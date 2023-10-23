@@ -45,17 +45,21 @@ DECLARE
     -- etc.
 ```
 
-The above code creates font styles, assuming that the default face is as per your Excel template
-(which is normally "Calibri").
+The above code creates font styles and cell background/fills.  The font-face will default to that
+defined in your Excel template (which is normally "Calibri").
  - `font_head_1` is a pinkish font with a bold face
- - `font_bld_` is a b (black) font with nothing font with a bold face
+ - `font_bld_` is a black font with a bold face
  - `font_bld_wht_` is white and bold
- - `bkg_dk_red_` defines a solid-background dark-red color
+ - `bkg_dk_red_` defines a solid-background of a dark-red hue
 
 You get the idea.  Anyway, the point is that as you define each style, it gets stored internally
-by the package, and can be retrieved with its Id value (which is stored in the allocated variable).
+by the package and gets assigned an ID number that is returned to your variable.  If you try to define the
+same style (or font) for a second time, `Get_Font()` is intelligent enough to recognise the duplication
+and returns the ID of the first style (inherently avoiding storing the same style multiple times).
 
-As such, we can later refer to the styles with the appropriate IDs as follows:
+We later refer to the styles just created with the ID number that was returned to us.  For example,
+the following code enters the text `Report Name` in column 2, row 3 (cell B3).  The font will be
+black and bold, and the cell will be coloured in a solid red:
 
 ```
 BEGIN
@@ -64,11 +68,6 @@ BEGIN
     -- blah...
 END;
 ```
-
-Here (with sheet number 1 being the implied default), we manipulate cell in column 2, row number 3
-by entering the text `Report Name` in the cell.  The font and fill of the cell will be given the
-styles as defined earlier.
-
 
 # Gotchas
 
@@ -85,3 +84,13 @@ font_head1_   PLS_INTEGER := as_xlsx.Get_Font (p_rgb=>'FFDBE5F1', p_bold=>true);
 
 If you define styles before creating a sheet on your Excel document, it'll come out all corrupt :-(
 
+A useful little hack might be to initiate the Workbook in the `BEGIN` section of our package:
+
+```
+CREATE OR REPLACE PACKAGE BODY as_xlsx IS
+   -- blah blah...
+BEGIN
+   Clear_Workbook;
+   New_Sheet ('Sheet 1');
+END as_xlsx;
+```
