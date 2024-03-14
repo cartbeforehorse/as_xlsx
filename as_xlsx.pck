@@ -127,6 +127,23 @@ PROCEDURE Get_Fill (
    bgRGB_       IN VARCHAR2 := null );
 
 ---------------------------------------
+-- Alfan_Cell(), Alfan_Range()
+--  Transforms a numeric cell or range reference into an Excel reference.  For
+--  example [1, 2] becomes "A2"; [1, 2, 3, 8] becomes "A2:C8".  This is useful
+--  when external code is trying to generate formulas.
+--
+FUNCTION Alfan_Cell (
+   col_ IN PLS_INTEGER,
+   row_ IN PLS_INTEGER ) RETURN VARCHAR2;
+
+FUNCTION Alfan_Range (
+   col_tl_ IN PLS_INTEGER,
+   row_tl_ IN PLS_INTEGER,
+   col_br_ IN PLS_INTEGER,
+   row_br_ IN PLS_INTEGER ) RETURN VARCHAR2;
+
+
+---------------------------------------
 -- Get_Border()
 --  Values allowed in all these parameters are as follows:
 --    none;thin;medium;dashed;dotted;thick;double;hair;mediumDashed;
@@ -172,10 +189,11 @@ PROCEDURE Cell ( -- NUMBER
    borderId_  IN PLS_INTEGER  := null,
    alignment_ IN tp_alignment := null,
    sheet_     IN PLS_INTEGER  := null );
-PROCEDURE CellP (
+PROCEDURE Cell (
    col_       IN PLS_INTEGER,
    row_       IN PLS_INTEGER,
-   value_     IN NUMBER,
+   value_num_ IN NUMBER      := null,
+   formula_   IN VARCHAR2    := '',
    numFmtId_  IN VARCHAR2    := null,
    fontId_    IN VARCHAR2    := null,
    fillId_    IN VARCHAR2    := null,
@@ -193,10 +211,11 @@ PROCEDURE Cell ( -- VARCHAR
    borderId_  IN PLS_INTEGER  := null,
    alignment_ IN tp_alignment := null,
    sheet_     IN PLS_INTEGER  := null );
-PROCEDURE CellP (
+PROCEDURE Cell (
    col_       IN PLS_INTEGER,
    row_       IN PLS_INTEGER,
-   value_     IN VARCHAR2,
+   value_str_ IN VARCHAR2    := '',
+   formula_   IN VARCHAR2    := '',
    numFmtId_  IN VARCHAR2    := null,
    fontId_    IN VARCHAR2    := null,
    fillId_    IN VARCHAR2    := null,
@@ -214,10 +233,21 @@ PROCEDURE Cell ( -- DATE
    borderId_  IN PLS_INTEGER  := null,
    alignment_ IN tp_alignment := null,
    sheet_     IN PLS_INTEGER  := null );
-PROCEDURE CellP (
+PROCEDURE Cell (
    col_       IN PLS_INTEGER,
    row_       IN PLS_INTEGER,
-   value_     IN DATE,
+   value_dt_  IN DATE        := null,
+   formula_   IN VARCHAR2    := '',
+   numFmtId_  IN VARCHAR2    := null,
+   fontId_    IN VARCHAR2    := null,
+   fillId_    IN VARCHAR2    := null,
+   borderId_  IN VARCHAR2    := null,
+   alignment_ IN VARCHAR2    := null,
+   sheet_     IN PLS_INTEGER := null );
+
+PROCEDURE CellB ( -- empty
+   col_       IN PLS_INTEGER,
+   row_       IN PLS_INTEGER,
    numFmtId_  IN VARCHAR2    := null,
    fontId_    IN VARCHAR2    := null,
    fillId_    IN VARCHAR2    := null,
@@ -268,6 +298,42 @@ PROCEDURE Str_Formula (
    borderId_      IN PLS_INTEGER  := null,
    alignment_     IN tp_alignment := null,
    sheet_         IN PLS_INTEGER  := null );
+
+PROCEDURE Formula (
+   col_           IN PLS_INTEGER,
+   row_           IN PLS_INTEGER,
+   formula_       IN VARCHAR2,
+   default_value_ IN NUMBER      := null,
+   numFmtId_      IN VARCHAR2    := null,
+   fontId_        IN VARCHAR2    := null,
+   fillId_        IN VARCHAR2    := null,
+   borderId_      IN VARCHAR2    := null,
+   alignment_     IN VARCHAR2    := null,
+   sheet_         IN PLS_INTEGER := null );
+
+PROCEDURE Formula (
+   col_           IN PLS_INTEGER,
+   row_           IN PLS_INTEGER,
+   formula_       IN VARCHAR2,
+   default_value_ IN VARCHAR2    := null,
+   numFmtId_      IN VARCHAR2    := null,
+   fontId_        IN VARCHAR2    := null,
+   fillId_        IN VARCHAR2    := null,
+   borderId_      IN VARCHAR2    := null,
+   alignment_     IN VARCHAR2    := null,
+   sheet_         IN PLS_INTEGER := null );
+
+PROCEDURE Formula (
+   col_           IN PLS_INTEGER,
+   row_           IN PLS_INTEGER,
+   formula_       IN VARCHAR2,
+   default_value_ IN DATE        := null,
+   numFmtId_      IN VARCHAR2    := null,
+   fontId_        IN VARCHAR2    := null,
+   fillId_        IN VARCHAR2    := null,
+   borderId_      IN VARCHAR2    := null,
+   alignment_     IN VARCHAR2    := null,
+   sheet_         IN PLS_INTEGER := null );
 
 PROCEDURE Mergecells (
    tl_col_ IN PLS_INTEGER, -- top left
@@ -443,6 +509,7 @@ PROCEDURE SetUseXf (
 PROCEDURE Set_Param (
    params_ IN OUT params_arr,
    ix_     IN NUMBER,
+   name_   IN VARCHAR2,
    val_    IN VARCHAR2,
    extra_  IN VARCHAR2 := '' );
 
@@ -853,21 +920,38 @@ BEGIN
 END Finish_Zip;
 
 FUNCTION Alfan_Col (
-   p_col PLS_INTEGER ) RETURN VARCHAR2
+   col_ IN PLS_INTEGER ) RETURN VARCHAR2
 IS BEGIN
    RETURN CASE
-      WHEN p_col > 702 THEN chr(64+trunc((p_col-27)/676)) || chr(65+mod(trunc((p_col-1)/26)-1, 26)) || chr(65+mod(p_col-1, 26))
-      WHEN p_col > 26  THEN chr(64+trunc((p_col-1)/26)) || chr(65+mod(p_col-1, 26))
-      ELSE chr(64+p_col)
+      WHEN col_ > 702 THEN chr(64+trunc((col_-27)/676)) || chr(65+mod(trunc((col_-1)/26)-1, 26)) || chr(65+mod(col_-1, 26))
+      WHEN col_ > 26  THEN chr(64+trunc((col_-1)/26)) || chr(65+mod(col_-1, 26))
+      ELSE chr(64+col_)
    END;
 END Alfan_Col;
 
-FUNCTION Col_Alfan(
-   p_col VARCHAR2 ) RETURN PLS_INTEGER
+FUNCTION Alfan_Cell (
+   col_ IN PLS_INTEGER,
+   row_ IN PLS_INTEGER ) RETURN VARCHAR2
+IS
+BEGIN
+   RETURN Alfan_Col (col_) || to_char(row_);
+END Alfan_Cell;
+
+FUNCTION Alfan_Range (
+   col_tl_ IN PLS_INTEGER,
+   row_tl_ IN PLS_INTEGER,
+   col_br_ IN PLS_INTEGER,
+   row_br_ IN PLS_INTEGER ) RETURN VARCHAR2
 IS BEGIN
-   RETURN ascii(substr(p_col,-1)) - 64
-      + nvl((ascii(substr(p_col,-2,1))-64) * 26, 0)
-      + nvl((ascii(substr(p_col,-3,1))-64) * 676, 0);
+   RETURN Alfan_Cell (col_tl_, row_tl_) || ':' || Alfan_Cell (col_br_, row_br_);
+END Alfan_Range;
+
+FUNCTION Col_Alfan(
+   col_ IN VARCHAR2 ) RETURN PLS_INTEGER
+IS BEGIN
+   RETURN ascii(substr(col_,-1)) - 64
+      + nvl((ascii(substr(col_,-2,1))-64) * 26, 0)
+      + nvl((ascii(substr(col_,-3,1))-64) * 676, 0);
 END Col_Alfan;
 
 PROCEDURE Clear_Workbook
@@ -1388,8 +1472,8 @@ FUNCTION Extract_Id_From_Style (
    style_ IN VARCHAR2 ) RETURN PLS_INTEGER
 IS BEGIN
    RETURN CASE
-      WHEN style_ IS null OR style_ = 't="s" ' THEN null
-      ELSE to_number(regexp_replace (style_, 't="s" s="(\d+)"', '\1'))
+      WHEN style_ IS null OR style_ = 't="s" ' THEN to_number(null)
+      ELSE to_number(regexp_replace (style_, '.*s="(\d+)".*', '\1'))
    END;
 END Extract_Id_From_Style;
 
@@ -1407,7 +1491,7 @@ BEGIN
    ELSE
       -- We need to create the cell in the PlSql model so that later functions
       -- can manipulate it
-      Cell (col_, row_, '', sheet_ => sheet_);
+      CellB (col_, row_, sheet_ => sheet_);
    END IF;
 
    RETURN CASE
@@ -1521,7 +1605,7 @@ BEGIN
 END Get_Cell_Value;
 
 
-PROCEDURE Cell (
+PROCEDURE Cell ( -- num version
    col_       IN PLS_INTEGER,
    row_       IN PLS_INTEGER,
    value_     IN NUMBER,
@@ -1544,19 +1628,23 @@ BEGIN
    );
 END Cell;
 
-PROCEDURE CellP (
-   col_       PLS_INTEGER,
-   row_       PLS_INTEGER,
-   value_     NUMBER,
-   numFmtId_  VARCHAR2    := null,
-   fontId_    VARCHAR2    := null,
-   fillId_    VARCHAR2    := null,
-   borderId_  VARCHAR2    := null,
-   alignment_ VARCHAR2    := null,
-   sheet_     PLS_INTEGER := null )
-IS BEGIN
+PROCEDURE Cell ( -- num version overload
+   col_       IN PLS_INTEGER,
+   row_       IN PLS_INTEGER,
+   value_num_ IN NUMBER      := null,
+   formula_   IN VARCHAR2    := '',
+   numFmtId_  IN VARCHAR2    := null,
+   fontId_    IN VARCHAR2    := null,
+   fillId_    IN VARCHAR2    := null,
+   borderId_  IN VARCHAR2    := null,
+   alignment_ IN VARCHAR2    := null,
+   sheet_     IN PLS_INTEGER := null )
+IS
+   fm_ix_ PLS_INTEGER := workbook.formulas.count;
+   sh_    PLS_INTEGER := nvl (sheet_, workbook.sheets.count());
+BEGIN
    Cell (
-      col_, row_, value_,
+      col_, row_, value_num_,
       CASE WHEN numFmtId_  IS NOT null THEN numFmt_(numFmtId_) END,
       CASE WHEN fontId_    IS NOT null THEN fonts_(fontId_) END,
       CASE WHEN fillId_    IS NOT null THEN fills_(fillId_) END,
@@ -1564,7 +1652,11 @@ IS BEGIN
       CASE WHEN alignment_ IS NOT null THEN align_(alignment_) END,
       sheet_
    );
-END CellP;
+   IF formula_ IS NOT null THEN
+      workbook.formulas(fm_ix_) := formula_;
+      workbook.sheets(sh_).rows(row_)(col_).formula_idx := fm_ix_;
+   END IF;
+END Cell;
 
 FUNCTION Add_String (
    string_ IN VARCHAR2 ) RETURN PLS_INTEGER
@@ -1582,7 +1674,7 @@ BEGIN
    RETURN ix_;
 END Add_String;
 
-PROCEDURE Cell (
+PROCEDURE Cell ( -- string version
    col_       IN PLS_INTEGER,
    row_       IN PLS_INTEGER,
    value_     IN VARCHAR2,
@@ -1609,38 +1701,46 @@ BEGIN
    );
 END Cell;
 
-PROCEDURE CellP (
-   col_       PLS_INTEGER,
-   row_       PLS_INTEGER,
-   value_     VARCHAR2,
-   numFmtId_  VARCHAR2    := null,
-   fontId_    VARCHAR2    := null,
-   fillId_    VARCHAR2    := null,
-   borderId_  VARCHAR2    := null,
-   alignment_ VARCHAR2    := null,
-   sheet_     PLS_INTEGER := null )
-IS BEGIN
+PROCEDURE Cell ( -- string version overload
+   col_       IN PLS_INTEGER,
+   row_       IN PLS_INTEGER,
+   value_str_ IN VARCHAR2    := '',
+   formula_   IN VARCHAR2    := '',
+   numFmtId_  IN VARCHAR2    := null,
+   fontId_    IN VARCHAR2    := null,
+   fillId_    IN VARCHAR2    := null,
+   borderId_  IN VARCHAR2    := null,
+   alignment_ IN VARCHAR2    := null,
+   sheet_     IN PLS_INTEGER := null ) 
+IS
+   fm_ix_ PLS_INTEGER := workbook.formulas.count;
+   sh_    PLS_INTEGER := nvl (sheet_, workbook.sheets.count());
+BEGIN
    Cell (
-      col_, row_, value_,
+      col_, row_, value_str_,
       CASE WHEN numFmtId_  IS NOT null THEN numFmt_(numFmtId_) END,
       CASE WHEN fontId_    IS NOT null THEN fonts_(fontId_) END,
       CASE WHEN fillId_    IS NOT null THEN fills_(fillId_) END,
       CASE WHEN borderId_  IS NOT null THEN bdrs_(borderId_) END,
       CASE WHEN alignment_ IS NOT null THEN align_(alignment_) END,
-      sheet_
+      sh_
    );
-END CellP;
+   IF formula_ IS NOT null THEN
+      workbook.formulas(fm_ix_) := formula_;
+      workbook.sheets(sh_).rows(row_)(col_).formula_idx := fm_ix_;
+   END IF;
+END Cell;
 
-PROCEDURE Cell (
-   col_       PLS_INTEGER,
-   row_       PLS_INTEGER,
-   value_     DATE,
-   numFmtId_  PLS_INTEGER  := null,
-   fontId_    PLS_INTEGER  := null,
-   fillId_    PLS_INTEGER  := null,
-   borderId_  PLS_INTEGER  := null,
-   alignment_ tp_alignment := null,
-   sheet_     PLS_INTEGER  := null )
+PROCEDURE Cell (  -- date version
+   col_       IN PLS_INTEGER,
+   row_       IN PLS_INTEGER,
+   value_     IN DATE,
+   numFmtId_  IN PLS_INTEGER  := null,
+   fontId_    IN PLS_INTEGER  := null,
+   fillId_    IN PLS_INTEGER  := null,
+   borderId_  IN PLS_INTEGER  := null,
+   alignment_ IN tp_alignment := null,
+   sheet_     IN PLS_INTEGER  := null )
 IS
    num_fmt_id_ PLS_INTEGER := numFmtId_;
    sh_         PLS_INTEGER := nvl(sheet_, workbook.sheets.count());
@@ -1663,19 +1763,23 @@ BEGIN
    );
 END Cell;
 
-PROCEDURE CellP (
-   col_       PLS_INTEGER,
-   row_       PLS_INTEGER,
-   value_     DATE,
-   numFmtId_  VARCHAR2    := null,
-   fontId_    VARCHAR2    := null,
-   fillId_    VARCHAR2    := null,
-   borderId_  VARCHAR2    := null,
-   alignment_ VARCHAR2    := null,
-   sheet_     PLS_INTEGER := null )
-IS BEGIN
+PROCEDURE Cell ( -- date version overload
+   col_       IN PLS_INTEGER,
+   row_       IN PLS_INTEGER,
+   value_dt_  IN DATE,
+   formula_   IN VARCHAR2    := '',
+   numFmtId_  IN VARCHAR2    := null,
+   fontId_    IN VARCHAR2    := null,
+   fillId_    IN VARCHAR2    := null,
+   borderId_  IN VARCHAR2    := null,
+   alignment_ IN VARCHAR2    := null,
+   sheet_     IN PLS_INTEGER := null )
+IS
+   fm_ix_ PLS_INTEGER := workbook.formulas.count;
+   sh_    PLS_INTEGER := nvl (sheet_, workbook.sheets.count());
+BEGIN
    Cell (
-      col_, row_, value_,
+      col_, row_, value_dt_,
       CASE WHEN numFmtId_  IS NOT null THEN numFmt_(numFmtId_) END,
       CASE WHEN fontId_    IS NOT null THEN fonts_(fontId_) END,
       CASE WHEN fillId_    IS NOT null THEN fills_(fillId_) END,
@@ -1683,14 +1787,36 @@ IS BEGIN
       CASE WHEN alignment_ IS NOT null THEN align_(alignment_) END,
       sheet_
    );
-END CellP;
+   IF formula_ IS NOT null THEN
+      workbook.formulas(fm_ix_) := formula_;
+      workbook.sheets(sh_).rows(row_)(col_).formula_idx := fm_ix_;
+   END IF;
+END Cell;
+
+-- Sometimes it's useful to be able to add an empty cell with formatting
+PROCEDURE CellB ( -- empty (b for blank)
+   col_       IN PLS_INTEGER,
+   row_       IN PLS_INTEGER,
+   numFmtId_  IN VARCHAR2    := null,
+   fontId_    IN VARCHAR2    := null,
+   fillId_    IN VARCHAR2    := null,
+   borderId_  IN VARCHAR2    := null,
+   alignment_ IN VARCHAR2    := null,
+   sheet_     IN PLS_INTEGER := null )
+IS BEGIN
+   Cell (
+      col_, row_, value_str_ => '',
+      numFmtId_ => numFmtId_, fontId_ => fontId_, fillId_ => fillId_,
+      borderId_ => borderId_, alignment_ => alignment_, sheet_ => sheet_
+   );
+END CellB;
 
 PROCEDURE Query_Date_Cell (
-   col_   PLS_INTEGER,
-   row_   PLS_INTEGER,
-   value_ DATE,
-   sheet_ PLS_INTEGER := null,
-   XfId_  VARCHAR2 )
+   col_   IN PLS_INTEGER,
+   row_   IN PLS_INTEGER,
+   value_ IN DATE,
+   sheet_ IN PLS_INTEGER := null,
+   XfId_  IN VARCHAR2 )
 IS
    sh_ PLS_INTEGER := nvl(sheet_, workbook.sheets.count());
 BEGIN
@@ -1699,8 +1825,8 @@ BEGIN
 END Query_Date_Cell;
 
 PROCEDURE Condition_Color_Col (
-   col_   PLS_INTEGER,
-   sheet_ PLS_INTEGER := null )
+   col_   IN PLS_INTEGER,
+   sheet_ IN PLS_INTEGER := null )
 IS
    sh_        PLS_INTEGER := nvl(sheet_, workbook.sheets.count());
    first_row_ PLS_INTEGER := workbook.sheets(sh_).rows.FIRST;
@@ -1747,11 +1873,11 @@ BEGIN
 END Condition_Color_Col;
 
 PROCEDURE Hyperlink (
-   col_   PLS_INTEGER,
-   row_   PLS_INTEGER,
-   url_   VARCHAR2,
-   value_ VARCHAR2    := null,
-   sheet_ PLS_INTEGER := null )
+   col_   IN PLS_INTEGER,
+   row_   IN PLS_INTEGER,
+   url_   IN VARCHAR2,
+   value_ IN VARCHAR2    := null,
+   sheet_ IN PLS_INTEGER := null )
 IS
    ix_ PLS_INTEGER;
    sh_ PLS_INTEGER := nvl(sheet_, workbook.sheets.count());
@@ -1764,13 +1890,13 @@ BEGIN
 END Hyperlink;
 
 PROCEDURE Comment (
-   col_    PLS_INTEGER,
-   row_    PLS_INTEGER,
-   text_   VARCHAR2,
-   author_ VARCHAR2 := null,
-   width_  PLS_INTEGER := 150,
-   height_ PLS_INTEGER := 100,
-   sheet_  PLS_INTEGER := null )
+   col_    IN PLS_INTEGER,
+   row_    IN PLS_INTEGER,
+   text_   IN VARCHAR2,
+   author_ IN VARCHAR2 := null,
+   width_  IN PLS_INTEGER := 150,
+   height_ IN PLS_INTEGER := 100,
+   sheet_  IN PLS_INTEGER := null )
 IS
    ix_ PLS_INTEGER;
    sh_ PLS_INTEGER := nvl(sheet_, workbook.sheets.count());
@@ -1785,16 +1911,16 @@ BEGIN
 END Comment;
 
 PROCEDURE Num_Formula (
-   col_           PLS_INTEGER,
-   row_           PLS_INTEGER,
-   formula_       VARCHAR2,
-   default_value_ NUMBER       := null,
-   numFmtId_      PLS_INTEGER  := null,
-   fontId_        PLS_INTEGER  := null,
-   fillId_        PLS_INTEGER  := null,
-   borderId_      PLS_INTEGER  := null,
-   alignment_     tp_alignment := null,
-   sheet_         PLS_INTEGER  := null )
+   col_           IN PLS_INTEGER,
+   row_           IN PLS_INTEGER,
+   formula_       IN VARCHAR2,
+   default_value_ IN NUMBER       := null,
+   numFmtId_      IN PLS_INTEGER  := null,
+   fontId_        IN PLS_INTEGER  := null,
+   fillId_        IN PLS_INTEGER  := null,
+   borderId_      IN PLS_INTEGER  := null,
+   alignment_     IN tp_alignment := null,
+   sheet_         IN PLS_INTEGER  := null )
 IS
    ix_ PLS_INTEGER := workbook.formulas.count;
    sh_ PLS_INTEGER := nvl (sheet_, workbook.sheets.count());
@@ -1805,16 +1931,16 @@ BEGIN
 END Num_Formula;
 
 PROCEDURE Str_Formula (
-   col_           PLS_INTEGER,
-   row_           PLS_INTEGER,
-   formula_       VARCHAR2,
-   default_value_ VARCHAR2     := null,
-   numFmtId_      PLS_INTEGER  := null,
-   fontId_        PLS_INTEGER  := null,
-   fillId_        PLS_INTEGER  := null,
-   borderId_      PLS_INTEGER  := null,
-   alignment_     tp_alignment := null,
-   sheet_         PLS_INTEGER  := null )
+   col_           IN PLS_INTEGER,
+   row_           IN PLS_INTEGER,
+   formula_       IN VARCHAR2,
+   default_value_ IN VARCHAR2     := null,
+   numFmtId_      IN PLS_INTEGER  := null,
+   fontId_        IN PLS_INTEGER  := null,
+   fillId_        IN PLS_INTEGER  := null,
+   borderId_      IN PLS_INTEGER  := null,
+   alignment_     IN tp_alignment := null,
+   sheet_         IN PLS_INTEGER  := null )
 IS
    ix_ PLS_INTEGER := workbook.formulas.count;
    sh_ PLS_INTEGER := nvl(sheet_, workbook.sheets.count());
@@ -1823,6 +1949,52 @@ BEGIN
    Cell (col_, row_, default_value_, numFmtId_, fontId_, fillId_, borderId_, alignment_, sh_);
    workbook.sheets(sh_).rows(row_)(col_).formula_idx := ix_;
 END Str_Formula;
+
+PROCEDURE Formula (
+   col_           IN PLS_INTEGER,
+   row_           IN PLS_INTEGER,
+   formula_       IN VARCHAR2,
+   default_value_ IN NUMBER      := null,
+   numFmtId_      IN VARCHAR2    := null,
+   fontId_        IN VARCHAR2    := null,
+   fillId_        IN VARCHAR2    := null,
+   borderId_      IN VARCHAR2    := null,
+   alignment_     IN VARCHAR2    := null,
+   sheet_         IN PLS_INTEGER := null )
+IS BEGIN
+   Cell  (col_, row_, default_value_, formula_, numFmtId_, fontId_, fillId_, borderId_, alignment_, sheet_);
+END Formula;
+
+PROCEDURE Formula (
+   col_           IN PLS_INTEGER,
+   row_           IN PLS_INTEGER,
+   formula_       IN VARCHAR2,
+   default_value_ IN VARCHAR2    := null,
+   numFmtId_      IN VARCHAR2    := null,
+   fontId_        IN VARCHAR2    := null,
+   fillId_        IN VARCHAR2    := null,
+   borderId_      IN VARCHAR2    := null,
+   alignment_     IN VARCHAR2    := null,
+   sheet_         IN PLS_INTEGER := null )
+IS BEGIN
+   Cell  (col_, row_, default_value_, formula_, numFmtId_, fontId_, fillId_, borderId_, alignment_, sheet_);
+END Formula;
+
+PROCEDURE Formula (
+   col_           IN PLS_INTEGER,
+   row_           IN PLS_INTEGER,
+   formula_       IN VARCHAR2,
+   default_value_ IN DATE        := null,
+   numFmtId_      IN VARCHAR2    := null,
+   fontId_        IN VARCHAR2    := null,
+   fillId_        IN VARCHAR2    := null,
+   borderId_      IN VARCHAR2    := null,
+   alignment_     IN VARCHAR2    := null,
+   sheet_         IN PLS_INTEGER := null )
+IS BEGIN
+   Cell  (col_, row_, default_value_, formula_, numFmtId_, fontId_, fillId_, borderId_, alignment_, sheet_);
+END Formula;
+
 
 PROCEDURE Mergecells (
    tl_col_ IN PLS_INTEGER, -- top left
@@ -2064,19 +2236,19 @@ END Add1Xml;
 --
 FUNCTION Finish RETURN BLOB
 IS
-   excel_   BLOB;
-   yyy_     BLOB;
-   xxx_     CLOB;
-   tmp_     VARCHAR2(32767 char);
-   c_       NUMBER;
-   h_       NUMBER;
-   w_       NUMBER;
-   cw_      NUMBER;
-   s        PLS_INTEGER;
-   row_ix_  PLS_INTEGER;
-   col_ix_  PLS_INTEGER;
-   col_min_ PLS_INTEGER;
-   col_max_ PLS_INTEGER;
+   excel_        BLOB;
+   yyy_          BLOB;
+   xxx_          CLOB;
+   formula_expr_ VARCHAR2(32767 char);
+   c_            NUMBER;
+   h_            NUMBER;
+   w_            NUMBER;
+   cw_           NUMBER;
+   s             PLS_INTEGER;
+   row_ix_       PLS_INTEGER;
+   col_ix_       PLS_INTEGER;
+   col_min_      PLS_INTEGER;
+   col_max_      PLS_INTEGER;
 
 BEGIN
   dbms_lob.createtemporary(excel_, true);
@@ -2609,13 +2781,13 @@ CASE WHEN workbook.sheets(s).tabcolor IS not null THEN '<sheetPr><tabColor rgb="
       col_ix_ := workbook.sheets(s).rows(row_ix_).first();
       WHILE col_ix_ IS not null LOOP
         IF workbook.sheets(s).rows(row_ix_)(col_ix_).formula_idx IS null THEN
-          tmp_ := null;
+          formula_expr_ := null;
         ELSE
-          tmp_ := '<f>' || workbook.formulas(workbook.sheets(s).rows(row_ix_)(col_ix_).formula_idx) || '</f>';
+          formula_expr_ := '<f>' || workbook.formulas(workbook.sheets(s).rows(row_ix_)(col_ix_).formula_idx) || '</f>';
         END IF;
         addtxt2utf8blob ('<c r="' || alfan_col(col_ix_) || row_ix_ || '"'
           || ' ' || workbook.sheets(s).rows(row_ix_)(col_ix_).style
-          || '>' || tmp_ || '<v>'
+          || '>' || formula_expr_ || '<v>'
           || to_char(workbook.sheets(s).rows(row_ix_)(col_ix_).value, 'TM9', 'NLS_NUMERIC_CHARACTERS=.,' )
           || '</v></c>', yyy_
         );
@@ -2919,7 +3091,7 @@ BEGIN
                   FOR i_ IN 0 .. rows_fetched_ - 1 LOOP
                      IF d_tab_(i_+d_tab_.first()) IS NOT null THEN
                         IF g_useXf_ THEN
-                           Cell (col_, offset_+i_, d_tab_(i_+d_tab_.first()), sheet_ => sh_);
+                           Cell (col_, offset_+i_, value_dt_ => d_tab_(i_+d_tab_.first()), sheet_ => sh_);
                         ELSE
                            Query_Date_Cell(col_, offset_+i_, d_tab_(i_+d_tab_.first()), sh_, XfIds_(col_));
                         END IF;
@@ -2932,7 +3104,7 @@ BEGIN
                   Dbms_Sql.Column_Value (cur_, col_, v_tab_);
                   FOR i_ IN 0 .. rows_fetched_-1 LOOP
                      IF v_tab_(i_+v_tab_.first()) IS NOT null THEN
-                        Cell (col_, offset_+i_, v_tab_(i_+v_tab_.first()), sheet_ => sh_);
+                        Cell (col_, offset_+i_, value_str_ => v_tab_(i_+v_tab_.first()), sheet_ => sh_);
                         data_len_ := length(v_tab_(i_+v_tab_.first()));
                         widths_(col_) := least (greatest(widths_(col_),data_len_), 60);
                      END IF;
@@ -3183,6 +3355,7 @@ BEGIN
 
    numFmt_('gbp_curr0')  := Get_NumFmt (gbp_curr_fmt0_);
    numFmt_('gbp_curr2')  := Get_NumFmt (gbp_curr_fmt2_);
+   numFmt_('0dp')        := Get_NumFmt ('#,##0');
    numFmt_('2dp')        := Get_NumFmt ('#,##0.00');
    numFmt_('dt_mid')     := Get_NumFmt ('dd mmm yyyy');
    numFmt_('dt_long')    := Get_NumFmt ('dd mmmm yyyy');
@@ -3192,17 +3365,19 @@ BEGIN
    align_('right')       := Get_Alignment (vertical_ => 'center', horizontal_ => 'right',  wrapText_ => false);
    align_('center')      := Get_Alignment (vertical_ => 'center', horizontal_ => 'center', wrapText_ => false);
    align_('wrap')        := Get_Alignment (vertical_ => 'top',    horizontal_ => 'left',   wrapText_ => true);
+   align_('wrap_r')      := Get_Alignment (vertical_ => 'top',    horizontal_ => 'right',  wrapText_ => true);
 
 END Init_Workbook;
 
 PROCEDURE Set_Param (
    params_ IN OUT params_arr,
    ix_     IN NUMBER,
+   name_   IN VARCHAR2,
    val_    IN VARCHAR2,
    extra_  IN VARCHAR2 := '' )
 IS BEGIN
    params_(ix_) := param_rec (
-      param_name      => 'Order Number',
+      param_name      => name_,
       param_value     => val_,
       additional_info => extra_
    );
@@ -3263,14 +3438,14 @@ BEGIN
    Cell (3, row_, '', fillId_ => fills_('dk_blue'), sheet_ => sh_);
    row_ := row_ + 1;
    Cell (2, row_, 'Report Name', fontId_ => fonts_('bold'), sheet_ => sh_);
-   Cell (3, row_, report_name_);
+   Cell (3, row_, value_str_ => report_name_);
    row_ := row_ + 1;
    Cell (2, row_, 'Executed at', fontId_ => fonts_('bold'), sheet_ => sh_);
-   Cell (3, row_, to_char(sysdate, 'YYYY-MM-DD HH24:MI:SS'), sheet_ => sh_);
+   Cell (3, row_, value_str_ => to_char(sysdate, 'YYYY-MM-DD HH24:MI:SS'), sheet_ => sh_);
    row_ := row_ + 1;
    IF show_user_ THEN
       Cell (2, row_, 'Executed by', fontId_ => fonts_('bold'), sheet_ => sh_);
-      Cell (3, row_, Fnd_User_API.Get_Description(Fnd_Session_API.Get_Fnd_User), sheet_ => sh_);
+      Cell (3, row_, value_str_ => Fnd_User_API.Get_Description(Fnd_Session_API.Get_Fnd_User), sheet_ => sh_);
       row_ := row_ + 1;
    END IF;
 
@@ -3282,8 +3457,8 @@ BEGIN
    row_ := row_ + 1;
    FOR i_ IN params_.FIRST .. params_.LAST LOOP
       Cell (2, row_, params_(i_).param_name, fontId_ => fonts_('bold'), sheet_ => sh_);
-      Cell (3, row_, params_(i_).param_value, sheet_ => sh_);
-      Cell (4, row_, params_(i_).additional_info, sheet_ => sh_);
+      Cell (3, row_, value_str_ => params_(i_).param_value, sheet_ => sh_);
+      Cell (4, row_, value_str_ => params_(i_).additional_info, sheet_ => sh_);
       row_ := row_ + 1;
    END LOOP;
 
