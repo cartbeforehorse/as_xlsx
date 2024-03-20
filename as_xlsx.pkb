@@ -1,451 +1,9 @@
-CREATE OR REPLACE package as_xlsx IS
-/**********************************************
-**
-** Author: Anton Scheffer
-** Date: 19-02-2011
-** Website: http://technology.amis.nl/blog
-** See also: http://technology.amis.nl/blog/?p=10995
-**
-** Changelog:
-**   Date: 21-02-2011
-**     Added Aligment, horizontal, vertical, wrapText
-**   Date: 06-03-2011
-**     Added Comments, MergeCells, fixed bug for dependency on NLS-settings
-**   Date: 16-03-2011
-**     Added bold and italic fonts
-**   Date: 22-03-2011
-**     Fixed issue with timezone's set to a region(name) instead of a offset
-**   Date: 08-04-2011
-**     Fixed issue with XML-escaping from text
-**   Date: 27-05-2011
-**     Added MIT-license
-**   Date: 11-08-2011
-**     Fixed NLS-issue with column width
-**   Date: 29-09-2011
-**     Added font color
-**   Date: 16-10-2011
-**     fixed bug in add_string
-**   Date: 26-04-2012
-**     Fixed set_autofilter (only one autofilter per sheet, added _xlnm._FilterDatabase)
-**     Added list_validation = drop-down
-**   Date: 27-08-2013
-**     Added freeze_pane
-**   Date: 05-09-2013
-**     Performance
-**   Date: 14-07-2014
-**      Added p_UseXf to query2sheet
-**   Date: 23-10-2014
-**      Added xml:space="preserve"
-**   Date: 29-02-2016
-**     Fixed issue with alignment in get_XfId
-**     Thank you Bertrand Gouraud
-**   Date: 01-04-2017
-**     Added p_height to set_row
-**   Date: 01-09-2017
-**     Added add_image
-**   Date: 06-09-2017
-**     set_column_width: round column width to pixel
-**   Date: 21-09-2017
-**     added  c_version
-**   Date: 29-09-2017
-**     added  location and tooltip to hyperlink
-**   Date: 23-05-2018
-**     fixed bug in add_string (thank you David Short)
-**     added tabColor to new_sheet
-**   Date: 13-06-2018
-**     added formulas
-**   Date: 12-02-2020
-**     added sys_refcursor overload of query2sheet
-**     use default date format in query2sheet
-**     changed to date1904=false
-**   Date: 05-10-2023
-**      added as_read_xlsx
-******************************************************************************
-******************************************************************************
-Copyright (C) 2011, 2023 by Anton Scheffer
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-
-******************************************************************************
-******************************************** */
---
-  use_utl_file  constant boolean := true;
---
-  type tp_alignment is record
-    ( vertical varchar2(11)
-    , horizontal varchar2(16)
-    , wrapText boolean
-    );
-  type sheet_names is table of varchar2(4000);
-  type tp_one_cell is record
-    ( sheet_nr number(2)
-    , sheet_name varchar(4000)
-    , row_nr number(10)
-    , col_nr number(10)
-    , cell varchar2(100)
-    , cell_type varchar2(1)
-    , string_val varchar2(4000)
-    , number_val number
-    , date_val date
-    , formula varchar2(4000)
-  );
-  type tp_all_cells is table of tp_one_cell;
---
-  procedure clear_workbook;
---
-  procedure new_sheet
-    ( p_sheetname varchar2 := null
-    , p_tabcolor varchar2 := null -- this is a hex ALPHA Red Green Blue value
-    );
---
-  function OraFmt2Excel( p_format varchar2 := null )
-  return varchar2;
---
-  function get_numFmt( p_format varchar2 := null )
-  return pls_integer;
---
-  procedure set_font
-    ( p_name varchar2
-    , p_sheet pls_integer := null
-    , p_family pls_integer := 2
-    , p_fontsize number := 11
-    , p_theme pls_integer := 1
-    , p_underline boolean := false
-    , p_italic boolean := false
-    , p_bold boolean := false
-    , p_rgb varchar2 := null -- this is a hex ALPHA Red Green Blue value
-    );
---
-  function get_font
-    ( p_name varchar2
-    , p_family pls_integer := 2
-    , p_fontsize number := 11
-    , p_theme pls_integer := 1
-    , p_underline boolean := false
-    , p_italic boolean := false
-    , p_bold boolean := false
-    , p_rgb varchar2 := null -- this is a hex ALPHA Red Green Blue value
-    )
-  return pls_integer;
---
-  function get_fill
-    ( p_patternType varchar2
-    , p_fgRGB varchar2 := null -- this is a hex ALPHA Red Green Blue value
-    , p_bgRGB varchar2 := null -- this is a hex ALPHA Red Green Blue value
-    )
-  return pls_integer;
---
-  function get_border
-    ( p_top varchar2 := 'thin'
-    , p_bottom varchar2 := 'thin'
-    , p_left varchar2 := 'thin'
-    , p_right varchar2 := 'thin'
-    )
-/*
-none
-thin
-medium
-dashed
-dotted
-thick
-double
-hair
-mediumDashed
-dashDot
-mediumDashDot
-dashDotDot
-mediumDashDotDot
-slantDashDot
-*/
-  return pls_integer;
---
-  function get_alignment
-    ( p_vertical varchar2 := null
-    , p_horizontal varchar2 := null
-    , p_wrapText boolean := null
-    )
-/* horizontal
-center
-centerContinuous
-distributed
-fill
-general
-justify
-left
-right
-*/
-/* vertical
-bottom
-center
-distributed
-justify
-top
-*/
-  return tp_alignment;
---
-  procedure cell
-    ( p_col pls_integer
-    , p_row pls_integer
-    , p_value number
-    , p_numFmtId pls_integer := null
-    , p_fontId pls_integer := null
-    , p_fillId pls_integer := null
-    , p_borderId pls_integer := null
-    , p_alignment tp_alignment := null
-    , p_sheet pls_integer := null
-    );
---
-  procedure cell
-    ( p_col pls_integer
-    , p_row pls_integer
-    , p_value varchar2
-    , p_numFmtId pls_integer := null
-    , p_fontId pls_integer := null
-    , p_fillId pls_integer := null
-    , p_borderId pls_integer := null
-    , p_alignment tp_alignment := null
-    , p_sheet pls_integer := null
-    );
---
-  procedure cell
-    ( p_col pls_integer
-    , p_row pls_integer
-    , p_value date
-    , p_numFmtId pls_integer := null
-    , p_fontId pls_integer := null
-    , p_fillId pls_integer := null
-    , p_borderId pls_integer := null
-    , p_alignment tp_alignment := null
-    , p_sheet pls_integer := null
-    );
---
-  procedure hyperlink
-    ( p_col pls_integer
-    , p_row pls_integer
-    , p_url varchar2 := null
-    , p_value varchar2 := null
-    , p_sheet pls_integer := null
-    , p_location varchar2 := null
-    , p_tooltip varchar2 := null
-    );
---
-  procedure comment
-    ( p_col pls_integer
-    , p_row pls_integer
-    , p_text varchar2
-    , p_author varchar2 := null
-    , p_width pls_integer := 150  -- pixels
-    , p_height pls_integer := 100  -- pixels
-    , p_sheet pls_integer := null
-    );
---
-  procedure num_formula
-    ( p_col pls_integer
-    , p_row pls_integer
-    , p_formula varchar2
-    , p_default_value number := null
-    , p_numFmtId pls_integer := null
-    , p_fontId pls_integer := null
-    , p_fillId pls_integer := null
-    , p_borderId pls_integer := null
-    , p_alignment tp_alignment := null
-    , p_sheet pls_integer := null
-    );
---
-  procedure str_formula
-    ( p_col pls_integer
-    , p_row pls_integer
-    , p_formula varchar2
-    , p_default_value varchar2 := null
-    , p_numFmtId pls_integer := null
-    , p_fontId pls_integer := null
-    , p_fillId pls_integer := null
-    , p_borderId pls_integer := null
-    , p_alignment tp_alignment := null
-    , p_sheet pls_integer := null
-    );
---
-  procedure mergecells
-    ( p_tl_col pls_integer -- top left
-    , p_tl_row pls_integer
-    , p_br_col pls_integer -- bottom right
-    , p_br_row pls_integer
-    , p_sheet pls_integer := null
-    );
---
-  procedure list_validation
-    ( p_sqref_col pls_integer
-    , p_sqref_row pls_integer
-    , p_tl_col pls_integer -- top left
-    , p_tl_row pls_integer
-    , p_br_col pls_integer -- bottom right
-    , p_br_row pls_integer
-    , p_style varchar2 := 'stop' -- stop, warning, information
-    , p_title varchar2 := null
-    , p_prompt varchar := null
-    , p_show_error boolean := false
-    , p_error_title varchar2 := null
-    , p_error_txt varchar2 := null
-    , p_sheet pls_integer := null
-    );
---
-  procedure list_validation
-    ( p_sqref_col pls_integer
-    , p_sqref_row pls_integer
-    , p_defined_name varchar2
-    , p_style varchar2 := 'stop' -- stop, warning, information
-    , p_title varchar2 := null
-    , p_prompt varchar := null
-    , p_show_error boolean := false
-    , p_error_title varchar2 := null
-    , p_error_txt varchar2 := null
-    , p_sheet pls_integer := null
-    );
---
-  procedure defined_name
-    ( p_tl_col pls_integer -- top left
-    , p_tl_row pls_integer
-    , p_br_col pls_integer -- bottom right
-    , p_br_row pls_integer
-    , p_name varchar2
-    , p_sheet pls_integer := null
-    , p_localsheet pls_integer := null
-    );
---
-  procedure set_column_width
-    ( p_col pls_integer
-    , p_width number
-    , p_sheet pls_integer := null
-    );
---
-  procedure set_column
-    ( p_col pls_integer
-    , p_numFmtId pls_integer := null
-    , p_fontId pls_integer := null
-    , p_fillId pls_integer := null
-    , p_borderId pls_integer := null
-    , p_alignment tp_alignment := null
-    , p_sheet pls_integer := null
-    );
---
-  procedure set_row
-    ( p_row pls_integer
-    , p_numFmtId pls_integer := null
-    , p_fontId pls_integer := null
-    , p_fillId pls_integer := null
-    , p_borderId pls_integer := null
-    , p_alignment tp_alignment := null
-    , p_sheet pls_integer := null
-    , p_height number := null
-    );
---
-  procedure freeze_rows
-    ( p_nr_rows pls_integer := 1
-    , p_sheet pls_integer := null
-    );
---
-  procedure freeze_cols
-    ( p_nr_cols pls_integer := 1
-    , p_sheet pls_integer := null
-    );
---
-  procedure freeze_pane
-    ( p_col pls_integer
-    , p_row pls_integer
-    , p_sheet pls_integer := null
-    );
---
-  procedure set_autofilter
-    ( p_column_start pls_integer := null
-    , p_column_end pls_integer := null
-    , p_row_start pls_integer := null
-    , p_row_end pls_integer := null
-    , p_sheet pls_integer := null
-    );
---
-  procedure set_tabcolor
-    ( p_tabcolor varchar2 -- this is a hex ALPHA Red Green Blue value
-    , p_sheet pls_integer := null
-    );
---
-  function finish
-  return blob;
---
-  procedure save
-    ( p_directory varchar2
-    , p_filename varchar2
-    );
---
-  procedure query2sheet
-    ( p_sql varchar2
-    , p_column_headers boolean := true
-    , p_directory varchar2 := null
-    , p_filename varchar2 := null
-    , p_sheet pls_integer := null
-    , p_UseXf boolean := false
-    );
---
-  procedure query2sheet
-    ( p_rc in out sys_refcursor
-    , p_column_headers boolean := true
-    , p_directory varchar2 := null
-    , p_filename varchar2 := null
-    , p_sheet pls_integer := null
-    , p_UseXf boolean := false
-    );
---
-  procedure setUseXf( p_val boolean := true );
---
-/*
-use p_width and p_height to pass the size of an image which is not a png, jpg, or gif
-*/
-  procedure add_image
-    ( p_col pls_integer
-    , p_row pls_integer
-    , p_img blob
-    , p_name varchar2 := ''
-    , p_title varchar2 := ''
-    , p_description varchar2 := ''
-    , p_scale number := null
-    , p_sheet pls_integer := null
-    , p_width pls_integer := null
-    , p_height pls_integer := null
-    );
-  --
-  function read( p_xlsx blob, p_sheets varchar2 := null, p_cell varchar2 := null )
-  return tp_all_cells pipelined;
-  --
-  function get_sheet_names( p_xlsx blob )
-  return sheet_names;
-  --
-  function file2blob( p_dir varchar2, p_file_name varchar2 )
-  return blob;
-  --
-end;
-/
-
-CREATE OR REPLACE package body as_xlsx
+create or replace package body as_xlsx
 is
   --
   c_version constant varchar2(20) := 'as_xlsx40';
 --
-  c_lob_duration             constant pls_integer := dbms_lob.call;
+  c_lob_duration constant pls_integer := dbms_lob.call;
   c_LOCAL_FILE_HEADER        constant raw(4) := hextoraw( '504B0304' ); -- Local file header signature
   c_CENTRAL_FILE_HEADER      constant raw(4) := hextoraw( '504B0102' ); -- Central directory file header signature
   c_END_OF_CENTRAL_DIRECTORY constant raw(4) := hextoraw( '504B0506' ); -- End of central directory signature
@@ -464,7 +22,6 @@ is
   type tp_cell is record
     ( value number
     , style varchar2(50)
-    , formula_idx pls_integer
     );
   type tp_cells is table of tp_cell index by pls_integer;
   type tp_rows is table of tp_cells index by pls_integer;
@@ -485,7 +42,6 @@ is
   subtype tp_author is varchar2(32767 char);
   type tp_authors is table of pls_integer index by tp_author;
   authors tp_authors;
-  type tp_formulas is table of varchar2(32767) index by pls_integer;
   type tp_comment is record
     ( text varchar2(32767 char)
     , author tp_author
@@ -536,7 +92,6 @@ is
     , validations tp_validations
     , drawings tp_drawings
     , tabcolor varchar2(8)
-    , fontid pls_integer
     );
   type tp_sheets is table of tp_sheet index by pls_integer;
   type tp_numFmt is record
@@ -547,7 +102,6 @@ is
   type tp_fill is record
     ( patternType varchar2(30)
     , fgRGB varchar2(8)
-    , bgRGB varchar2(8)
     );
   type tp_fills is table of tp_fill index by pls_integer;
   type tp_cellXfs is table of tp_xf_fmt index by pls_integer;
@@ -597,8 +151,6 @@ is
     , cellXfs tp_cellXfs
     , numFmtIndexes tp_numFmtIndexes
     , defined_names tp_defined_names
-    , formulas tp_formulas
-    , fontid pls_integer
     , images tp_images
     );
   workbook tp_book;
@@ -628,7 +180,7 @@ is
     );
   --
   g_useXf boolean := true;
---
+  --
   g_addtxt2utf8blob_tmp varchar2(32767);
   procedure addtxt2utf8blob_init( p_blob in out nocopy blob )
   is
@@ -712,7 +264,7 @@ $END
   begin
     return to_number( utl_raw.reverse( utl_raw.substr( p_num, p_pos, p_bytes ) ), 'XXXXXXXXXXXXXXXX' );
   end;
---
+  --
   function blob2num( p_blob blob, p_len integer, p_pos integer )
   return number
   is
@@ -863,7 +415,7 @@ $END
              else chr( 64 + p_col )
            end;
   end;
---
+  --
   function col_alfan( p_col varchar2 )
   return pls_integer
   is
@@ -872,7 +424,7 @@ $END
          + nvl( ( ascii( substr( p_col, -2, 1 ) ) - 64 ) * 26, 0 )
          + nvl( ( ascii( substr( p_col, -3, 1 ) ) - 64 ) * 676, 0 );
   end;
---
+  --
   procedure clear_workbook
   is
     s pls_integer;
@@ -881,7 +433,7 @@ $END
     s := workbook.sheets.first;
     while s is not null
     loop
-      t_row_ind := workbook.sheets( s ).rows.first();
+      t_row_ind := workbook.sheets( s ).rows.first;
       while t_row_ind is not null
       loop
         workbook.sheets( s ).rows( t_row_ind ).delete();
@@ -907,7 +459,6 @@ $END
     workbook.numFmts.delete();
     workbook.cellXfs.delete();
     workbook.defined_names.delete();
-    workbook.formulas.delete();
     for i in 1 .. workbook.images.count
     loop
       dbms_lob.freetemporary( workbook.images(i).img );
@@ -931,29 +482,28 @@ $END
     , p_tabcolor varchar2 := null -- this is a hex ALPHA Red Green Blue value
     )
   is
-    t_nr pls_integer := workbook.sheets.count() + 1;
+    t_nr pls_integer := workbook.sheets.count + 1;
     t_ind pls_integer;
   begin
     workbook.sheets( t_nr ).name := nvl( dbms_xmlgen.convert( translate( p_sheetname, 'a/\[]*:?', 'a' ) ), 'Sheet' || t_nr );
-    if workbook.strings.count() = 0
+    if workbook.strings.count = 0
     then
      workbook.str_cnt := 0;
     end if;
-    if workbook.fonts.count() = 0
+    if workbook.fonts.count = 0
     then
-      workbook.fontid := get_font( 'Calibri' );
+      t_ind := get_font( 'Calibri' );
     end if;
-    if workbook.fills.count() = 0
+    if workbook.fills.count = 0
     then
       t_ind := get_fill( 'none' );
       t_ind := get_fill( 'gray125' );
     end if;
-    if workbook.borders.count() = 0
+    if workbook.borders.count = 0
     then
       t_ind := get_border( '', '', '', '' );
     end if;
     set_tabcolor( p_tabcolor, t_nr );
-    workbook.sheets( t_nr ).fontid := workbook.fontid;
   end;
 --
   procedure set_col_width
@@ -1017,7 +567,7 @@ $END
     then
       return 0;
     end if;
-    t_cnt := workbook.numFmts.count();
+    t_cnt := workbook.numFmts.count;
     for i in 1 .. t_cnt
     loop
       if workbook.numFmts( i ).formatCode = p_format
@@ -1037,28 +587,6 @@ $END
     return t_numFmtId;
   end;
 --
-  procedure set_font
-    ( p_name varchar2
-    , p_sheet pls_integer := null
-    , p_family pls_integer := 2
-    , p_fontsize number := 11
-    , p_theme pls_integer := 1
-    , p_underline boolean := false
-    , p_italic boolean := false
-    , p_bold boolean := false
-    , p_rgb varchar2 := null -- this is a hex ALPHA Red Green Blue value
-    )
-  is
-    t_ind pls_integer := get_font( p_name, p_family, p_fontsize, p_theme, p_underline, p_italic, p_bold, p_rgb );
-  begin
-    if p_sheet is null
-    then
-      workbook.fontid := t_ind;
-    else
-      workbook.sheets( p_sheet ).fontid := t_ind;
-    end if;
-  end;
---
   function get_font
     ( p_name varchar2
     , p_family pls_integer := 2
@@ -1073,9 +601,9 @@ $END
   is
     t_ind pls_integer;
   begin
-    if workbook.fonts.count() > 0
+    if workbook.fonts.count > 0
     then
-      for f in 0 .. workbook.fonts.count() - 1
+      for f in 0 .. workbook.fonts.count - 1
       loop
         if (   workbook.fonts( f ).name = p_name
            and workbook.fonts( f ).family = p_family
@@ -1093,7 +621,7 @@ $END
         end if;
       end loop;
     end if;
-    t_ind := workbook.fonts.count();
+    t_ind := workbook.fonts.count;
     workbook.fonts( t_ind ).name := p_name;
     workbook.fonts( t_ind ).family := p_family;
     workbook.fonts( t_ind ).fontsize := p_fontsize;
@@ -1108,29 +636,26 @@ $END
   function get_fill
     ( p_patternType varchar2
     , p_fgRGB varchar2 := null
-    , p_bgRGB varchar2 := null
     )
   return pls_integer
   is
     t_ind pls_integer;
   begin
-    if workbook.fills.count() > 0
+    if workbook.fills.count > 0
     then
-      for f in 0 .. workbook.fills.count() - 1
+      for f in 0 .. workbook.fills.count - 1
       loop
         if (   workbook.fills( f ).patternType = p_patternType
            and nvl( workbook.fills( f ).fgRGB, 'x' ) = nvl( upper( p_fgRGB ), 'x' )
-           and nvl( workbook.fills( f ).bgRGB, 'x' ) = nvl( upper( p_bgRGB ), 'x' )
            )
         then
           return f;
         end if;
       end loop;
     end if;
-    t_ind := workbook.fills.count();
+    t_ind := workbook.fills.count;
     workbook.fills( t_ind ).patternType := p_patternType;
     workbook.fills( t_ind ).fgRGB := upper( p_fgRGB );
-    workbook.fills( t_ind ).bgRGB := upper( p_bgRGB );
     return t_ind;
   end;
 --
@@ -1144,9 +669,9 @@ $END
   is
     t_ind pls_integer;
   begin
-    if workbook.borders.count() > 0
+    if workbook.borders.count > 0
     then
-      for b in 0 .. workbook.borders.count() - 1
+      for b in 0 .. workbook.borders.count - 1
       loop
         if (   nvl( workbook.borders( b ).top, 'x' ) = nvl( p_top, 'x' )
            and nvl( workbook.borders( b ).bottom, 'x' ) = nvl( p_bottom, 'x' )
@@ -1158,7 +683,7 @@ $END
         end if;
       end loop;
     end if;
-    t_ind := workbook.borders.count();
+    t_ind := workbook.borders.count;
     workbook.borders( t_ind ).top := p_top;
     workbook.borders( t_ind ).bottom := p_bottom;
     workbook.borders( t_ind ).left := p_left;
@@ -1211,7 +736,7 @@ $END
     then
       t_row_XF := workbook.sheets( p_sheet ).row_fmts( p_row );
     end if;
-    t_XF.numFmtId := coalesce( p_numFmtId, t_col_XF.numFmtId, t_row_XF.numFmtId, workbook.sheets( p_sheet ).fontid, workbook.fontid );
+    t_XF.numFmtId := coalesce( p_numFmtId, t_col_XF.numFmtId, t_row_XF.numFmtId, 0 );
     t_XF.fontId := coalesce( p_fontId, t_col_XF.fontId, t_row_XF.fontId, 0 );
     t_XF.fillId := coalesce( p_fillId, t_col_XF.fillId, t_row_XF.fillId, 0 );
     t_XF.borderId := coalesce( p_borderId, t_col_XF.borderId, t_row_XF.borderId, 0 );
@@ -1232,7 +757,7 @@ $END
     then
       set_col_width( p_sheet, p_col, workbook.numFmts( workbook.numFmtIndexes( t_XF.numFmtId ) ).formatCode );
     end if;
-    t_cnt := workbook.cellXfs.count();
+    t_cnt := workbook.cellXfs.count;
     for i in 1 .. t_cnt
     loop
       if (   workbook.cellXfs( i ).numFmtId = t_XF.numFmtId
@@ -1269,7 +794,7 @@ $END
     , p_sheet pls_integer := null
     )
   is
-    t_sheet pls_integer := nvl( p_sheet, workbook.sheets.count() );
+    t_sheet pls_integer := nvl( p_sheet, workbook.sheets.count );
   begin
     workbook.sheets( t_sheet ).rows( p_row )( p_col ).value := p_value;
     workbook.sheets( t_sheet ).rows( p_row )( p_col ).style := null;
@@ -1285,7 +810,7 @@ $END
     then
       t_cnt := workbook.strings( nvl( p_string, '' ) );
     else
-      t_cnt := workbook.strings.count();
+      t_cnt := workbook.strings.count;
       workbook.str_ind( t_cnt ) := p_string;
       workbook.strings( nvl( p_string, '' ) ) := t_cnt;
     end if;
@@ -1305,7 +830,7 @@ $END
     , p_sheet pls_integer := null
     )
   is
-    t_sheet pls_integer := nvl( p_sheet, workbook.sheets.count() );
+    t_sheet pls_integer := nvl( p_sheet, workbook.sheets.count );
     t_alignment tp_alignment := p_alignment;
   begin
     workbook.sheets( t_sheet ).rows( p_row )( p_col ).value := add_string( p_value );
@@ -1329,7 +854,7 @@ $END
     )
   is
     t_numFmtId pls_integer := p_numFmtId;
-    t_sheet pls_integer := nvl( p_sheet, workbook.sheets.count() );
+    t_sheet pls_integer := nvl( p_sheet, workbook.sheets.count );
   begin
     workbook.sheets( t_sheet ).rows( p_row )( p_col ).value := ( p_value - date '1900-03-01' ) + 61;
     if t_numFmtId is null
@@ -1370,7 +895,7 @@ $END
     )
   is
     t_ind pls_integer;
-    t_sheet pls_integer := nvl( p_sheet, workbook.sheets.count() );
+    t_sheet pls_integer := nvl( p_sheet, workbook.sheets.count );
   begin
     if p_url is not null or p_location is not null
     then
@@ -1395,57 +920,15 @@ $END
     )
   is
     t_ind pls_integer;
-    t_sheet pls_integer := nvl( p_sheet, workbook.sheets.count() );
+    t_sheet pls_integer := nvl( p_sheet, workbook.sheets.count );
   begin
-    t_ind := workbook.sheets( t_sheet ).comments.count() + 1;
+    t_ind := workbook.sheets( t_sheet ).comments.count + 1;
     workbook.sheets( t_sheet ).comments( t_ind ).row := p_row;
     workbook.sheets( t_sheet ).comments( t_ind ).column := p_col;
     workbook.sheets( t_sheet ).comments( t_ind ).text := dbms_xmlgen.convert( p_text );
     workbook.sheets( t_sheet ).comments( t_ind ).author := dbms_xmlgen.convert( p_author );
     workbook.sheets( t_sheet ).comments( t_ind ).width := p_width;
     workbook.sheets( t_sheet ).comments( t_ind ).height := p_height;
-  end;
---
-  procedure num_formula
-    ( p_col pls_integer
-    , p_row pls_integer
-    , p_formula varchar2
-    , p_default_value number := null
-    , p_numFmtId pls_integer := null
-    , p_fontId pls_integer := null
-    , p_fillId pls_integer := null
-    , p_borderId pls_integer := null
-    , p_alignment tp_alignment := null
-    , p_sheet pls_integer := null
-    )
-  is
-    t_ind pls_integer := workbook.formulas.count;
-    t_sheet pls_integer := nvl( p_sheet, workbook.sheets.count() );
-  begin
-    workbook.formulas( t_ind ) := p_formula;
-    cell( p_col, p_row, p_default_value, p_numFmtId, p_fontId, p_fillId, p_borderId, p_alignment, t_sheet );
-    workbook.sheets( t_sheet ).rows( p_row )( p_col ).formula_idx := t_ind;
-  end;
---
-  procedure str_formula
-    ( p_col pls_integer
-    , p_row pls_integer
-    , p_formula varchar2
-    , p_default_value varchar2 := null
-    , p_numFmtId pls_integer := null
-    , p_fontId pls_integer := null
-    , p_fillId pls_integer := null
-    , p_borderId pls_integer := null
-    , p_alignment tp_alignment := null
-    , p_sheet pls_integer := null
-    )
-  is
-    t_ind pls_integer := workbook.formulas.count;
-    t_sheet pls_integer := nvl( p_sheet, workbook.sheets.count() );
-  begin
-    workbook.formulas( t_ind ) := p_formula;
-    cell( p_col, p_row, p_default_value, p_numFmtId, p_fontId, p_fillId, p_borderId, p_alignment, t_sheet );
-    workbook.sheets( t_sheet ).rows( p_row )( p_col ).formula_idx := t_ind;
   end;
 --
   procedure mergecells
@@ -1457,9 +940,9 @@ $END
     )
   is
     t_ind pls_integer;
-    t_sheet pls_integer := nvl( p_sheet, workbook.sheets.count() );
+    t_sheet pls_integer := nvl( p_sheet, workbook.sheets.count );
   begin
-    t_ind := workbook.sheets( t_sheet ).mergecells.count() + 1;
+    t_ind := workbook.sheets( t_sheet ).mergecells.count + 1;
     workbook.sheets( t_sheet ).mergecells( t_ind ) := alfan_col( p_tl_col ) || p_tl_row || ':' || alfan_col( p_br_col ) || p_br_row;
   end;
 --
@@ -1478,9 +961,9 @@ $END
     )
   is
     t_ind pls_integer;
-    t_sheet pls_integer := nvl( p_sheet, workbook.sheets.count() );
+    t_sheet pls_integer := nvl( p_sheet, workbook.sheets.count );
   begin
-    t_ind := workbook.sheets( t_sheet ).validations.count() + 1;
+    t_ind := workbook.sheets( t_sheet ).validations.count + 1;
     workbook.sheets( t_sheet ).validations( t_ind ).type := p_type;
     workbook.sheets( t_sheet ).validations( t_ind ).errorstyle := p_style;
     workbook.sheets( t_sheet ).validations( t_ind ).sqref := p_sqref;
@@ -1560,9 +1043,9 @@ $END
     )
   is
     t_ind pls_integer;
-    t_sheet pls_integer := nvl( p_sheet, workbook.sheets.count() );
+    t_sheet pls_integer := nvl( p_sheet, workbook.sheets.count );
   begin
-    t_ind := workbook.defined_names.count() + 1;
+    t_ind := workbook.defined_names.count + 1;
     workbook.defined_names( t_ind ).name := p_name;
     workbook.defined_names( t_ind ).ref := 'Sheet' || t_sheet || '!$' || alfan_col( p_tl_col ) || '$' ||  p_tl_row || ':$' || alfan_col( p_br_col ) || '$' || p_br_row;
     workbook.defined_names( t_ind ).sheet := p_localsheet;
@@ -1577,7 +1060,7 @@ $END
     t_width number;
   begin
     t_width := trunc( round( p_width * 7 ) * 256 / 7 ) / 256;
-    workbook.sheets( nvl( p_sheet, workbook.sheets.count() ) ).widths( p_col ) := t_width;
+    workbook.sheets( nvl( p_sheet, workbook.sheets.count ) ).widths( p_col ) := t_width;
   end;
 --
   procedure set_column
@@ -1590,7 +1073,7 @@ $END
     , p_sheet pls_integer := null
     )
   is
-    t_sheet pls_integer := nvl( p_sheet, workbook.sheets.count() );
+    t_sheet pls_integer := nvl( p_sheet, workbook.sheets.count );
   begin
     workbook.sheets( t_sheet ).col_fmts( p_col ).numFmtId := p_numFmtId;
     workbook.sheets( t_sheet ).col_fmts( p_col ).fontId := p_fontId;
@@ -1610,7 +1093,7 @@ $END
     , p_height number := null
     )
   is
-    t_sheet pls_integer := nvl( p_sheet, workbook.sheets.count() );
+    t_sheet pls_integer := nvl( p_sheet, workbook.sheets.count );
     t_cells tp_cells;
   begin
     workbook.sheets( t_sheet ).row_fmts( p_row ).numFmtId := p_numFmtId;
@@ -1630,7 +1113,7 @@ $END
     , p_sheet pls_integer := null
     )
   is
-    t_sheet pls_integer := nvl( p_sheet, workbook.sheets.count() );
+    t_sheet pls_integer := nvl( p_sheet, workbook.sheets.count );
   begin
     workbook.sheets( t_sheet ).freeze_cols := null;
     workbook.sheets( t_sheet ).freeze_rows := p_nr_rows;
@@ -1641,7 +1124,7 @@ $END
     , p_sheet pls_integer := null
     )
   is
-    t_sheet pls_integer := nvl( p_sheet, workbook.sheets.count() );
+    t_sheet pls_integer := nvl( p_sheet, workbook.sheets.count );
   begin
     workbook.sheets( t_sheet ).freeze_rows := null;
     workbook.sheets( t_sheet ).freeze_cols := p_nr_cols;
@@ -1653,7 +1136,7 @@ $END
     , p_sheet pls_integer := null
     )
   is
-    t_sheet pls_integer := nvl( p_sheet, workbook.sheets.count() );
+    t_sheet pls_integer := nvl( p_sheet, workbook.sheets.count );
   begin
     workbook.sheets( t_sheet ).freeze_rows := p_row;
     workbook.sheets( t_sheet ).freeze_cols := p_col;
@@ -1668,7 +1151,7 @@ $END
     )
   is
     t_ind pls_integer;
-    t_sheet pls_integer := nvl( p_sheet, workbook.sheets.count() );
+    t_sheet pls_integer := nvl( p_sheet, workbook.sheets.count );
   begin
     t_ind := 1;
     workbook.sheets( t_sheet ).autofilters( t_ind ).column_start := p_column_start;
@@ -1864,8 +1347,6 @@ $END
     t_excel blob;
     t_yyy blob;
     t_xxx clob;
-    t_tmp varchar2(32767 char);
-    t_str varchar2(32767 char);
     t_c number;
     t_h number;
     t_w number;
@@ -1900,7 +1381,7 @@ $END
     s := workbook.sheets.first;
     while s is not null
     loop
-      if workbook.sheets( s ).comments.count() > 0
+      if workbook.sheets( s ).comments.count > 0
       then
         t_xxx := t_xxx || ( '
 <Override PartName="/xl/comments' || s || '.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.comments+xml"/>' );
@@ -1920,14 +1401,14 @@ $END
     t_xxx := t_xxx || '
 </Types>';
     add1xml( t_excel, '[Content_Types].xml', t_xxx );
-    t_xxx := '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+    t_xxx := ( '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:dcmitype="http://purl.org/dc/dcmitype/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
 <dc:creator>' || sys_context( 'userenv', 'os_user' ) || '</dc:creator>
 <dc:description>Build by version:' || c_version || '</dc:description>
 <cp:lastModifiedBy>' || sys_context( 'userenv', 'os_user' ) || '</cp:lastModifiedBy>
 <dcterms:created xsi:type="dcterms:W3CDTF">' || to_char( current_timestamp, 'yyyy-mm-dd"T"hh24:mi:ssTZH:TZM' ) || '</dcterms:created>
 <dcterms:modified xsi:type="dcterms:W3CDTF">' || to_char( current_timestamp, 'yyyy-mm-dd"T"hh24:mi:ssTZH:TZM' ) || '</dcterms:modified>
-</cp:coreProperties>';
+</cp:coreProperties>' );
     add1xml( t_excel, 'docProps/core.xml', t_xxx );
     t_xxx := '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes">
@@ -1940,12 +1421,12 @@ $END
 <vt:lpstr>Worksheets</vt:lpstr>
 </vt:variant>
 <vt:variant>
-<vt:i4>' || workbook.sheets.count() || '</vt:i4>
+<vt:i4>' || workbook.sheets.count || '</vt:i4>
 </vt:variant>
 </vt:vector>
 </HeadingPairs>
 <TitlesOfParts>
-<vt:vector size="' || workbook.sheets.count() || '" baseType="lpstr">';
+<vt:vector size="' || workbook.sheets.count || '" baseType="lpstr">';
     s := workbook.sheets.first;
     while s is not null
     loop
@@ -1970,17 +1451,17 @@ $END
     add1xml( t_excel, '_rels/.rels', t_xxx );
     t_xxx := '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" mc:Ignorable="x14ac" xmlns:x14ac="http://schemas.microsoft.com/office/spreadsheetml/2009/9/ac">';
-    if workbook.numFmts.count() > 0
+    if workbook.numFmts.count > 0
     then
-      t_xxx := t_xxx || ( '<numFmts count="' || workbook.numFmts.count() || '">' );
-      for n in 1 .. workbook.numFmts.count()
+      t_xxx := t_xxx || ( '<numFmts count="' || workbook.numFmts.count || '">' );
+      for n in 1 .. workbook.numFmts.count
       loop
         t_xxx := t_xxx || ( '<numFmt numFmtId="' || workbook.numFmts( n ).numFmtId || '" formatCode="' || workbook.numFmts( n ).formatCode || '"/>' );
       end loop;
       t_xxx := t_xxx || '</numFmts>';
     end if;
-    t_xxx := t_xxx || ( '<fonts count="' || workbook.fonts.count() || '" x14ac:knownFonts="1">' );
-    for f in 0 .. workbook.fonts.count() - 1
+    t_xxx := t_xxx || ( '<fonts count="' || workbook.fonts.count || '" x14ac:knownFonts="1">' );
+    for f in 0 .. workbook.fonts.count - 1
     loop
       t_xxx := t_xxx || ( '<font>' ||
         case when workbook.fonts( f ).bold then '<b/>' end ||
@@ -1997,17 +1478,16 @@ $END
 </font>' );
     end loop;
     t_xxx := t_xxx || ( '</fonts>
-<fills count="' || workbook.fills.count() || '">' );
-    for f in 0 .. workbook.fills.count() - 1
+<fills count="' || workbook.fills.count || '">' );
+    for f in 0 .. workbook.fills.count - 1
     loop
       t_xxx := t_xxx || ( '<fill><patternFill patternType="' || workbook.fills( f ).patternType || '">' ||
          case when workbook.fills( f ).fgRGB is not null then '<fgColor rgb="' || workbook.fills( f ).fgRGB || '"/>' end ||
-         case when workbook.fills( f ).bgRGB is not null then '<bgColor rgb="' || workbook.fills( f ).bgRGB || '"/>' end ||
          '</patternFill></fill>' );
     end loop;
     t_xxx := t_xxx || ( '</fills>
-<borders count="' || workbook.borders.count() || '">' );
-    for b in 0 .. workbook.borders.count() - 1
+<borders count="' || workbook.borders.count || '">' );
+    for b in 0 .. workbook.borders.count - 1
     loop
       t_xxx := t_xxx || ( '<border>' ||
          case when workbook.borders( b ).left   is null then '<left/>'   else '<left style="'   || workbook.borders( b ).left   || '"/>' end ||
@@ -2020,9 +1500,9 @@ $END
 <cellStyleXfs count="1">
 <xf numFmtId="0" fontId="0" fillId="0" borderId="0"/>
 </cellStyleXfs>
-<cellXfs count="' || ( workbook.cellXfs.count() + 1 ) || '">
+<cellXfs count="' || ( workbook.cellXfs.count + 1 ) || '">
 <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>' );
-    for x in 1 .. workbook.cellXfs.count()
+    for x in 1 .. workbook.cellXfs.count
     loop
       t_xxx := t_xxx || ( '<xf numFmtId="' || workbook.cellXfs( x ).numFmtId || '" fontId="' || workbook.cellXfs( x ).fontId || '" fillId="' || workbook.cellXfs( x ).fillId || '" borderId="' || workbook.cellXfs( x ).borderId || '">' );
       if (  workbook.cellXfs( x ).alignment.horizontal is not null
@@ -2066,10 +1546,10 @@ $END
       s := workbook.sheets.next( s );
     end loop;
     t_xxx := t_xxx || '</sheets>';
-    if workbook.defined_names.count() > 0
+    if workbook.defined_names.count > 0
     then
       t_xxx := t_xxx || '<definedNames>';
-      for s in 1 .. workbook.defined_names.count()
+      for s in 1 .. workbook.defined_names.count
       loop
         t_xxx := t_xxx || ( '
 <definedName name="' || workbook.defined_names( s ).name || '"' ||
@@ -2369,7 +1849,7 @@ $END
     loop
       t_col_min := 16384;
       t_col_max := 1;
-      t_row_ind := workbook.sheets( s ).rows.first();
+      t_row_ind := workbook.sheets( s ).rows.first;
       while t_row_ind is not null
       loop
         t_col_min := least( t_col_min, nvl( workbook.sheets( s ).rows( t_row_ind ).first, t_col_min ) );
@@ -2380,7 +1860,7 @@ $END
       addtxt2utf8blob( '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" xmlns:x14="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" mc:Ignorable="x14ac" xmlns:x14ac="http://schemas.microsoft.com/office/spreadsheetml/2009/9/ac">' ||
 case when workbook.sheets( s ).tabcolor is not null then '<sheetPr><tabColor rgb="' || workbook.sheets( s ).tabcolor || '"/></sheetPr>' end ||
-'<dimension ref="' || alfan_col( t_col_min ) || workbook.sheets( s ).rows.first() || ':' || alfan_col( t_col_max ) || workbook.sheets( s ).rows.last() || '"/>
+'<dimension ref="' || alfan_col( t_col_min ) || workbook.sheets( s ).rows.first || ':' || alfan_col( t_col_max ) || workbook.sheets( s ).rows.last || '"/>
 <sheetViews>
 <sheetView' || case when s = 1 then ' tabSelected="1"' end || ' workbookViewId="0">'
                      , t_yyy
@@ -2412,10 +1892,10 @@ case when workbook.sheets( s ).tabcolor is not null then '<sheetPr><tabColor rgb
 <sheetFormatPr defaultRowHeight="15" x14ac:dyDescent="0.25"/>'
                      , t_yyy
                      );
-      if workbook.sheets( s ).widths.count() > 0
+      if workbook.sheets( s ).widths.count > 0
       then
         addtxt2utf8blob( '<cols>', t_yyy );
-        t_col_ind := workbook.sheets( s ).widths.first();
+        t_col_ind := workbook.sheets( s ).widths.first;
         while t_col_ind is not null
         loop
           addtxt2utf8blob( '<col min="' || t_col_ind || '" max="' || t_col_ind || '" width="' || to_char( workbook.sheets( s ).widths( t_col_ind ), 'TM9', 'NLS_NUMERIC_CHARACTERS=.,' ) || '" customWidth="1"/>', t_yyy );
@@ -2424,7 +1904,7 @@ case when workbook.sheets( s ).tabcolor is not null then '<sheetPr><tabColor rgb
         addtxt2utf8blob( '</cols>', t_yyy );
       end if;
       addtxt2utf8blob( '<sheetData>', t_yyy );
-      t_row_ind := workbook.sheets( s ).rows.first();
+      t_row_ind := workbook.sheets( s ).rows.first;
       while t_row_ind is not null
       loop
         if workbook.sheets( s ).row_fmts.exists( t_row_ind ) and workbook.sheets( s ).row_fmts( t_row_ind ).height is not null
@@ -2434,18 +1914,12 @@ case when workbook.sheets( s ).tabcolor is not null then '<sheetPr><tabColor rgb
         else
           addtxt2utf8blob( '<row r="' || t_row_ind || '" spans="' || t_col_min || ':' || t_col_max || '">', t_yyy );
         end if;
-        t_col_ind := workbook.sheets( s ).rows( t_row_ind ).first();
+        t_col_ind := workbook.sheets( s ).rows( t_row_ind ).first;
         while t_col_ind is not null
         loop
-          if workbook.sheets( s ).rows( t_row_ind )( t_col_ind ).formula_idx is null
-          then
-            t_tmp := null;
-          else
-            t_tmp := '<f>' || workbook.formulas( workbook.sheets( s ).rows( t_row_ind )( t_col_ind ).formula_idx ) || '</f>';
-          end if;
           addtxt2utf8blob( '<c r="' || alfan_col( t_col_ind ) || t_row_ind || '"'
                  || ' ' || workbook.sheets( s ).rows( t_row_ind )( t_col_ind ).style
-                 || '>' || t_tmp || '<v>'
+                 || '><v>'
                  || to_char( workbook.sheets( s ).rows( t_row_ind )( t_col_ind ).value, 'TM9', 'NLS_NUMERIC_CHARACTERS=.,' )
                  || '</v></c>', t_yyy );
           t_col_ind := workbook.sheets( s ).rows( t_row_ind ).next( t_col_ind );
@@ -2454,28 +1928,28 @@ case when workbook.sheets( s ).tabcolor is not null then '<sheetPr><tabColor rgb
         t_row_ind := workbook.sheets( s ).rows.next( t_row_ind );
       end loop;
       addtxt2utf8blob( '</sheetData>', t_yyy );
-      for a in 1 ..  workbook.sheets( s ).autofilters.count()
+      for a in 1 ..  workbook.sheets( s ).autofilters.count
       loop
         addtxt2utf8blob( '<autoFilter ref="' ||
             alfan_col( nvl( workbook.sheets( s ).autofilters( a ).column_start, t_col_min ) ) ||
-            nvl( workbook.sheets( s ).autofilters( a ).row_start, workbook.sheets( s ).rows.first() ) || ':' ||
+            nvl( workbook.sheets( s ).autofilters( a ).row_start, workbook.sheets( s ).rows.first ) || ':' ||
             alfan_col( coalesce( workbook.sheets( s ).autofilters( a ).column_end, workbook.sheets( s ).autofilters( a ).column_start, t_col_max ) ) ||
-            nvl( workbook.sheets( s ).autofilters( a ).row_end, workbook.sheets( s ).rows.last() ) || '"/>', t_yyy );
+            nvl( workbook.sheets( s ).autofilters( a ).row_end, workbook.sheets( s ).rows.last ) || '"/>', t_yyy );
       end loop;
-      if workbook.sheets( s ).mergecells.count() > 0
+      if workbook.sheets( s ).mergecells.count > 0
       then
-        addtxt2utf8blob( '<mergeCells count="' || to_char( workbook.sheets( s ).mergecells.count() ) || '">', t_yyy );
-        for m in 1 ..  workbook.sheets( s ).mergecells.count()
+        addtxt2utf8blob( '<mergeCells count="' || to_char( workbook.sheets( s ).mergecells.count ) || '">', t_yyy );
+        for m in 1 ..  workbook.sheets( s ).mergecells.count
         loop
           addtxt2utf8blob( '<mergeCell ref="' || workbook.sheets( s ).mergecells( m ) || '"/>', t_yyy );
         end loop;
         addtxt2utf8blob( '</mergeCells>', t_yyy );
       end if;
 --
-      if workbook.sheets( s ).validations.count() > 0
+      if workbook.sheets( s ).validations.count > 0
       then
-        addtxt2utf8blob( '<dataValidations count="' || to_char( workbook.sheets( s ).validations.count() ) || '">', t_yyy );
-        for m in 1 ..  workbook.sheets( s ).validations.count()
+        addtxt2utf8blob( '<dataValidations count="' || to_char( workbook.sheets( s ).validations.count ) || '">', t_yyy );
+        for m in 1 ..  workbook.sheets( s ).validations.count
         loop
           addtxt2utf8blob( '<dataValidation' ||
               ' type="' || workbook.sheets( s ).validations( m ).type || '"' ||
@@ -2516,10 +1990,10 @@ case when workbook.sheets( s ).tabcolor is not null then '<sheetPr><tabColor rgb
         addtxt2utf8blob( '</dataValidations>', t_yyy );
       end if;
 --
-      if workbook.sheets( s ).hyperlinks.count() > 0
+      if workbook.sheets( s ).hyperlinks.count > 0
       then
         addtxt2utf8blob( '<hyperlinks>', t_yyy );
-        for h in 1 ..  workbook.sheets( s ).hyperlinks.count()
+        for h in 1 ..  workbook.sheets( s ).hyperlinks.count
         loop
           addtxt2utf8blob( '<hyperlink ref="' || workbook.sheets( s ).hyperlinks( h ).cell || '"', t_yyy );
           if workbook.sheets( s ).hyperlinks( h ).url is null
@@ -2557,12 +2031,12 @@ case when workbook.sheets( s ).tabcolor is not null then '<sheetPr><tabColor rgb
       then
         t_xxx := '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">';
-        if workbook.sheets( s ).comments.count() > 0
+        if workbook.sheets( s ).comments.count > 0
         then
-          t_xxx := t_xxx || ( '<Relationship Id="rId' || ( workbook.sheets( s ).hyperlinks.count() + 2 ) || '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments" Target="../comments' || s || '.xml"/>' );
-          t_xxx := t_xxx || ( '<Relationship Id="rId' || ( workbook.sheets( s ).hyperlinks.count() + 1 ) || '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/vmlDrawing" Target="../drawings/vmlDrawing' || s || '.vml"/>' );
+          t_xxx := t_xxx || ( '<Relationship Id="rId' || ( workbook.sheets( s ).hyperlinks.count + 2 ) || '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments" Target="../comments' || s || '.xml"/>' );
+          t_xxx := t_xxx || ( '<Relationship Id="rId' || ( workbook.sheets( s ).hyperlinks.count + 1 ) || '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/vmlDrawing" Target="../drawings/vmlDrawing' || s || '.vml"/>' );
         end if;
-        for h in 1 ..  workbook.sheets( s ).hyperlinks.count()
+        for h in 1 ..  workbook.sheets( s ).hyperlinks.count
         loop
           if workbook.sheets( s ).hyperlinks( h ).url is not null
           then
@@ -2700,10 +2174,10 @@ style="position:absolute;margin-left:35.25pt;margin-top:3pt;z-index:' || to_char
     end if;
     addtxt2utf8blob_init( t_yyy );
     addtxt2utf8blob( '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="' || workbook.str_cnt || '" uniqueCount="' || workbook.strings.count() || '">'
+<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="' || workbook.str_cnt || '" uniqueCount="' || workbook.strings.count || '">'
                   , t_yyy
                   );
-    for i in 0 .. workbook.str_ind.count() - 1
+    for i in 0 .. workbook.str_ind.count - 1
     loop
       addtxt2utf8blob( '<si><t xml:space="preserve">' || dbms_xmlgen.convert( substr( workbook.str_ind( i ), 1, 32000 ) ) || '</t></si>', t_yyy );
     end loop;
