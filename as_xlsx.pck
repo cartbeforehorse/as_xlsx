@@ -369,6 +369,31 @@ PROCEDURE List_Validation (
    p_error_txt    IN VARCHAR2    := null,
    sheet_         IN PLS_INTEGER := null );
 
+PROCEDURE Add_Image (
+   col_         IN PLS_INTEGER,
+   row_         IN PLS_INTEGER,
+   img_blob_    IN BLOB,
+   name_        IN VARCHAR2    := '',
+   title_       IN VARCHAR2    := '',
+   description_ IN VARCHAR2    := '',
+   scale_       IN NUMBER      := null,
+   sheet_       IN PLS_INTEGER := null,
+   width_       IN PLS_INTEGER := null,
+   height_      IN PLS_INTEGER := null );
+
+PROCEDURE Load_Image (
+   col_         IN PLS_INTEGER,
+   row_         IN PLS_INTEGER,
+   dir_         IN VARCHAR2,
+   filename_    IN VARCHAR2,
+   name_        IN VARCHAR2    := '',
+   title_       IN VARCHAR2    := '',
+   description_ IN VARCHAR2    := '',
+   scale_       IN NUMBER      := null,
+   sheet_       IN PLS_INTEGER := null,
+   width_       IN PLS_INTEGER := null,
+   height_      IN PLS_INTEGER := null );
+
 PROCEDURE Defined_Name (
    tl_col_     IN PLS_INTEGER, -- top left
    tl_row_     IN PLS_INTEGER,
@@ -608,6 +633,16 @@ TYPE tp_validation IS RECORD (
    sqref            VARCHAR2(32767 CHAR)
 );
 TYPE tp_validations IS TABLE OF tp_validation INDEX BY PLS_INTEGER;
+TYPE tp_drawing IS RECORD (
+   img_id      PLS_INTEGER,
+   row         PLS_INTEGER,
+   col         PLS_INTEGER,
+   scale       NUMBER,
+   name        VARCHAR2(100),
+   title       VARCHAR2(100),
+   description VARCHAR2(4000)
+);
+TYPE tp_drawings IS TABLE OF tp_drawing INDEX BY PLS_INTEGER;
 TYPE tp_sheet IS RECORD (
    rows        tp_rows,
    widths      tp_widths,
@@ -622,7 +657,8 @@ TYPE tp_sheet IS RECORD (
    mergecells  tp_mergecells,
    validations tp_validations,
    tabcolor    VARCHAR2(8),
-   fontid      PLS_INTEGER
+   fontid      PLS_INTEGER,
+   drawings    tp_drawings
 );
 TYPE tp_sheets is table of tp_sheet index by PLS_INTEGER;
 TYPE tp_numFmt IS RECORD (
@@ -663,7 +699,14 @@ TYPE tp_defined_name is record (
    ref VARCHAR2(32767 char),
    sheet PLS_INTEGER
 );
-TYPE tp_defined_names is table of tp_defined_name index by PLS_INTEGER;
+TYPE tp_defined_names IS TABLE OF tp_defined_name index by PLS_INTEGER;
+TYPE tp_image IS RECORD (
+   img_blob    BLOB,
+   img_hash    RAW(128), --NUMBER,
+   width       PLS_INTEGER,
+   height      PLS_INTEGER
+);
+TYPE tp_images is table of tp_image index by PLS_INTEGER;
 TYPE tp_book IS RECORD (
    sheets        tp_sheets,
    strings       tp_strings,
@@ -677,7 +720,8 @@ TYPE tp_book IS RECORD (
    numFmtIndexes tp_numFmtIndexes,
    defined_names tp_defined_names,
    formulas      tp_formulas,
-   fontid        PLS_INTEGER
+   fontid        PLS_INTEGER,
+   images        tp_images
 );
 
 workbook              tp_book;
@@ -974,6 +1018,7 @@ BEGIN
       workbook.sheets(s_).comments.delete();
       workbook.sheets(s_).mergecells.delete();
       workbook.sheets(s_).validations.delete();
+      workbook.sheets(s_).drawings.delete();
       s_ := workbook.sheets.next(s_);
    END LOOP;
    workbook.strings.delete();
@@ -985,6 +1030,10 @@ BEGIN
    workbook.cellXfs.delete();
    workbook.defined_names.delete();
    workbook.formulas.delete();
+   FOR i_ IN 1 .. workbook.images.count LOOP
+      dbms_lob.freeTemporary (workbook.images(i_).img_blob);
+   END LOOP;
+   workbook.images.delete();
    workbook := null;
 END Clear_Workbook;
 
@@ -2094,7 +2143,180 @@ IS BEGIN
       sheet_       => sheet_
    );
 END List_Validation;
---
+
+PROCEDURE Add_Image (
+   col_         IN PLS_INTEGER,
+   row_         IN PLS_INTEGER,
+   img_blob_    IN BLOB,
+   name_        IN VARCHAR2    := '',
+   title_       IN VARCHAR2    := '',
+   description_ IN VARCHAR2    := '',
+   scale_       IN NUMBER      := null,
+   sheet_       IN PLS_INTEGER := null,
+   width_       IN PLS_INTEGER := null,
+   height_      IN PLS_INTEGER := null )
+IS
+   sh_         PLS_INTEGER := coalesce (sheet_, workbook.sheets.count);
+   img_ix_     PLS_INTEGER;
+   hash_       RAW(128) := Dbms_Crypto.Hash (img_blob_, dbms_crypto.hash_md5);
+   img_rec_    tp_image;
+   drawing_    tp_drawing;
+   offset_     NUMBER;
+   length_     NUMBER;
+   file_chunk_ RAW(14);
+   hex_        VARCHAR2(8);
+BEGIN
+
+   FOR i_ IN 1 .. workbook.images.count LOOP
+      IF workbook.images(i_).img_hash = hash_ THEN
+         img_ix_ := i_;
+         exit;
+      END IF;
+   END LOOP;
+
+   IF img_ix_ IS null THEN
+
+      img_ix_ := workbook.images.count + 1;
+      dbms_lob.createTemporary (img_rec_.img_blob, true);
+      
+      dbms_lob.copy (img_rec_.img_blob, img_blob_, dbms_lob.lobmaxsize, 1, 1);
+      img_rec_.img_hash := hash_;
+      file_chunk_ := dbms_lob.substr (img_blob_, 14, 1);
+
+      --
+      -- Different processing for different types of image...
+      --
+      IF utl_raw.substr (file_chunk_, 1, 8) = hextoraw('89504E470D0A1A0A') THEN -- png
+         Dbms_Output.Put_Line ('file is PNG');
+
+         offset_ := 9;
+         LOOP
+            length_ := to_number (dbms_lob.substr (img_blob_, 4, offset_), 'xxxxxxxx');
+            EXIT WHEN length_ IS null OR offset_ > dbms_lob.getlength (img_blob_);
+            CASE rawtohex (dbms_lob.substr (img_blob_, 4, offset_ + 4)) -- Chunk type
+               WHEN '49484452' /* IHDR */ THEN
+                  img_rec_.width  := to_number (dbms_lob.substr(img_blob_,4,offset_+8), 'xxxxxxxx');
+                  img_rec_.height := to_number (dbms_lob.substr(img_blob_,4,offset_+12), 'xxxxxxxx');
+                  exit;
+               WHEN '49454E44' /* IEND */ THEN
+                  exit;
+            END CASE;
+            offset_ := offset_ + 4 + 4 + length_ + 4;  -- Length + Chunk type + Chunk data + CRC
+         END LOOP;
+
+      ELSIF utl_raw.substr (file_chunk_, 1, 3) = hextoraw('474946') THEN -- gif
+         Dbms_Output.Put_Line ('file is GIF');
+
+         offset_ := 14;
+         file_chunk_ := utl_raw.substr (file_chunk_, 11, 1);
+         IF utl_raw.bit_and ('80', file_chunk_) = '80' THEN
+            length_ := to_number (utl_raw.bit_and('07', file_chunk_), 'XX');
+            offset_ := offset_ + 3 * power(2, length_+1);
+         END IF;
+         LOOP
+            CASE rawtohex (dbms_lob.substr (img_blob_, 1, offset_))
+               WHEN '21' /* extension */ THEN
+                  offset_ := offset_ + 2; -- skip sentinel + label
+                  LOOP
+                     length_ := to_number(dbms_lob.substr(img_blob_, 1, offset_), 'XX'); -- Block Size
+                     EXIT WHEN length_ = 0;
+                     offset_ := offset_ + 1 + length_; -- skip Block Size + Data Sub-block
+                  END LOOP;
+                  offset_ := offset_ + 1; -- skip last Block Size
+               WHEN  '2C' /* image */ THEN
+                  file_chunk_     := dbms_lob.substr (img_blob_, 4, offset_+5);
+                  img_rec_.width  := utl_raw.cast_to_binary_integer (utl_raw.substr(file_chunk_,1,2), utl_raw.little_endian);
+                  img_rec_.height := utl_raw.cast_to_binary_integer (utl_raw.substr(file_chunk_,3,2), utl_raw.little_endian);
+                  exit;
+               ELSE
+                  exit;
+            END CASE;
+         END LOOP;
+
+      ELSIF utl_raw.substr (file_chunk_,1,2) = hextoraw('FFD8') -- SOI Start of Image
+            AND rawtohex (utl_raw.substr(file_chunk_,3,2)) IN ('FFE0', 'FFE1') -- APP0 jpg; APP1 jpg
+      THEN -- jpg
+         Dbms_Output.Put_Line ('file is JPG');
+
+         offset_ := 5 + to_number(utl_raw.substr(file_chunk_,5,2), 'xxxx');
+         LOOP
+            file_chunk_ := dbms_lob.substr (img_blob_, 4, offset_);
+            hex_        := substr( rawtohex(file_chunk_),1,4);
+            EXIT WHEN hex_ IN ('FFDA', 'FFD9') -- SOS Start of Scan; EOI End Of Image
+                   OR substr (hex_, 1, 2) != 'FF';
+            IF hex_ IN ('FFD0', 'FFD1', 'FFD2', 'FFD3', 'FFD4', 'FFD5', 'FFD6', 'FFD7', /*RSTn*/ 'FF01' /*TEM*/) THEN
+               offset_ := offset_ + 2;
+            ELSE
+               IF hex_ = 'FFC0' /* SOF0 (Start Of Frame 0) marker*/ THEN
+                  hex_ := rawtohex (dbms_lob.substr (img_blob_, 4, offset_+5));
+                  img_rec_.width  := to_number (substr(hex_,5), 'xxxx');
+                  img_rec_.height := to_number (substr(hex_,1,4), 'xxxx');
+                  exit;
+               END IF;
+               offset_ := offset_ + 2 + to_number (utl_raw.substr(file_chunk_,3,2), 'xxxx');
+            END IF;
+         END LOOP;
+
+      ELSE -- unknown - use the values passed in
+         img_rec_.width  := nvl(width_, 0);
+         img_rec_.height := nvl(height_, 0);
+      END IF;
+
+      workbook.images(img_ix_) := img_rec_;
+
+   END IF;
+
+   drawing_.img_id      := img_ix_;
+   drawing_.row         := row_;
+   drawing_.col         := col_;
+   drawing_.scale       := scale_;
+   drawing_.name        := name_;
+   drawing_.title       := title_;
+   drawing_.description := description_;
+   workbook.sheets(sh_).drawings(workbook.sheets(sh_).drawings.count+1) := drawing_;
+
+END Add_Image;
+
+PROCEDURE Load_Image (
+   col_         IN PLS_INTEGER,
+   row_         IN PLS_INTEGER,
+   dir_         IN VARCHAR2,
+   filename_    IN VARCHAR2,
+   name_        IN VARCHAR2    := '',
+   title_       IN VARCHAR2    := '',
+   description_ IN VARCHAR2    := '',
+   scale_       IN NUMBER      := null,
+   sheet_       IN PLS_INTEGER := null,
+   width_       IN PLS_INTEGER := null,
+   height_      IN PLS_INTEGER := null )
+IS
+   img_blob_ BLOB  := empty_blob();
+   bfile_    BFILE := bFileName (dir_, filename_);
+BEGIN
+   Dbms_Lob.fileOpen (bfile_);
+   Dbms_Lob.createTemporary (img_blob_, true);
+   Dbms_Lob.loadFromFile (img_blob_, bfile_, dbms_lob.getLength(bfile_));
+   Dbms_Lob.fileClose (bfile_);
+   Add_Image (
+      col_         => col_,
+      row_         => row_,
+      img_blob_    => img_blob_,
+      name_        => name_,
+      title_       => title_,
+      description_ => description_,
+      scale_       => scale_,
+      sheet_       => sheet_,
+      width_       => width_,
+      height_      => height_
+   );
+EXCEPTION
+   WHEN others THEN
+      IF Dbms_Lob.fileIsOpen (bfile_) = 1 THEN
+         Dbms_Lob.fileClose (bfile_);
+      END IF;
+      raise;
+END Load_Image;
+
 PROCEDURE Defined_Name (
    tl_col_     PLS_INTEGER, -- top left
    tl_row_     PLS_INTEGER,
@@ -2104,7 +2326,7 @@ PROCEDURE Defined_Name (
    sheet_      PLS_INTEGER := null,
    localsheet_ PLS_INTEGER := null )
 IS
-   ix_   PLS_INTEGER;
+   ix_ PLS_INTEGER;
    sh_ PLS_INTEGER := nvl(sheet_, workbook.sheets.count());
 BEGIN
    ix_ := workbook.defined_names.count() + 1;
@@ -2214,6 +2436,10 @@ BEGIN
    Defined_Name (col_start_, row_start_, col_end_, row_end_, '_xlnm._FilterDatabase', sh_, sh_-1);
 END Set_Autofilter;
 
+
+-----------------------------------
+-- Finishing functions
+--
 PROCEDURE Add1Xml (
    excel_    IN OUT NOCOPY BLOB,
    filename_ VARCHAR2,
@@ -2233,7 +2459,123 @@ BEGIN
    Add1File (excel_, filename_, tmp_);
    Dbms_Lob.freetemporary(tmp_);
 END Add1Xml;
---
+
+FUNCTION Finish_Drawing (
+   drawing_ tp_drawing,
+   ix_      PLS_INTEGER,
+   sheet_   PLS_INTEGER ) RETURN VARCHAR2
+IS
+   rv_         VARCHAR2(32767);
+   col_        PLS_INTEGER;
+   row_        PLS_INTEGER;
+   width_      NUMBER;
+   height_     NUMBER;
+   col_offs_   NUMBER;
+   row_offs_   NUMBER;
+   col_width_  NUMBER;
+   row_height_ NUMBER;
+   widths_     tp_widths;
+   heights_    tp_row_fmts;
+BEGIN
+   width_  := workbook.images(drawing_.img_id).width;
+   height_ := workbook.images(drawing_.img_id).height;
+   IF drawing_.scale IS NOT null THEN
+      width_  := drawing_.scale * width_;
+      height_ := drawing_.scale * height_;
+   END IF;
+   IF workbook.sheets(sheet_).widths.count = 0 THEN
+      -- assume default column widths!
+      -- 64 px = 1 col = 609600
+      col_ := trunc (width_/64);
+      col_offs_ := (width_-col_*64)*9525;
+      col_ := drawing_.col - 1 + col_;
+   ELSE
+      widths_ := workbook.sheets(sheet_).widths;
+      col_ := drawing_.col;
+      LOOP
+         IF widths_.exists(col_) THEN
+            col_width_ := round(7*widths_(col_));
+         ELSE
+            col_width_ := 64;
+         END IF;
+         EXIT WHEN width_ < col_width_;
+         col_ := col_ + 1;
+         width_ := width_ - col_width_;
+      END LOOP;
+      col_ := col_ - 1;
+      col_offs_ := width_ * 9525;
+   END IF;
+   IF workbook.sheets(sheet_).row_fmts.count = 0 THEN
+      -- assume default row heigths!
+      -- 20 px = 1 row = 190500
+      row_ := trunc (height_/20);
+      row_offs_ := (height_- row_*20) * 9525;
+      row_ := drawing_.row - 1 + row_;
+   ELSE
+      heights_ := workbook.sheets(sheet_).row_fmts;
+      row_ := drawing_.row;
+      LOOP
+         IF heights_.exists(row_) AND heights_(row_).height IS NOT null THEN
+            row_height_ := heights_(row_).height;
+            row_height_ := round (4*row_height_/3);
+         ELSE
+            row_height_ := 20;
+         END IF;
+         EXIT WHEN height_ < row_height_;
+         row_ := row_ + 1;
+         height_ := height_ - row_height_;
+      END LOOP;
+      row_offs_ := height_ * 9525;
+      row_ := row_ - 1;
+   END IF;
+   rv_ := '<xdr:twoCellAnchor editAs="oneCell">
+<xdr:from><xdr:col>' || ( drawing_.col-1 ) || '</xdr:col>
+<xdr:colOff>0</xdr:colOff>
+<xdr:row>' || ( drawing_.row-1 ) || '</xdr:row>
+<xdr:rowOff>0</xdr:rowOff>
+</xdr:from>
+<xdr:to>
+<xdr:col>' || col_ || '</xdr:col>
+<xdr:colOff>' || col_offs_ || '</xdr:colOff>
+<xdr:row>' || row_ || '</xdr:row>
+<xdr:rowOff>' || row_offs_ || '</xdr:rowOff>
+</xdr:to>
+<xdr:pic>
+<xdr:nvPicPr>
+<xdr:cNvPr id="3" name="' || coalesce (drawing_.name, 'Picture '||ix_) || '"';
+   IF drawing_.title IS NOT null THEN
+      rv_ := rv_ || ' title="' || drawing_.title || '"';
+   END IF;
+   IF drawing_.description IS NOT null THEN
+      rv_ := rv_ || ' descr="' || drawing_.description || '"';
+   END IF;
+   rv_ := rv_ || '/>
+<xdr:cNvPicPr>
+<a:picLocks noChangeAspect="1"/>
+</xdr:cNvPicPr>
+</xdr:nvPicPr>
+<xdr:blipFill>
+<a:blip xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" r:embed="rId' || drawing_.img_id || '">
+<a:extLst>
+<a:ext uri="{28A0092B-C50C-407E-A947-70E740481C1C}">
+<a14:useLocalDpi xmlns:a14="http://schemas.microsoft.com/office/drawing/2010/main" val="0"/>
+</a:ext>
+</a:extLst>
+</a:blip>
+<a:stretch>
+<a:fillRect/>
+</a:stretch>
+</xdr:blipFill>
+<xdr:spPr>
+<a:prstGeom prst="rect">
+</a:prstGeom>
+</xdr:spPr>
+</xdr:pic>
+<xdr:clientData/>
+</xdr:twoCellAnchor>';
+   RETURN rv_;
+END Finish_Drawing;
+
 FUNCTION Finish RETURN BLOB
 IS
    excel_        BLOB;
@@ -2272,12 +2614,19 @@ BEGIN
 <Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>';
   s := workbook.sheets.first;
   WHILE s IS not null LOOP
-    IF workbook.sheets( s ).comments.count() > 0 THEN
+    IF workbook.sheets(s).comments.count() > 0 THEN
       xxx_ := xxx_ || ( '
 <Override PartName="/xl/comments' || s || '.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.comments+xml"/>' );
     END IF;
-    s := workbook.sheets.next( s );
+    IF workbook.sheets(s).drawings.count > 0 THEN
+      xxx_ := xxx_ || '
+<Override ContentType="application/vnd.openxmlformats-officedocument.drawing+xml" PartName="/xl/drawings/drawing' || s || '.xml"/>';
+    END IF;
+    s := workbook.sheets.next(s);
   END LOOP;
+  IF workbook.images.count > 0 THEN
+     xxx_ := xxx_ || '<Default ContentType="image/png" Extension="png"/>';
+  END IF;
   xxx_ := xxx_ || '
 </Types>';
   add1xml (excel_, '[Content_Types].xml', xxx_);
@@ -2320,7 +2669,7 @@ BEGIN
 <HyperlinksChanged>false</HyperlinksChanged>
 <AppVersion>14.0300</AppVersion>
 </Properties>';
-  add1xml( excel_, 'docProps/app.xml', xxx_ );
+  add1xml (excel_, 'docProps/app.xml', xxx_);
   xxx_ := '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
 <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties" Target="docProps/app.xml"/>
@@ -2858,29 +3207,46 @@ CASE WHEN workbook.sheets(s).tabcolor IS not null THEN '<sheetPr><tabColor rgb="
     IF workbook.sheets(s).comments.count() > 0 THEN
       addtxt2utf8blob( '<legacyDrawing r:id="rId' || ( workbook.sheets(s).hyperlinks.count() + 1 ) || '"/>', yyy_ );
     END IF;
+    IF workbook.sheets(s).drawings.count > 0 THEN
+      addtxt2utf8blob( '<drawing r:id="rId' || (workbook.sheets(s).hyperlinks.count + sign(workbook.sheets(s).comments.count)+1) || '"/>', yyy_);
+    END IF;
 
     addtxt2utf8blob( '</worksheet>', yyy_ );
     addtxt2utf8blob_finish( yyy_ );
     add1file( excel_, 'xl/worksheets/sheet' || s || '.xml', yyy_ );
-    IF workbook.sheets(s).hyperlinks.count() > 0 OR workbook.sheets(s).comments.count() > 0 THEN
+    IF workbook.sheets(s).hyperlinks.count > 0 OR workbook.sheets(s).comments.count > 0 OR workbook.sheets(s).drawings.count > 0 THEN
       xxx_ := '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">';
       IF workbook.sheets(s).comments.count() > 0 THEN
         xxx_ := xxx_ || ( '<Relationship Id="rId' || ( workbook.sheets(s).hyperlinks.count() + 2 ) || '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments" Target="../comments' || s || '.xml"/>' );
         xxx_ := xxx_ || ( '<Relationship Id="rId' || ( workbook.sheets(s).hyperlinks.count() + 1 ) || '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/vmlDrawing" Target="../drawings/vmlDrawing' || s || '.vml"/>' );
       END IF;
-      FOR h IN 1 ..  workbook.sheets( s ).hyperlinks.count() LOOP
-        xxx_ := xxx_ || ( '<Relationship Id="rId' || h || '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="' || workbook.sheets( s ).hyperlinks( h ).url || '" TargetMode="External"/>' );
+      FOR h IN 1 ..  workbook.sheets(s).hyperlinks.count() LOOP
+        IF workbook.sheets(s).hyperlinks(h).url IS NOT null THEN
+          xxx_ := xxx_ || ( '<Relationship Id="rId' || h || '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="' || workbook.sheets( s ).hyperlinks( h ).url || '" TargetMode="External"/>' );
+        END IF;
       END LOOP;
+      IF workbook.sheets(s).drawings.count > 0 THEN
+        xxx_ := xxx_ || ( '<Relationship Id="rId' || ( workbook.sheets(s).hyperlinks.count + sign(workbook.sheets(s).comments.count)*2+1)|| '" Target="../drawings/drawing' || s || '.xml" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing"/>' );
+      END IF;
       xxx_ := xxx_ || '</Relationships>';
-      add1xml( excel_, 'xl/worksheets/_rels/sheet' || s || '.xml.rels', xxx_ );
+      add1xml (excel_, 'xl/worksheets/_rels/sheet' || s || '.xml.rels', xxx_);
+    END IF;
+
+    IF workbook.sheets(s).drawings.count > 0 THEN
+      xxx_ := '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">';
+      FOR i_ IN 1 .. workbook.sheets(s).drawings.count LOOP
+        xxx_ := xxx_ || Finish_Drawing (workbook.sheets(s).drawings(i_), i_, s);
+      END LOOP;
+      xxx_ := xxx_ || '</xdr:wsDr>';
+      add1xml (excel_, 'xl/drawings/drawing' || s || '.xml', xxx_);
     END IF;
 
     IF workbook.sheets(s).comments.count() > 0 THEN
       DECLARE
         cnt PLS_INTEGER;
         author_ind tp_author;
-        -- col_ix_ := workbook.sheets(s).widths.next(col_ix_);
       BEGIN
         authors.delete();
         FOR c IN 1 .. workbook.sheets(s).comments.count() LOOP
@@ -2963,9 +3329,20 @@ style="position:absolute;margin-left:35.25pt;margin-top:3pt;z-index:' || to_char
   END LOOP;
   xxx_ := xxx_ || '</Relationships>';
   add1xml (excel_, 'xl/_rels/workbook.xml.rels', xxx_);
+  IF workbook.images.count > 0 THEN
+    xxx_ := '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">';
+    FOR i_ IN 1 .. workbook.images.count LOOP
+       add1file (excel_, 'xl/media/image' || i_ || '.png', workbook.images(i_).img_blob );
+       xxx_ := xxx_ || ( '<Relationship Id="rId' || i_ || '" '
+                    ||   'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image' || i_ || '.png'
+                    ||   '"/>' );
+    END LOOP;
+    xxx_ := xxx_ || '</Relationships>';
+    add1xml (excel_, 'xl/drawings/_rels/drawing1.xml.rels', xxx_);
+  END IF;
   addtxt2utf8blob_init(yyy_);
-  addtxt2utf8blob (
-    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+  addtxt2utf8blob ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="' || workbook.str_cnt || '" uniqueCount="' || workbook.strings.count() || '">',
     yyy_
   );
