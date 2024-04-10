@@ -59,14 +59,14 @@ TYPE params_arr IS TABLE OF param_rec;
 --
 TYPE fonts_list  IS TABLE OF INTEGER INDEX BY VARCHAR2(50);
 TYPE fills_list  IS TABLE OF INTEGER INDEX BY VARCHAR2(50);
-TYPE borddr_list IS TABLE OF INTEGER INDEX BY VARCHAR2(50);
+TYPE border_list IS TABLE OF INTEGER INDEX BY VARCHAR2(50);
 TYPE numFmt_list IS TABLE OF INTEGER INDEX BY VARCHAR2(50);
 TYPE align_list  IS TABLE OF tp_alignment INDEX BY VARCHAR2(50);
 TYPE numFmt_cols IS TABLE OF INTEGER INDEX BY PLS_INTEGER;
 
 fonts_  fonts_list;
 fills_  fills_list;
-bdrs_   borddr_list;
+bdrs_   border_list;
 numFmt_ numFmt_list;
 align_  align_list;
 
@@ -125,6 +125,16 @@ PROCEDURE Get_Fill (
    patternType_ IN VARCHAR2,
    fgRGB_       IN VARCHAR2 := null,
    bgRGB_       IN VARCHAR2 := null );
+
+PROCEDURE Add_Fill (
+   fill_id_     IN VARCHAR2,
+   patternType_ IN VARCHAR2,
+   fgRGB_       IN VARCHAR2 := null,
+   bgRGB_       IN VARCHAR2 := null );
+
+PROCEDURE Add_NumFmt (
+   fmt_id_ IN VARCHAR2,
+   format_ IN VARCHAR2 );
 
 ---------------------------------------
 -- Alfan_Cell(), Alfan_Range()
@@ -200,6 +210,17 @@ PROCEDURE Cell (
    borderId_  IN VARCHAR2    := null,
    alignment_ IN VARCHAR2    := null,
    sheet_     IN PLS_INTEGER := null );
+PROCEDURE CellN ( -- num version overload
+   col_       IN PLS_INTEGER,
+   row_       IN PLS_INTEGER,
+   value_num_ IN NUMBER      := null,
+   formula_   IN VARCHAR2    := '',
+   numFmtId_  IN VARCHAR2    := null,
+   fontId_    IN VARCHAR2    := null,
+   fillId_    IN VARCHAR2    := null,
+   borderId_  IN VARCHAR2    := null,
+   alignment_ IN VARCHAR2    := null,
+   sheet_     IN PLS_INTEGER := null );
 
 PROCEDURE Cell ( -- VARCHAR
    col_       IN PLS_INTEGER,
@@ -212,6 +233,17 @@ PROCEDURE Cell ( -- VARCHAR
    alignment_ IN tp_alignment := null,
    sheet_     IN PLS_INTEGER  := null );
 PROCEDURE Cell (
+   col_       IN PLS_INTEGER,
+   row_       IN PLS_INTEGER,
+   value_str_ IN VARCHAR2    := '',
+   formula_   IN VARCHAR2    := '',
+   numFmtId_  IN VARCHAR2    := null,
+   fontId_    IN VARCHAR2    := null,
+   fillId_    IN VARCHAR2    := null,
+   borderId_  IN VARCHAR2    := null,
+   alignment_ IN VARCHAR2    := null,
+   sheet_     IN PLS_INTEGER := null );
+PROCEDURE CellS ( -- string version overload
    col_       IN PLS_INTEGER,
    row_       IN PLS_INTEGER,
    value_str_ IN VARCHAR2    := '',
@@ -237,6 +269,17 @@ PROCEDURE Cell (
    col_       IN PLS_INTEGER,
    row_       IN PLS_INTEGER,
    value_dt_  IN DATE        := null,
+   formula_   IN VARCHAR2    := '',
+   numFmtId_  IN VARCHAR2    := null,
+   fontId_    IN VARCHAR2    := null,
+   fillId_    IN VARCHAR2    := null,
+   borderId_  IN VARCHAR2    := null,
+   alignment_ IN VARCHAR2    := null,
+   sheet_     IN PLS_INTEGER := null );
+PROCEDURE CellD ( -- date version overload
+   col_       IN PLS_INTEGER,
+   row_       IN PLS_INTEGER,
+   value_dt_  IN DATE,
    formula_   IN VARCHAR2    := '',
    numFmtId_  IN VARCHAR2    := null,
    fontId_    IN VARCHAR2    := null,
@@ -1046,7 +1089,6 @@ BEGIN
    workbook.sheets(sh_).tabcolor := substr(tabcolor_, 1, 8);
 END Set_Tabcolor;
 
-
 FUNCTION New_Sheet (
    sheetname_ VARCHAR2 := null,
    tab_color_ VARCHAR2 := null ) RETURN PLS_INTEGER
@@ -1161,6 +1203,14 @@ BEGIN
    RETURN numFmtId_;
 END Get_NumFmt;
 
+PROCEDURE Add_NumFmt (
+   fmt_id_ IN VARCHAR2,
+   format_ IN VARCHAR2 )
+IS BEGIN
+   numFmt_(fmt_id_) := format_;
+END Add_NumFmt;
+   
+
 PROCEDURE Set_Font (
    name_      VARCHAR2    := 'Calibri',
    sheet_     PLS_INTEGER := null,
@@ -1256,6 +1306,15 @@ IS
 BEGIN
    null;
 END Get_Fill;
+
+PROCEDURE Add_Fill (
+   fill_id_     IN VARCHAR2,
+   patternType_ IN VARCHAR2,
+   fgRGB_       IN VARCHAR2 := null,
+   bgRGB_       IN VARCHAR2 := null )
+IS BEGIN
+   fills_(fill_id_) := Get_Fill (patternType_, fgRGB_, bgRGB_);
+END Add_Fill;
 
 
 FUNCTION Get_Border (
@@ -1707,6 +1766,25 @@ BEGIN
    END IF;
 END Cell;
 
+PROCEDURE CellN ( -- num version overload
+   col_       IN PLS_INTEGER,
+   row_       IN PLS_INTEGER,
+   value_num_ IN NUMBER      := null,
+   formula_   IN VARCHAR2    := '',
+   numFmtId_  IN VARCHAR2    := null,
+   fontId_    IN VARCHAR2    := null,
+   fillId_    IN VARCHAR2    := null,
+   borderId_  IN VARCHAR2    := null,
+   alignment_ IN VARCHAR2    := null,
+   sheet_     IN PLS_INTEGER := null )
+IS BEGIN
+   Cell (
+      col_ => col_, row_ => row_, value_num_ => value_num_, formula_ => formula_,
+      numFmtId_ => numFmtId_, fontId_ => fontId_, fillId_ => fillId_,
+      borderId_ => borderId_, alignment_ => alignment_, sheet_ => sheet_
+   );
+END CellN;
+
 FUNCTION Add_String (
    string_ IN VARCHAR2 ) RETURN PLS_INTEGER
 IS
@@ -1780,6 +1858,25 @@ BEGIN
    END IF;
 END Cell;
 
+PROCEDURE CellS ( -- string version overload
+   col_       IN PLS_INTEGER,
+   row_       IN PLS_INTEGER,
+   value_str_ IN VARCHAR2    := '',
+   formula_   IN VARCHAR2    := '',
+   numFmtId_  IN VARCHAR2    := null,
+   fontId_    IN VARCHAR2    := null,
+   fillId_    IN VARCHAR2    := null,
+   borderId_  IN VARCHAR2    := null,
+   alignment_ IN VARCHAR2    := null,
+   sheet_     IN PLS_INTEGER := null )
+IS BEGIN
+   Cell (
+      col_ => col_, row_ => row_, value_str_ => value_str_, formula_ => formula_,
+      numFmtId_ => numFmtId_, fontId_ => fontId_, fillId_ => fillId_,
+      borderId_ => borderId_, alignment_ => alignment_, sheet_ => sheet_
+   );
+END CellS;
+
 PROCEDURE Cell (  -- date version
    col_       IN PLS_INTEGER,
    row_       IN PLS_INTEGER,
@@ -1841,6 +1938,25 @@ BEGIN
       workbook.sheets(sh_).rows(row_)(col_).formula_idx := fm_ix_;
    END IF;
 END Cell;
+
+PROCEDURE CellD ( -- date version overload
+   col_       IN PLS_INTEGER,
+   row_       IN PLS_INTEGER,
+   value_dt_  IN DATE,
+   formula_   IN VARCHAR2    := '',
+   numFmtId_  IN VARCHAR2    := null,
+   fontId_    IN VARCHAR2    := null,
+   fillId_    IN VARCHAR2    := null,
+   borderId_  IN VARCHAR2    := null,
+   alignment_ IN VARCHAR2    := null,
+   sheet_     IN PLS_INTEGER := null )
+IS BEGIN
+   Cell (
+      col_ => col_, row_ => row_, value_dt_ => value_dt_, formula_ => formula_,
+      numFmtId_ => numFmtId_, fontId_ => fontId_, fillId_ => fillId_,
+      borderId_ => borderId_, alignment_ => alignment_, sheet_ => sheet_
+   );
+END CellD;
 
 -- Sometimes it's useful to be able to add an empty cell with formatting
 PROCEDURE CellB ( -- empty (b for blank)
@@ -3551,8 +3667,7 @@ IS
 BEGIN
    Dbms_Sql.Parse (cur_, sql_, dbms_sql.native);
    Do_Binding (cur_, binds_);
-   res_ := Dbms_Sql.Execute(cur_);
-   SELECT 1 INTO res_ FROM dual; --avoid compiler warning
+   res_ := Dbms_Sql.Execute(cur_); -- ignore
    Query2Sheet (
       col_count_, row_count_, cur_, col_headers_,
       sheet_, UseXf_, hdr_font_, hdr_fill_, col_fmts_
@@ -3707,8 +3822,31 @@ BEGIN
    fills_('md_grey')     := Get_Fill ('solid', 'FFA6A6A6');
    fills_('dk_grey')     := Get_Fill ('solid', 'FF595959');
 
-   bdrs_('thin')         := Get_Border();
    bdrs_('none')         := Get_Border ('none', 'none', 'none', 'none');
+   bdrs_('dotted')       := Get_Border ('dotted', 'dotted', 'dotted', 'dotted');
+   bdrs_('t_dotted')     := Get_Border ('dotted', 'none', 'none', 'none'); -- top, bottom, left, right
+   bdrs_('tl_dotted')    := Get_Border ('dotted', 'none', 'dotted', 'none');
+   bdrs_('tbl_dotted')   := Get_Border ('dotted', 'dotted', 'dotted', 'none');
+   bdrs_('tr_dotted')    := Get_Border ('dotted', 'none', 'none', 'dotted');
+   bdrs_('tb_dotted')    := Get_Border ('dotted', 'dotted', 'none', 'none');
+   bdrs_('b_dotted')     := Get_Border ('none', 'dotted', 'none', 'none');
+   bdrs_('bl_dotted')    := Get_Border ('none', 'dotted', 'dotted', 'none');
+   bdrs_('l_dotted')     := Get_Border ('none', 'none', 'dotted', 'none');
+   bdrs_('br_dotted')    := Get_Border ('none', 'dotted', 'none', 'dotted');
+   bdrs_('r_dotted')     := Get_Border ('none', 'none', 'none', 'dotted');
+   bdrs_('tbr_dotted')   := Get_Border ('dotted', 'dotted', 'none', 'dotted');
+   bdrs_('thin')         := Get_Border ('thin', 'thin', 'thin', 'thin');
+   bdrs_('t_thin')       := Get_Border ('thin', 'none', 'none', 'none'); -- top, bottom, left, right
+   bdrs_('tl_thin')      := Get_Border ('thin', 'none', 'thin', 'none');
+   bdrs_('tbl_thin')     := Get_Border ('thin', 'thin', 'thin', 'none');
+   bdrs_('tr_thin')      := Get_Border ('thin', 'none', 'none', 'thin');
+   bdrs_('tb_thin')      := Get_Border ('thin', 'thin', 'none', 'none');
+   bdrs_('b_thin')       := Get_Border ('none', 'thin', 'none', 'none');
+   bdrs_('bl_thin')      := Get_Border ('none', 'thin', 'thin', 'none');
+   bdrs_('l_thin')       := Get_Border ('none', 'none', 'thin', 'none');
+   bdrs_('br_thin')      := Get_Border ('none', 'thin', 'none', 'thin');
+   bdrs_('r_thin')       := Get_Border ('none', 'none', 'none', 'thin');
+   bdrs_('tbr_thin')     := Get_Border ('thin', 'thin', 'none', 'thin');
    bdrs_('medium')       := Get_Border ('medium', 'medium', 'medium', 'medium');
    bdrs_('t_medium')     := Get_Border ('medium', 'none', 'none', 'none'); -- top, bottom, left, right
    bdrs_('tl_medium')    := Get_Border ('medium', 'none', 'medium', 'none');
@@ -3736,6 +3874,7 @@ BEGIN
    numFmt_('2dp')        := Get_NumFmt ('#,##0.00');
    numFmt_('dt_mid')     := Get_NumFmt ('dd mmm yyyy');
    numFmt_('dt_long')    := Get_NumFmt ('dd mmmm yyyy');
+   numFmt_('Mmm yyyy')   := Get_NumFmt ('Mmm yyyy');
 
    align_('left')        := Get_Alignment (vertical_ => 'center', horizontal_ => 'left',   wrapText_ => false);
    align_('leftw')       := Get_Alignment (vertical_ => 'center', horizontal_ => 'left',   wrapText_ => true);
