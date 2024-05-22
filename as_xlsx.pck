@@ -1,35 +1,19 @@
-CREATE OR REPLACE PACKAGE AS_XLSX IS
+CREATE OR REPLACE PACKAGE as_xlsx IS
 /*****************************************************************************
  *****************************************************************************
  **
  ** Author: Anton Scheffer
- ** Date: 19-02-2011
  ** Website: http://technology.amis.nl/blog
  ** See also: http://technology.amis.nl/blog/?p=10995
+ **   # License
+ **   Copyright (C) 2011, 2020 by Anton Scheffer
+ **   See associated LICENSE.md file
  **
- *****************************************************************************
- *****************************************************************************
-
-  Copyright (C) 2011, 2020 by Anton Scheffer
-
-  Permission is hereby granted, free of charge, to any person obtaining a copy
-  of this software and associated documentation files (the "Software"), to deal
-  in the Software without restriction, including without limitation the rights
-  to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-  copies of the Software, and to permit persons to whom the Software is
-  furnished to do so, subject to the following conditions:
-
-  The above copyright notice and this permission notice shall be included in
-  all copies or substantial portions of the Software.
-
-  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-  THE SOFTWARE.
-
+ ** Modifications added by Osian ap Garth since 2017, version-controlled since
+ ** 2021 in Git Hub:
+ **    >> https://github.com/cartbeforehorse/as_xlsx
+ ** Documentation updated in README.md
+ ** 
  *****************************************************************************
  *****************************************************************************/
 
@@ -601,9 +585,9 @@ PROCEDURE Create_Params_Sheet (
    sheet_       IN PLS_INTEGER := null );
 
 
-END AS_XLSX;
+END as_xlsx;
 /
-CREATE OR REPLACE PACKAGE BODY AS_XLSX IS
+CREATE OR REPLACE PACKAGE BODY as_xlsx IS
 
 VERSION_ CONSTANT VARCHAR2(20) := 'as_xlsx20';
 
@@ -743,13 +727,19 @@ TYPE tp_defined_name is record (
    sheet PLS_INTEGER
 );
 TYPE tp_defined_names IS TABLE OF tp_defined_name index by PLS_INTEGER;
+
+TYPE tp_pivot IS RECORD (
+   pivot_name VARCHAR2(2000)
+);
+TYPE tp_pivots IS TABLE OF tp_pivot index by PLS_INTEGER;
 TYPE tp_image IS RECORD (
    img_blob    BLOB,
    img_hash    RAW(128), --NUMBER,
    width       PLS_INTEGER,
    height      PLS_INTEGER
 );
-TYPE tp_images is table of tp_image index by PLS_INTEGER;
+TYPE tp_images IS TABLE OF tp_image index by PLS_INTEGER;
+
 TYPE tp_book IS RECORD (
    sheets        tp_sheets,
    strings       tp_strings,
@@ -764,6 +754,7 @@ TYPE tp_book IS RECORD (
    defined_names tp_defined_names,
    formulas      tp_formulas,
    fontid        PLS_INTEGER,
+   pivots        tp_pivots,
    images        tp_images
 );
 
@@ -857,8 +848,7 @@ FUNCTION Raw2Num (
    pos_ INTEGER ) RETURN NUMBER
 IS BEGIN
    RETURN utl_raw.cast_to_binary_integer(
-      utl_raw.substr(raw_, pos_, len_),
-      utl_raw.little_endian
+      utl_raw.substr (raw_, pos_, len_), utl_raw.little_endian
    );
 END Raw2Num;
 
@@ -867,8 +857,7 @@ FUNCTION Little_Endian (
    bytes_ PLS_INTEGER := 4 ) RETURN RAW
 IS BEGIN
    RETURN utl_raw.substr (
-      utl_raw.cast_from_binary_integer (big_, utl_raw.little_endian),
-      1, bytes_
+      utl_raw.cast_from_binary_integer (big_, utl_raw.little_endian), 1, bytes_
    );
 END Little_Endian;
 
@@ -878,8 +867,7 @@ FUNCTION Blob2Num (
    pos_  INTEGER ) RETURN NUMBER
 IS BEGIN
    RETURN utl_raw.cast_to_binary_integer (
-      dbms_lob.substr(blob_, len_, pos_),
-      utl_raw.little_endian
+      dbms_lob.substr (blob_, len_, pos_), utl_raw.little_endian
    );
 END Blob2Num;
 
@@ -908,7 +896,7 @@ BEGIN
       blob_ := content_;
    END IF;
    IF zipped_blob_ IS null THEN
-      dbms_lob.createtemporary( zipped_blob_, true );
+      dbms_lob.createtemporary (zipped_blob_, true);
    END IF;
    name_raw_ := Utl_i18n.String_To_Raw (name_, 'AL32UTF8');
    Dbms_Lob.Append (
@@ -1118,9 +1106,9 @@ PROCEDURE New_Sheet (
    sheetname_ VARCHAR2 := null,
    tab_color_ VARCHAR2 := null )
 IS
-   s_ PLS_INTEGER := New_Sheet (sheetname_, tab_color_); --ignore
+   throw_ PLS_INTEGER;
 BEGIN
-   null;
+   throw_ := New_Sheet (sheetname_, tab_color_); --ignore
 END New_Sheet;
 
 PROCEDURE Set_Sheet_Name (
@@ -1302,9 +1290,9 @@ PROCEDURE Get_Fill (
    fgRGB_       IN VARCHAR2 := null,
    bgRGB_       IN VARCHAR2 := null )
 IS
-   ix_ PLS_INTEGER := Get_Fill (patternType_, fgRGB_, bgRGB_); --ignore
+   throw_ PLS_INTEGER;
 BEGIN
-   null;
+   throw_ := Get_Fill (patternType_, fgRGB_, bgRGB_); --ignore
 END Get_Fill;
 
 PROCEDURE Add_Fill (
@@ -1350,9 +1338,9 @@ PROCEDURE Get_Border (
    left_   IN VARCHAR2 := 'thin',
    right_  IN VARCHAR2 := 'thin' )
 IS
-   throw_ NUMBER := Get_Border (top_, bottom_, left_, right_); -- ignore
+   throw_ NUMBER;
 BEGIN
-   null;
+   throw_ := Get_Border (top_, bottom_, left_, right_); -- ignore
 END Get_Border;
 
 -----
@@ -2047,11 +2035,11 @@ IS
    ix_ PLS_INTEGER;
    sh_ PLS_INTEGER := nvl(sheet_, workbook.sheets.count());
 BEGIN
-   workbook.sheets(sheet_).rows(row_)(col_).value := add_string(nvl(value_, url_));
-   workbook.sheets(sheet_).rows(row_)(col_).style := 't="s" ' || get_XfId(sh_, col_, row_, '', Get_Font('Calibri', theme_ => 10, underline_ => true));
-   ix_ := workbook.sheets(sheet_).hyperlinks.count() + 1;
-   workbook.sheets(sheet_).hyperlinks(ix_).cell := alfan_col(col_) || row_;
-   workbook.sheets(sheet_).hyperlinks(ix_).url := url_;
+   workbook.sheets(sh_).rows(row_)(col_).value := add_string(nvl(value_, url_));
+   workbook.sheets(sh_).rows(row_)(col_).style := 't="s" ' || get_XfId(sh_, col_, row_, '', Get_Font('Calibri', theme_ => 10, underline_ => true));
+   ix_ := workbook.sheets(sh_).hyperlinks.count() + 1;
+   workbook.sheets(sh_).hyperlinks(ix_).cell := alfan_col(col_) || row_;
+   workbook.sheets(sh_).hyperlinks(ix_).url := url_;
 END Hyperlink;
 
 PROCEDURE Comment (
@@ -2256,7 +2244,7 @@ IS BEGIN
       p_show_error  => p_show_error,
       p_error_title => p_error_title,
       p_error_txt   => p_error_txt,
-      sheet_       => sheet_
+      sheet_        => sheet_
    );
 END List_Validation;
 
@@ -2561,19 +2549,19 @@ PROCEDURE Add1Xml (
    filename_ VARCHAR2,
    xml_      CLOB )
 IS
-   tmp_          BLOB;
+   xml_blob_     BLOB;
    dest_offset_  INTEGER := 1;
    src_offset_   INTEGER := 1;
    lang_context_ INTEGER := Dbms_Lob.DEFAULT_LANG_CTX;
    warning_      INTEGER;
 BEGIN
-   Dbms_Lob.CreateTemporary (tmp_, true);
+   Dbms_Lob.CreateTemporary (xml_blob_, true);
    Dbms_Lob.ConvertToBlob (
-      tmp_, xml_, Dbms_Lob.LobMaxSize, dest_offset_, src_offset_,
+      xml_blob_, xml_, Dbms_Lob.LobMaxSize, dest_offset_, src_offset_,
       nls_charset_id('AL32UTF8'), lang_context_, warning_
    );
-   Add1File (excel_, filename_, tmp_);
-   Dbms_Lob.freetemporary(tmp_);
+   Add1File (excel_, filename_, xml_blob_);
+   Dbms_Lob.freetemporary(xml_blob_);
 END Add1Xml;
 
 FUNCTION Finish_Drawing (
@@ -2692,6 +2680,17 @@ BEGIN
    RETURN rv_;
 END Finish_Drawing;
 
+--osian
+/*FUNCTION Finish_Pivot (
+   pivot_  tp_pivot,
+   ix_     PLS_INTEGER,
+   sheet_  PLS_INTEGER ) RETURN VARCHAR2
+IS
+BEGIN
+   null;
+END Finish_Pivot;*/
+   
+
 FUNCTION Finish RETURN BLOB
 IS
    excel_        BLOB;
@@ -2702,7 +2701,8 @@ IS
    h_            NUMBER;
    w_            NUMBER;
    cw_           NUMBER;
-   s             PLS_INTEGER;
+   p_            PLS_INTEGER;
+   s_            PLS_INTEGER;
    row_ix_       PLS_INTEGER;
    col_ix_       PLS_INTEGER;
    col_min_      PLS_INTEGER;
@@ -2716,29 +2716,36 @@ BEGIN
 <Default Extension="xml" ContentType="application/xml"/>
 <Default Extension="vml" ContentType="application/vnd.openxmlformats-officedocument.vmlDrawing"/>
 <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>';
-  s := workbook.sheets.first;
-  WHILE s IS not null LOOP
-    xxx_ := xxx_ || ( '
-<Override PartName="/xl/worksheets/sheet' || s || '.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>' );
-    s := workbook.sheets.next(s);
+  s_ := workbook.sheets.first;
+  WHILE s_ IS not null LOOP
+    xxx_ := xxx_ || '
+<Override PartName="/xl/worksheets/sheet' || s_ || '.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>';
+    s_ := workbook.sheets.next(s_);
   END LOOP;
   xxx_ := xxx_ || '
 <Override PartName="/xl/theme/theme1.xml" ContentType="application/vnd.openxmlformats-officedocument.theme+xml"/>
 <Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
-<Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/>
+<Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/>';
+  p_ := workbook.pivots.first; -- osian
+  WHILE p_ IS NOT null LOOP
+     xxx_ := xxx_ || '
+<Override PartName="xl/pivotTables/pivotTable' || p_ || '.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.pivotTable+xml"/>';
+     p_ := workbook.pivots.next(p_);
+  END LOOP;
+  xxx_ := xxx_ || '
 <Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>
 <Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>';
-  s := workbook.sheets.first;
-  WHILE s IS not null LOOP
-    IF workbook.sheets(s).comments.count() > 0 THEN
+  s_ := workbook.sheets.first;
+  WHILE s_ IS not null LOOP
+    IF workbook.sheets(s_).comments.count() > 0 THEN
       xxx_ := xxx_ || ( '
-<Override PartName="/xl/comments' || s || '.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.comments+xml"/>' );
+<Override PartName="/xl/comments' || s_ || '.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.comments+xml"/>' );
     END IF;
-    IF workbook.sheets(s).drawings.count > 0 THEN
+    IF workbook.sheets(s_).drawings.count > 0 THEN
       xxx_ := xxx_ || '
-<Override ContentType="application/vnd.openxmlformats-officedocument.drawing+xml" PartName="/xl/drawings/drawing' || s || '.xml"/>';
+<Override ContentType="application/vnd.openxmlformats-officedocument.drawing+xml" PartName="/xl/drawings/drawing' || s_ || '.xml"/>';
     END IF;
-    s := workbook.sheets.next(s);
+    s_ := workbook.sheets.next(s_);
   END LOOP;
   IF workbook.images.count > 0 THEN
      xxx_ := xxx_ || '<Default ContentType="image/png" Extension="png"/>';
@@ -2772,11 +2779,11 @@ BEGIN
 </HeadingPairs>
 <TitlesOfParts>
 <vt:vector size="' || workbook.sheets.count() || '" baseType="lpstr">';
-  s := workbook.sheets.first;
-  WHILE s IS not null LOOP
+  s_ := workbook.sheets.first;
+  WHILE s_ IS not null LOOP
     xxx_ := xxx_ || ( '
-<vt:lpstr>' || workbook.sheets(s).name || '</vt:lpstr>' );
-    s := workbook.sheets.next(s);
+<vt:lpstr>' || workbook.sheets(s_).name || '</vt:lpstr>' );
+    s_ := workbook.sheets.next(s_);
   END LOOP;
   xxx_ := xxx_ || '</vt:vector>
 </TitlesOfParts>
@@ -2877,20 +2884,20 @@ BEGIN
 <workbookView xWindow="120" yWindow="45" windowWidth="19155" windowHeight="4935"/>
 </bookViews>
 <sheets>';
-  s := workbook.sheets.first;
-  WHILE s IS not null LOOP
+  s_ := workbook.sheets.first;
+  WHILE s_ IS not null LOOP
     xxx_ := xxx_ || ('
-<sheet name="' || workbook.sheets(s).name || '" sheetId="' || s || '" r:id="rId' || ( 9 + s ) || '"/>' );
-    s := workbook.sheets.next(s);
+<sheet name="' || workbook.sheets(s_).name || '" sheetId="' || s_ || '" r:id="rId' || ( 9 + s_ ) || '"/>' );
+    s_ := workbook.sheets.next(s_);
   END LOOP;
   xxx_ := xxx_ || '</sheets>';
   IF workbook.defined_names.count() > 0 THEN
     xxx_ := xxx_ || '<definedNames>';
-    FOR s IN 1 .. workbook.defined_names.count() LOOP
+    FOR s_ IN 1 .. workbook.defined_names.count() LOOP
       xxx_ := xxx_ || ('
-<definedName name="' || workbook.defined_names(s).name || '"' ||
-        CASE WHEN workbook.defined_names( s ).sheet IS not null THEN ' localSheetId="' || to_char(workbook.defined_names(s).sheet) || '"' END ||
-        '>' || workbook.defined_names( s ).ref || '</definedName>');
+<definedName name="' || workbook.defined_names(s_).name || '"' ||
+        CASE WHEN workbook.defined_names(s_).sheet IS not null THEN ' localSheetId="' || to_char(workbook.defined_names(s_).sheet) || '"' END ||
+        '>' || workbook.defined_names(s_).ref || '</definedName>');
     END LOOP;
     xxx_ := xxx_ || '</definedNames>';
   END IF;
@@ -2898,325 +2905,271 @@ BEGIN
   add1xml( excel_, 'xl/workbook.xml', xxx_ );
   xxx_ := '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" name="Office Theme">
-<a:themeElements>
-<a:clrScheme name="Office">
-<a:dk1>
-<a:sysClr val="windowText" lastClr="000000"/>
-</a:dk1>
-<a:lt1>
-<a:sysClr val="window" lastClr="FFFFFF"/>
-</a:lt1>
-<a:dk2>
-<a:srgbClr val="1F497D"/>
-</a:dk2>
-<a:lt2>
-<a:srgbClr val="EEECE1"/>
-</a:lt2>
-<a:accent1>
-<a:srgbClr val="4F81BD"/>
-</a:accent1>
-<a:accent2>
-<a:srgbClr val="C0504D"/>
-</a:accent2>
-<a:accent3>
-<a:srgbClr val="9BBB59"/>
-</a:accent3>
-<a:accent4>
-<a:srgbClr val="8064A2"/>
-</a:accent4>
-<a:accent5>
-<a:srgbClr val="4BACC6"/>
-</a:accent5>
-<a:accent6>
-<a:srgbClr val="F79646"/>
-</a:accent6>
-<a:hlink>
-<a:srgbClr val="0000FF"/>
-</a:hlink>
-<a:folHlink>
-<a:srgbClr val="800080"/>
-</a:folHlink>
-</a:clrScheme>
-<a:fontScheme name="Office">
-<a:majorFont>
-<a:latin typeface="Cambria"/>
-<a:ea typeface=""/>
-<a:cs typeface=""/>
-<a:font script="Jpan" typeface="MS P????"/>
-<a:font script="Hang" typeface="?? ??"/>
-<a:font script="Hans" typeface="??"/>
-<a:font script="Hant" typeface="????"/>
-<a:font script="Arab" typeface="Times New Roman"/>
-<a:font script="Hebr" typeface="Times New Roman"/>
-<a:font script="Thai" typeface="Tahoma"/>
-<a:font script="Ethi" typeface="Nyala"/>
-<a:font script="Beng" typeface="Vrinda"/>
-<a:font script="Gujr" typeface="Shruti"/>
-<a:font script="Khmr" typeface="MoolBoran"/>
-<a:font script="Knda" typeface="Tunga"/>
-<a:font script="Guru" typeface="Raavi"/>
-<a:font script="Cans" typeface="Euphemia"/>
-<a:font script="Cher" typeface="Plantagenet Cherokee"/>
-<a:font script="Yiii" typeface="Microsoft Yi Baiti"/>
-<a:font script="Tibt" typeface="Microsoft Himalaya"/>
-<a:font script="Thaa" typeface="MV Boli"/>
-<a:font script="Deva" typeface="Mangal"/>
-<a:font script="Telu" typeface="Gautami"/>
-<a:font script="Taml" typeface="Latha"/>
-<a:font script="Syrc" typeface="Estrangelo Edessa"/>
-<a:font script="Orya" typeface="Kalinga"/>
-<a:font script="Mlym" typeface="Kartika"/>
-<a:font script="Laoo" typeface="DokChampa"/>
-<a:font script="Sinh" typeface="Iskoola Pota"/>
-<a:font script="Mong" typeface="Mongolian Baiti"/>
-<a:font script="Viet" typeface="Times New Roman"/>
-<a:font script="Uigh" typeface="Microsoft Uighur"/>
-<a:font script="Geor" typeface="Sylfaen"/>
-</a:majorFont>
-<a:minorFont>
-<a:latin typeface="Calibri"/>
-<a:ea typeface=""/>
-<a:cs typeface=""/>
-<a:font script="Jpan" typeface="MS P????"/>
-<a:font script="Hang" typeface="?? ??"/>
-<a:font script="Hans" typeface="??"/>
-<a:font script="Hant" typeface="????"/>
-<a:font script="Arab" typeface="Arial"/>
-<a:font script="Hebr" typeface="Arial"/>
-<a:font script="Thai" typeface="Tahoma"/>
-<a:font script="Ethi" typeface="Nyala"/>
-<a:font script="Beng" typeface="Vrinda"/>
-<a:font script="Gujr" typeface="Shruti"/>
-<a:font script="Khmr" typeface="DaunPenh"/>
-<a:font script="Knda" typeface="Tunga"/>
-<a:font script="Guru" typeface="Raavi"/>
-<a:font script="Cans" typeface="Euphemia"/>
-<a:font script="Cher" typeface="Plantagenet Cherokee"/>
-<a:font script="Yiii" typeface="Microsoft Yi Baiti"/>
-<a:font script="Tibt" typeface="Microsoft Himalaya"/>
-<a:font script="Thaa" typeface="MV Boli"/>
-<a:font script="Deva" typeface="Mangal"/>
-<a:font script="Telu" typeface="Gautami"/>
-<a:font script="Taml" typeface="Latha"/>
-<a:font script="Syrc" typeface="Estrangelo Edessa"/>
-<a:font script="Orya" typeface="Kalinga"/>
-<a:font script="Mlym" typeface="Kartika"/>
-<a:font script="Laoo" typeface="DokChampa"/>
-<a:font script="Sinh" typeface="Iskoola Pota"/>
-<a:font script="Mong" typeface="Mongolian Baiti"/>
-<a:font script="Viet" typeface="Arial"/>
-<a:font script="Uigh" typeface="Microsoft Uighur"/>
-<a:font script="Geor" typeface="Sylfaen"/>
-</a:minorFont>
-</a:fontScheme>
-<a:fmtScheme name="Office">
-<a:fillStyleLst>
-<a:solidFill>
-<a:schemeClr val="phClr"/>
-</a:solidFill>
-<a:gradFill rotWithShape="1">
-<a:gsLst>
-<a:gs pos="0">
-<a:schemeClr val="phClr">
-<a:tint val="50000"/>
-<a:satMod val="300000"/>
-</a:schemeClr>
-</a:gs>
-<a:gs pos="35000">
-<a:schemeClr val="phClr">
-<a:tint val="37000"/>
-<a:satMod val="300000"/>
-</a:schemeClr>
-</a:gs>
-<a:gs pos="100000">
-<a:schemeClr val="phClr">
-<a:tint val="15000"/>
-<a:satMod val="350000"/>
-</a:schemeClr>
-</a:gs>
-</a:gsLst>
-<a:lin ang="16200000" scaled="1"/>
-</a:gradFill>
-<a:gradFill rotWithShape="1">
-  <a:gsLst>
-    <a:gs pos="0">
-      <a:schemeClr val="phClr">
-        <a:shade val="51000"/>
-        <a:satMod val="130000"/>
-      </a:schemeClr>
-    </a:gs>
-    <a:gs pos="80000">
-      <a:schemeClr val="phClr">
-        <a:shade val="93000"/>
-        <a:satMod val="130000"/>
-      </a:schemeClr>
-    </a:gs>
-    <a:gs pos="100000">
-      <a:schemeClr val="phClr">
-        <a:shade val="94000"/>
-        <a:satMod val="135000"/>
-      </a:schemeClr>
-    </a:gs>
-  </a:gsLst>
-  <a:lin ang="16200000" scaled="0"/>
-</a:gradFill>
-</a:fillStyleLst>
-<a:lnStyleLst>
-<a:ln w="9525" cap="flat" cmpd="sng" algn="ctr">
-<a:solidFill>
-<a:schemeClr val="phClr">
-<a:shade val="95000"/>
-<a:satMod val="105000"/>
-</a:schemeClr>
-</a:solidFill>
-<a:prstDash val="solid"/>
-</a:ln>
-<a:ln w="25400" cap="flat" cmpd="sng" algn="ctr">
-<a:solidFill>
-<a:schemeClr val="phClr"/>
-</a:solidFill>
-<a:prstDash val="solid"/>
-</a:ln>
-<a:ln w="38100" cap="flat" cmpd="sng" algn="ctr">
-<a:solidFill>
-<a:schemeClr val="phClr"/>
-</a:solidFill>
-<a:prstDash val="solid"/>
-</a:ln>
-</a:lnStyleLst>
-<a:effectStyleLst>
-<a:effectStyle>
-<a:effectLst>
-<a:outerShdw blurRad="40000" dist="20000" dir="5400000" rotWithShape="0">
-<a:srgbClr val="000000">
-<a:alpha val="38000"/>
-</a:srgbClr>
-</a:outerShdw>
-</a:effectLst>
-</a:effectStyle>
-<a:effectStyle>
-<a:effectLst>
-<a:outerShdw blurRad="40000" dist="23000" dir="5400000" rotWithShape="0">
-<a:srgbClr val="000000">
-<a:alpha val="35000"/>
-</a:srgbClr>
-</a:outerShdw>
-</a:effectLst>
-</a:effectStyle>
-<a:effectStyle>
-<a:effectLst>
-<a:outerShdw blurRad="40000" dist="23000" dir="5400000" rotWithShape="0">
-<a:srgbClr val="000000">
-<a:alpha val="35000"/>
-</a:srgbClr>
-</a:outerShdw>
-</a:effectLst>
-<a:scene3d>
-<a:camera prst="orthographicFront">
-<a:rot lat="0" lon="0" rev="0"/>
-</a:camera>
-<a:lightRig rig="threePt" dir="t">
-<a:rot lat="0" lon="0" rev="1200000"/>
-</a:lightRig>
-</a:scene3d>
-<a:sp3d>
-<a:bevelT w="63500" h="25400"/>
-</a:sp3d>
-</a:effectStyle>
-</a:effectStyleLst>
-<a:bgFillStyleLst>
-<a:solidFill>
-<a:schemeClr val="phClr"/>
-</a:solidFill>
-<a:gradFill rotWithShape="1">
-<a:gsLst>
-<a:gs pos="0">
-<a:schemeClr val="phClr">
-<a:tint val="40000"/>
-<a:satMod val="350000"/>
-</a:schemeClr>
-</a:gs>
-<a:gs pos="40000">
-<a:schemeClr val="phClr">
-<a:tint val="45000"/>
-<a:shade val="99000"/>
-<a:satMod val="350000"/>
-</a:schemeClr>
-</a:gs>
-<a:gs pos="100000">
-<a:schemeClr val="phClr">
-<a:shade val="20000"/>
-<a:satMod val="255000"/>
-</a:schemeClr>
-</a:gs>
-</a:gsLst>
-<a:path path="circle">
-<a:fillToRect l="50000" t="-80000" r="50000" b="180000"/>
-</a:path>
-</a:gradFill>
-<a:gradFill rotWithShape="1">
-<a:gsLst>
-<a:gs pos="0">
-<a:schemeClr val="phClr">
-<a:tint val="80000"/>
-<a:satMod val="300000"/>
-</a:schemeClr>
-</a:gs>
-<a:gs pos="100000">
-<a:schemeClr val="phClr">
-<a:shade val="30000"/>
-<a:satMod val="200000"/>
-</a:schemeClr>
-</a:gs>
-</a:gsLst>
-<a:path path="circle">
-<a:fillToRect l="50000" t="50000" r="50000" b="50000"/>
-</a:path>
-</a:gradFill>
-</a:bgFillStyleLst>
-</a:fmtScheme>
-</a:themeElements>
-<a:objectDefaults/>
-<a:extraClrSchemeLst/>
+  <a:themeElements>
+    <a:clrScheme name="Office">
+      <a:dk1><a:sysClr val="windowText" lastClr="000000"/></a:dk1>
+      <a:lt1><a:sysClr val="window" lastClr="FFFFFF"/></a:lt1>
+      <a:dk2><a:srgbClr val="1F497D"/></a:dk2>
+      <a:lt2><a:srgbClr val="EEECE1"/></a:lt2>
+      <a:accent1><a:srgbClr val="4F81BD"/></a:accent1>
+      <a:accent2><a:srgbClr val="C0504D"/></a:accent2>
+      <a:accent3><a:srgbClr val="9BBB59"/></a:accent3>
+      <a:accent4><a:srgbClr val="8064A2"/></a:accent4>
+      <a:accent5><a:srgbClr val="4BACC6"/></a:accent5>
+      <a:accent6><a:srgbClr val="F79646"/></a:accent6>
+      <a:hlink><a:srgbClr val="0000FF"/></a:hlink>
+      <a:folHlink><a:srgbClr val="800080"/></a:folHlink>
+    </a:clrScheme>
+    <a:fontScheme name="Office">
+      <a:majorFont>
+        <a:latin typeface="Cambria"/>
+        <a:ea typeface=""/>
+        <a:cs typeface=""/>
+        <a:font script="Jpan" typeface="MS P????"/><a:font script="Hang" typeface="?? ??"/>
+        <a:font script="Hans" typeface="??"/><a:font script="Hant" typeface="????"/>
+        <a:font script="Arab" typeface="Times New Roman"/><a:font script="Hebr" typeface="Times New Roman"/>
+        <a:font script="Thai" typeface="Tahoma"/><a:font script="Ethi" typeface="Nyala"/>
+        <a:font script="Beng" typeface="Vrinda"/><a:font script="Gujr" typeface="Shruti"/>
+        <a:font script="Khmr" typeface="MoolBoran"/><a:font script="Knda" typeface="Tunga"/>
+        <a:font script="Guru" typeface="Raavi"/><a:font script="Cans" typeface="Euphemia"/>
+        <a:font script="Cher" typeface="Plantagenet Cherokee"/><a:font script="Yiii" typeface="Microsoft Yi Baiti"/>
+        <a:font script="Tibt" typeface="Microsoft Himalaya"/><a:font script="Thaa" typeface="MV Boli"/>
+        <a:font script="Deva" typeface="Mangal"/><a:font script="Telu" typeface="Gautami"/>
+        <a:font script="Taml" typeface="Latha"/><a:font script="Syrc" typeface="Estrangelo Edessa"/>
+        <a:font script="Orya" typeface="Kalinga"/><a:font script="Mlym" typeface="Kartika"/>
+        <a:font script="Laoo" typeface="DokChampa"/><a:font script="Sinh" typeface="Iskoola Pota"/>
+        <a:font script="Mong" typeface="Mongolian Baiti"/><a:font script="Viet" typeface="Times New Roman"/>
+        <a:font script="Uigh" typeface="Microsoft Uighur"/><a:font script="Geor" typeface="Sylfaen"/>
+      </a:majorFont>
+      <a:minorFont>
+        <a:latin typeface="Calibri"/>
+        <a:ea typeface=""/>
+        <a:cs typeface=""/>
+        <a:font script="Jpan" typeface="MS P????"/><a:font script="Hang" typeface="?? ??"/>
+        <a:font script="Hans" typeface="??"/><a:font script="Hant" typeface="????"/>
+        <a:font script="Arab" typeface="Arial"/><a:font script="Hebr" typeface="Arial"/>
+        <a:font script="Thai" typeface="Tahoma"/><a:font script="Ethi" typeface="Nyala"/>
+        <a:font script="Beng" typeface="Vrinda"/><a:font script="Gujr" typeface="Shruti"/>
+        <a:font script="Khmr" typeface="DaunPenh"/><a:font script="Knda" typeface="Tunga"/>
+        <a:font script="Guru" typeface="Raavi"/><a:font script="Cans" typeface="Euphemia"/>
+        <a:font script="Cher" typeface="Plantagenet Cherokee"/><a:font script="Yiii" typeface="Microsoft Yi Baiti"/>
+        <a:font script="Tibt" typeface="Microsoft Himalaya"/><a:font script="Thaa" typeface="MV Boli"/>
+        <a:font script="Deva" typeface="Mangal"/><a:font script="Telu" typeface="Gautami"/>
+        <a:font script="Taml" typeface="Latha"/><a:font script="Syrc" typeface="Estrangelo Edessa"/>
+        <a:font script="Orya" typeface="Kalinga"/><a:font script="Mlym" typeface="Kartika"/>
+        <a:font script="Laoo" typeface="DokChampa"/><a:font script="Sinh" typeface="Iskoola Pota"/>
+        <a:font script="Mong" typeface="Mongolian Baiti"/><a:font script="Viet" typeface="Arial"/>
+        <a:font script="Uigh" typeface="Microsoft Uighur"/><a:font script="Geor" typeface="Sylfaen"/>
+      </a:minorFont>
+    </a:fontScheme>
+    <a:fmtScheme name="Office">
+      <a:fillStyleLst>
+        <a:solidFill>
+          <a:schemeClr val="phClr"/>
+        </a:solidFill>
+        <a:gradFill rotWithShape="1">
+          <a:gsLst>
+            <a:gs pos="0">
+              <a:schemeClr val="phClr">
+                <a:tint val="50000"/>
+                <a:satMod val="300000"/>
+              </a:schemeClr>
+            </a:gs>
+            <a:gs pos="35000">
+              <a:schemeClr val="phClr">
+                <a:tint val="37000"/>
+                <a:satMod val="300000"/>
+              </a:schemeClr>
+            </a:gs>
+            <a:gs pos="100000">
+              <a:schemeClr val="phClr">
+                <a:tint val="15000"/>
+                <a:satMod val="350000"/>
+              </a:schemeClr>
+            </a:gs>
+          </a:gsLst>
+          <a:lin ang="16200000" scaled="1"/>
+        </a:gradFill>
+        <a:gradFill rotWithShape="1">
+          <a:gsLst>
+            <a:gs pos="0">
+              <a:schemeClr val="phClr">
+                <a:shade val="51000"/>
+                <a:satMod val="130000"/>
+              </a:schemeClr>
+            </a:gs>
+            <a:gs pos="80000">
+              <a:schemeClr val="phClr">
+                <a:shade val="93000"/>
+                <a:satMod val="130000"/>
+              </a:schemeClr>
+            </a:gs>
+            <a:gs pos="100000">
+              <a:schemeClr val="phClr">
+                <a:shade val="94000"/>
+                <a:satMod val="135000"/>
+              </a:schemeClr>
+            </a:gs>
+          </a:gsLst>
+          <a:lin ang="16200000" scaled="0"/>
+        </a:gradFill>
+      </a:fillStyleLst>
+      <a:lnStyleLst>
+        <a:ln w="9525" cap="flat" cmpd="sng" algn="ctr">
+          <a:solidFill>
+            <a:schemeClr val="phClr">
+              <a:shade val="95000"/>
+              <a:satMod val="105000"/>
+            </a:schemeClr>
+          </a:solidFill>
+          <a:prstDash val="solid"/>
+        </a:ln>
+        <a:ln w="25400" cap="flat" cmpd="sng" algn="ctr">
+          <a:solidFill>
+            <a:schemeClr val="phClr"/>
+          </a:solidFill>
+          <a:prstDash val="solid"/>
+        </a:ln>
+        <a:ln w="38100" cap="flat" cmpd="sng" algn="ctr">
+          <a:solidFill>
+            <a:schemeClr val="phClr"/>
+          </a:solidFill>
+          <a:prstDash val="solid"/>
+        </a:ln>
+      </a:lnStyleLst>
+      <a:effectStyleLst>
+        <a:effectStyle>
+          <a:effectLst>
+            <a:outerShdw blurRad="40000" dist="20000" dir="5400000" rotWithShape="0">
+              <a:srgbClr val="000000">
+                <a:alpha val="38000"/>
+              </a:srgbClr>
+            </a:outerShdw>
+          </a:effectLst>
+        </a:effectStyle>
+        <a:effectStyle>
+          <a:effectLst>
+            <a:outerShdw blurRad="40000" dist="23000" dir="5400000" rotWithShape="0">
+              <a:srgbClr val="000000">
+                <a:alpha val="35000"/>
+              </a:srgbClr>
+            </a:outerShdw>
+          </a:effectLst>
+        </a:effectStyle>
+        <a:effectStyle>
+          <a:effectLst>
+            <a:outerShdw blurRad="40000" dist="23000" dir="5400000" rotWithShape="0">
+              <a:srgbClr val="000000">
+                <a:alpha val="35000"/>
+              </a:srgbClr>
+            </a:outerShdw>
+          </a:effectLst>
+          <a:scene3d>
+            <a:camera prst="orthographicFront">
+              <a:rot lat="0" lon="0" rev="0"/>
+            </a:camera>
+            <a:lightRig rig="threePt" dir="t">
+              <a:rot lat="0" lon="0" rev="1200000"/>
+            </a:lightRig>
+          </a:scene3d>
+          <a:sp3d>
+            <a:bevelT w="63500" h="25400"/>
+          </a:sp3d>
+        </a:effectStyle>
+      </a:effectStyleLst>
+      <a:bgFillStyleLst>
+        <a:solidFill>
+          <a:schemeClr val="phClr"/>
+        </a:solidFill>
+        <a:gradFill rotWithShape="1">
+          <a:gsLst>
+            <a:gs pos="0">
+              <a:schemeClr val="phClr">
+                <a:tint val="40000"/>
+                <a:satMod val="350000"/>
+              </a:schemeClr>
+            </a:gs>
+            <a:gs pos="40000">
+              <a:schemeClr val="phClr">
+                <a:tint val="45000"/>
+                <a:shade val="99000"/>
+                <a:satMod val="350000"/>
+              </a:schemeClr>
+            </a:gs>
+            <a:gs pos="100000">
+              <a:schemeClr val="phClr">
+                <a:shade val="20000"/>
+                <a:satMod val="255000"/>
+              </a:schemeClr>
+            </a:gs>
+          </a:gsLst>
+          <a:path path="circle">
+            <a:fillToRect l="50000" t="-80000" r="50000" b="180000"/>
+          </a:path>
+        </a:gradFill>
+        <a:gradFill rotWithShape="1">
+          <a:gsLst>
+            <a:gs pos="0">
+              <a:schemeClr val="phClr">
+                <a:tint val="80000"/>
+                <a:satMod val="300000"/>
+              </a:schemeClr>
+            </a:gs>
+            <a:gs pos="100000">
+              <a:schemeClr val="phClr">
+                <a:shade val="30000"/>
+                <a:satMod val="200000"/>
+              </a:schemeClr>
+            </a:gs>
+          </a:gsLst>
+          <a:path path="circle">
+            <a:fillToRect l="50000" t="50000" r="50000" b="50000"/>
+          </a:path>
+        </a:gradFill>
+      </a:bgFillStyleLst>
+    </a:fmtScheme>
+  </a:themeElements>
+  <a:objectDefaults/>
+  <a:extraClrSchemeLst/>
 </a:theme>';
   add1xml (excel_, 'xl/theme/theme1.xml', xxx_);
-  s := workbook.sheets.first;
-  WHILE s IS not null LOOP
+  s_ := workbook.sheets.first;
+  WHILE s_ IS not null LOOP
     col_min_ := 16384;
     col_max_ := 1;
-    row_ix_ := workbook.sheets(s).rows.first();
+    row_ix_ := workbook.sheets(s_).rows.first();
     WHILE row_ix_ IS not null LOOP
-      col_min_ := least(col_min_, workbook.sheets(s).rows(row_ix_).first());
-      col_max_ := greatest(col_max_, workbook.sheets(s).rows(row_ix_).last());
-      row_ix_ := workbook.sheets(s).rows.next(row_ix_);
+      col_min_ := least(col_min_, workbook.sheets(s_).rows(row_ix_).first());
+      col_max_ := greatest(col_max_, workbook.sheets(s_).rows(row_ix_).last());
+      row_ix_ := workbook.sheets(s_).rows.next(row_ix_);
     END LOOP;
     addtxt2utf8blob_init(yyy_);
     addtxt2utf8blob ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" xmlns:x14="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" mc:Ignorable="x14ac" xmlns:x14ac="http://schemas.microsoft.com/office/spreadsheetml/2009/9/ac">' ||
-CASE WHEN workbook.sheets(s).tabcolor IS not null THEN '<sheetPr><tabColor rgb="' || workbook.sheets(s).tabcolor || '"/></sheetPr>' end ||
-'<dimension ref="' || alfan_col(col_min_) || workbook.sheets(s).rows.first() || ':' || alfan_col(col_max_) || workbook.sheets(s).rows.last() || '"/>
+CASE WHEN workbook.sheets(s_).tabcolor IS not null THEN '<sheetPr><tabColor rgb="' || workbook.sheets(s_).tabcolor || '"/></sheetPr>' end ||
+'<dimension ref="' || alfan_col(col_min_) || workbook.sheets(s_).rows.first() || ':' || alfan_col(col_max_) || workbook.sheets(s_).rows.last() || '"/>
 <sheetViews>
-<sheetView' || CASE WHEN s = 1 THEN ' tabSelected="1"' END || ' workbookViewId="0">', yyy_);
-    IF workbook.sheets(s).freeze_rows > 0 AND workbook.sheets(s).freeze_cols > 0 THEN
+<sheetView' || CASE WHEN s_ = 1 THEN ' tabSelected="1"' END || ' workbookViewId="0">', yyy_);
+    IF workbook.sheets(s_).freeze_rows > 0 AND workbook.sheets(s_).freeze_cols > 0 THEN
       addtxt2utf8blob (
-        '<pane xSplit="' || workbook.sheets(s).freeze_cols || '" '
-        || 'ySplit="' || workbook.sheets(s).freeze_rows || '" '
-        || 'topLeftCell="' || alfan_col(workbook.sheets(s).freeze_cols+1) || (workbook.sheets(s).freeze_rows+1) || '" '
+        '<pane xSplit="' || workbook.sheets(s_).freeze_cols || '" '
+        || 'ySplit="' || workbook.sheets(s_).freeze_rows || '" '
+        || 'topLeftCell="' || alfan_col(workbook.sheets(s_).freeze_cols+1) || (workbook.sheets(s_).freeze_rows+1) || '" '
         || 'activePane="bottomLeft" state="frozen"/>',
         yyy_
       );
     ELSE
-      IF workbook.sheets(s).freeze_rows > 0 THEN
+      IF workbook.sheets(s_).freeze_rows > 0 THEN
         addtxt2utf8blob (
-          '<pane ySplit="' || workbook.sheets(s).freeze_rows || '" topLeftCell="A' ||
-            (workbook.sheets(s).freeze_rows+1) || '" activePane="bottomLeft" state="frozen"/>',
+          '<pane ySplit="' || workbook.sheets(s_).freeze_rows || '" topLeftCell="A' ||
+            (workbook.sheets(s_).freeze_rows+1) || '" activePane="bottomLeft" state="frozen"/>',
           yyy_
         );
       END IF;
-      IF workbook.sheets(s).freeze_cols > 0 THEN
+      IF workbook.sheets(s_).freeze_cols > 0 THEN
         addtxt2utf8blob (
-          '<pane xSplit="' || workbook.sheets(s).freeze_cols || '" topLeftCell="' ||
-          alfan_col( workbook.sheets( s ).freeze_cols + 1 ) ||
+          '<pane xSplit="' || workbook.sheets(s_).freeze_cols || '" topLeftCell="' ||
+          alfan_col(workbook.sheets(s_).freeze_cols+1) ||
           '1" activePane="bottomLeft" state="frozen"/>',
           yyy_
         );
@@ -3225,148 +3178,148 @@ CASE WHEN workbook.sheets(s).tabcolor IS not null THEN '<sheetPr><tabColor rgb="
     addtxt2utf8blob ('</sheetView>
 </sheetViews>
 <sheetFormatPr defaultRowHeight="15" x14ac:dyDescent="0.25"/>', yyy_);
-    IF workbook.sheets(s).widths.count() > 0 THEN
+    IF workbook.sheets(s_).widths.count() > 0 THEN
       addtxt2utf8blob ('<cols>', yyy_);
-      col_ix_ := workbook.sheets(s).widths.first();
+      col_ix_ := workbook.sheets(s_).widths.first();
       WHILE col_ix_ IS not null LOOP
-        addtxt2utf8blob ('<col min="' || col_ix_ || '" max="' || col_ix_ || '" width="' || to_char(workbook.sheets(s).widths(col_ix_), 'TM9', 'NLS_NUMERIC_CHARACTERS=.,' ) || '" customWidth="1"/>', yyy_);
-        col_ix_ := workbook.sheets(s).widths.next(col_ix_);
+        addtxt2utf8blob ('<col min="' || col_ix_ || '" max="' || col_ix_ || '" width="' || to_char(workbook.sheets(s_).widths(col_ix_), 'TM9', 'NLS_NUMERIC_CHARACTERS=.,' ) || '" customWidth="1"/>', yyy_);
+        col_ix_ := workbook.sheets(s_).widths.next(col_ix_);
       END LOOP;
       addtxt2utf8blob('</cols>', yyy_);
     END IF;
     addtxt2utf8blob('<sheetData>', yyy_);
-    row_ix_ := workbook.sheets(s).rows.first();
+    row_ix_ := workbook.sheets(s_).rows.first();
     WHILE row_ix_ IS not null LOOP
-      IF workbook.sheets(s).row_fmts.exists(row_ix_) AND workbook.sheets(s).row_fmts(row_ix_).height IS not null THEN
+      IF workbook.sheets(s_).row_fmts.exists(row_ix_) AND workbook.sheets(s_).row_fmts(row_ix_).height IS not null THEN
           addtxt2utf8blob( '<row r="' || row_ix_ || '" spans="' || col_min_ || ':' || col_max_ || '" customHeight="1" ht="'
-                         || to_char( workbook.sheets(s).row_fmts(row_ix_).height, 'TM9', 'NLS_NUMERIC_CHARACTERS=.,' ) || '" >', yyy_ );
+                         || to_char( workbook.sheets(s_).row_fmts(row_ix_).height, 'TM9', 'NLS_NUMERIC_CHARACTERS=.,' ) || '" >', yyy_ );
       ELSE
         addtxt2utf8blob( '<row r="' || row_ix_ || '" spans="' || col_min_ || ':' || col_max_ || '">', yyy_ );
       END IF;
-      col_ix_ := workbook.sheets(s).rows(row_ix_).first();
+      col_ix_ := workbook.sheets(s_).rows(row_ix_).first();
       WHILE col_ix_ IS not null LOOP
-        IF workbook.sheets(s).rows(row_ix_)(col_ix_).formula_idx IS null THEN
+        IF workbook.sheets(s_).rows(row_ix_)(col_ix_).formula_idx IS null THEN
           formula_expr_ := null;
         ELSE
-          formula_expr_ := '<f>' || workbook.formulas(workbook.sheets(s).rows(row_ix_)(col_ix_).formula_idx) || '</f>';
+          formula_expr_ := '<f>' || workbook.formulas(workbook.sheets(s_).rows(row_ix_)(col_ix_).formula_idx) || '</f>';
         END IF;
         addtxt2utf8blob ('<c r="' || alfan_col(col_ix_) || row_ix_ || '"'
-          || ' ' || workbook.sheets(s).rows(row_ix_)(col_ix_).style
+          || ' ' || workbook.sheets(s_).rows(row_ix_)(col_ix_).style
           || '>' || formula_expr_ || '<v>'
-          || to_char(workbook.sheets(s).rows(row_ix_)(col_ix_).value, 'TM9', 'NLS_NUMERIC_CHARACTERS=.,' )
+          || to_char(workbook.sheets(s_).rows(row_ix_)(col_ix_).value, 'TM9', 'NLS_NUMERIC_CHARACTERS=.,' )
           || '</v></c>', yyy_
         );
-        col_ix_ := workbook.sheets(s).rows(row_ix_).next(col_ix_);
+        col_ix_ := workbook.sheets(s_).rows(row_ix_).next(col_ix_);
       END LOOP;
       addtxt2utf8blob( '</row>', yyy_ );
-      row_ix_ := workbook.sheets( s ).rows.next(row_ix_);
+      row_ix_ := workbook.sheets(s_).rows.next(row_ix_);
     END LOOP;
     addtxt2utf8blob( '</sheetData>', yyy_ );
-    FOR a IN 1 ..  workbook.sheets(s).autofilters.count() LOOP
+    FOR a IN 1 ..  workbook.sheets(s_).autofilters.count() LOOP
       addtxt2utf8blob( '<autoFilter ref="' ||
-        alfan_col( nvl( workbook.sheets(s).autofilters(a).column_start, col_min_ ) ) ||
-        nvl( workbook.sheets(s).autofilters(a).row_start, workbook.sheets(s).rows.first() ) || ':' ||
-        alfan_col(coalesce( workbook.sheets(s).autofilters(a).column_end, workbook.sheets( s ).autofilters(a).column_start, col_max_)) ||
-        nvl(workbook.sheets(s).autofilters(a).row_end, workbook.sheets(s).rows.last()) || '"/>', yyy_);
+        alfan_col( nvl( workbook.sheets(s_).autofilters(a).column_start, col_min_ ) ) ||
+        nvl( workbook.sheets(s_).autofilters(a).row_start, workbook.sheets(s_).rows.first() ) || ':' ||
+        alfan_col(coalesce( workbook.sheets(s_).autofilters(a).column_end, workbook.sheets(s_).autofilters(a).column_start, col_max_)) ||
+        nvl(workbook.sheets(s_).autofilters(a).row_end, workbook.sheets(s_).rows.last()) || '"/>', yyy_);
     END LOOP;
-    IF workbook.sheets(s).mergecells.count() > 0 THEN
-      addtxt2utf8blob( '<mergeCells count="' || to_char(workbook.sheets(s).mergecells.count()) || '">', yyy_);
-      FOR m IN 1 ..  workbook.sheets(s).mergecells.count() LOOP
-        addtxt2utf8blob( '<mergeCell ref="' || workbook.sheets( s ).mergecells( m ) || '"/>', yyy_);
+    IF workbook.sheets(s_).mergecells.count() > 0 THEN
+      addtxt2utf8blob( '<mergeCells count="' || to_char(workbook.sheets(s_).mergecells.count()) || '">', yyy_);
+      FOR m IN 1 ..  workbook.sheets(s_).mergecells.count() LOOP
+        addtxt2utf8blob( '<mergeCell ref="' || workbook.sheets(s_).mergecells( m ) || '"/>', yyy_);
       END LOOP;
       addtxt2utf8blob('</mergeCells>', yyy_);
     END IF;
 --
-    IF workbook.sheets(s).validations.count() > 0 THEN
-      addtxt2utf8blob( '<dataValidations count="' || to_char( workbook.sheets( s ).validations.count() ) || '">', yyy_ );
-      FOR m IN 1 ..  workbook.sheets( s ).validations.count() LOOP
+    IF workbook.sheets(s_).validations.count() > 0 THEN
+      addtxt2utf8blob( '<dataValidations count="' || to_char( workbook.sheets(s_).validations.count() ) || '">', yyy_ );
+      FOR m IN 1 ..  workbook.sheets(s_).validations.count() LOOP
         addtxt2utf8blob ('<dataValidation' ||
-            ' type="' || workbook.sheets(s).validations(m).type || '"' ||
-            ' errorStyle="' || workbook.sheets(s).validations(m).errorstyle || '"' ||
-            ' allowBlank="' || CASE WHEN nvl(workbook.sheets(s).validations(m).allowBlank, true) THEN '1' ELSE '0' END || '"' ||
-            ' sqref="' || workbook.sheets(s).validations(m).sqref || '"', yyy_ );
-        IF workbook.sheets( s ).validations(m).prompt IS not null THEN
-          addtxt2utf8blob(' showInputMessage="1" prompt="' || workbook.sheets(s).validations(m).prompt || '"', yyy_);
-          IF workbook.sheets(s).validations(m).title IS not null THEN
-            addtxt2utf8blob( ' promptTitle="' || workbook.sheets(s).validations(m).title || '"', yyy_);
+            ' type="' || workbook.sheets(s_).validations(m).type || '"' ||
+            ' errorStyle="' || workbook.sheets(s_).validations(m).errorstyle || '"' ||
+            ' allowBlank="' || CASE WHEN nvl(workbook.sheets(s_).validations(m).allowBlank, true) THEN '1' ELSE '0' END || '"' ||
+            ' sqref="' || workbook.sheets(s_).validations(m).sqref || '"', yyy_ );
+        IF workbook.sheets(s_).validations(m).prompt IS not null THEN
+          addtxt2utf8blob(' showInputMessage="1" prompt="' || workbook.sheets(s_).validations(m).prompt || '"', yyy_);
+          IF workbook.sheets(s_).validations(m).title IS not null THEN
+            addtxt2utf8blob( ' promptTitle="' || workbook.sheets(s_).validations(m).title || '"', yyy_);
           END IF;
         END IF;
-        IF workbook.sheets(s).validations(m).showerrormessage THEN
+        IF workbook.sheets(s_).validations(m).showerrormessage THEN
           addtxt2utf8blob( ' showErrorMessage="1"', yyy_);
-          IF workbook.sheets(s).validations(m).error_title IS not null THEN
-            addtxt2utf8blob( ' errorTitle="' || workbook.sheets(s).validations(m).error_title || '"', yyy_);
+          IF workbook.sheets(s_).validations(m).error_title IS not null THEN
+            addtxt2utf8blob( ' errorTitle="' || workbook.sheets(s_).validations(m).error_title || '"', yyy_);
           END IF;
-          IF workbook.sheets(s).validations(m).error_txt IS not null THEN
-            addtxt2utf8blob(' error="' || workbook.sheets(s).validations(m).error_txt || '"', yyy_);
+          IF workbook.sheets(s_).validations(m).error_txt IS not null THEN
+            addtxt2utf8blob(' error="' || workbook.sheets(s_).validations(m).error_txt || '"', yyy_);
           END IF;
         END IF;
         addtxt2utf8blob( '>', yyy_ );
-        IF workbook.sheets(s).validations(m).formula1 IS not null THEN
-          addtxt2utf8blob ('<formula1>' || workbook.sheets(s).validations(m).formula1 || '</formula1>', yyy_);
+        IF workbook.sheets(s_).validations(m).formula1 IS not null THEN
+          addtxt2utf8blob ('<formula1>' || workbook.sheets(s_).validations(m).formula1 || '</formula1>', yyy_);
         END IF;
-        IF workbook.sheets(s).validations(m).formula2 IS not null THEN
-          addtxt2utf8blob ('<formula2>' || workbook.sheets(s).validations(m).formula2 || '</formula2>', yyy_);
+        IF workbook.sheets(s_).validations(m).formula2 IS not null THEN
+          addtxt2utf8blob ('<formula2>' || workbook.sheets(s_).validations(m).formula2 || '</formula2>', yyy_);
         END IF;
         addtxt2utf8blob ('</dataValidation>', yyy_);
       END LOOP;
       addtxt2utf8blob ('</dataValidations>', yyy_);
     END IF;
 
-    IF workbook.sheets(s).hyperlinks.count() > 0 THEN
+    IF workbook.sheets(s_).hyperlinks.count() > 0 THEN
       addtxt2utf8blob ('<hyperlinks>', yyy_);
-      FOR h IN 1 ..  workbook.sheets( s ).hyperlinks.count() LOOP
-        addtxt2utf8blob ('<hyperlink ref="' || workbook.sheets(s).hyperlinks(h).cell || '" r:id="rId' || h || '"/>', yyy_);
+      FOR h IN 1 ..  workbook.sheets(s_).hyperlinks.count() LOOP
+        addtxt2utf8blob ('<hyperlink ref="' || workbook.sheets(s_).hyperlinks(h).cell || '" r:id="rId' || h || '"/>', yyy_);
       END LOOP;
       addtxt2utf8blob ('</hyperlinks>', yyy_);
     END IF;
-    addtxt2utf8blob( '<pageMargins left="0.7" right="0.7" top="0.75" bottom="0.75" header="0.3" footer="0.3"/>', yyy_ );
-    IF workbook.sheets(s).comments.count() > 0 THEN
-      addtxt2utf8blob( '<legacyDrawing r:id="rId' || ( workbook.sheets(s).hyperlinks.count() + 1 ) || '"/>', yyy_ );
+    addtxt2utf8blob( '<pageMargins left="0.7" right="0.7" top="0.75" bottom="0.75" header="0.3" footer="0.3"/>', yyy_);
+    IF workbook.sheets(s_).comments.count() > 0 THEN
+      addtxt2utf8blob( '<legacyDrawing r:id="rId' || ( workbook.sheets(s_).hyperlinks.count() + 1 ) || '"/>', yyy_);
     END IF;
-    IF workbook.sheets(s).drawings.count > 0 THEN
-      addtxt2utf8blob( '<drawing r:id="rId' || (workbook.sheets(s).hyperlinks.count + sign(workbook.sheets(s).comments.count)+1) || '"/>', yyy_);
+    IF workbook.sheets(s_).drawings.count > 0 THEN
+      addtxt2utf8blob( '<drawing r:id="rId' || (workbook.sheets(s_).hyperlinks.count + sign(workbook.sheets(s_).comments.count)+1) || '"/>', yyy_);
     END IF;
 
-    addtxt2utf8blob( '</worksheet>', yyy_ );
+    addtxt2utf8blob( '</worksheet>', yyy_);
     addtxt2utf8blob_finish( yyy_ );
-    add1file( excel_, 'xl/worksheets/sheet' || s || '.xml', yyy_ );
-    IF workbook.sheets(s).hyperlinks.count > 0 OR workbook.sheets(s).comments.count > 0 OR workbook.sheets(s).drawings.count > 0 THEN
+    add1file (excel_, 'xl/worksheets/sheet' || s_ || '.xml', yyy_);
+    IF workbook.sheets(s_).hyperlinks.count > 0 OR workbook.sheets(s_).comments.count > 0 OR workbook.sheets(s_).drawings.count > 0 THEN
       xxx_ := '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">';
-      IF workbook.sheets(s).comments.count() > 0 THEN
-        xxx_ := xxx_ || ( '<Relationship Id="rId' || ( workbook.sheets(s).hyperlinks.count() + 2 ) || '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments" Target="../comments' || s || '.xml"/>' );
-        xxx_ := xxx_ || ( '<Relationship Id="rId' || ( workbook.sheets(s).hyperlinks.count() + 1 ) || '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/vmlDrawing" Target="../drawings/vmlDrawing' || s || '.vml"/>' );
+      IF workbook.sheets(s_).comments.count() > 0 THEN
+        xxx_ := xxx_ || ('<Relationship Id="rId' || ( workbook.sheets(s_).hyperlinks.count() + 2 ) || '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments" Target="../comments' || s_ || '.xml"/>' );
+        xxx_ := xxx_ || ('<Relationship Id="rId' || ( workbook.sheets(s_).hyperlinks.count() + 1 ) || '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/vmlDrawing" Target="../drawings/vmlDrawing' || s_ || '.vml"/>' );
       END IF;
-      FOR h IN 1 ..  workbook.sheets(s).hyperlinks.count() LOOP
-        IF workbook.sheets(s).hyperlinks(h).url IS NOT null THEN
-          xxx_ := xxx_ || ( '<Relationship Id="rId' || h || '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="' || workbook.sheets( s ).hyperlinks( h ).url || '" TargetMode="External"/>' );
+      FOR h IN 1 ..  workbook.sheets(s_).hyperlinks.count() LOOP
+        IF workbook.sheets(s_).hyperlinks(h).url IS NOT null THEN
+          xxx_ := xxx_ || ( '<Relationship Id="rId' || h || '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="' || workbook.sheets(s_).hyperlinks( h ).url || '" TargetMode="External"/>' );
         END IF;
       END LOOP;
-      IF workbook.sheets(s).drawings.count > 0 THEN
-        xxx_ := xxx_ || ( '<Relationship Id="rId' || ( workbook.sheets(s).hyperlinks.count + sign(workbook.sheets(s).comments.count)*2+1)|| '" Target="../drawings/drawing' || s || '.xml" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing"/>' );
+      IF workbook.sheets(s_).drawings.count > 0 THEN
+        xxx_ := xxx_ || ( '<Relationship Id="rId' || ( workbook.sheets(s_).hyperlinks.count + sign(workbook.sheets(s_).comments.count)*2+1)|| '" Target="../drawings/drawing' || s_ || '.xml" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing"/>' );
       END IF;
       xxx_ := xxx_ || '</Relationships>';
-      add1xml (excel_, 'xl/worksheets/_rels/sheet' || s || '.xml.rels', xxx_);
+      add1xml (excel_, 'xl/worksheets/_rels/sheet' || s_ || '.xml.rels', xxx_);
     END IF;
 
-    IF workbook.sheets(s).drawings.count > 0 THEN
+    IF workbook.sheets(s_).drawings.count > 0 THEN
       xxx_ := '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">';
-      FOR i_ IN 1 .. workbook.sheets(s).drawings.count LOOP
-        xxx_ := xxx_ || Finish_Drawing (workbook.sheets(s).drawings(i_), i_, s);
+      FOR i_ IN 1 .. workbook.sheets(s_).drawings.count LOOP
+        xxx_ := xxx_ || Finish_Drawing (workbook.sheets(s_).drawings(i_), i_, s_);
       END LOOP;
       xxx_ := xxx_ || '</xdr:wsDr>';
-      add1xml (excel_, 'xl/drawings/drawing' || s || '.xml', xxx_);
+      add1xml (excel_, 'xl/drawings/drawing' || s_ || '.xml', xxx_);
     END IF;
 
-    IF workbook.sheets(s).comments.count() > 0 THEN
+    IF workbook.sheets(s_).comments.count() > 0 THEN
       DECLARE
         cnt PLS_INTEGER;
         author_ind tp_author;
       BEGIN
         authors.delete();
-        FOR c IN 1 .. workbook.sheets(s).comments.count() LOOP
-          authors(workbook.sheets(s).comments(c).author) := 0;
+        FOR c IN 1 .. workbook.sheets(s_).comments.count() LOOP
+          authors(workbook.sheets(s_).comments(c).author) := 0;
         END LOOP;
         xxx_ := '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <comments xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
@@ -3381,34 +3334,34 @@ CASE WHEN workbook.sheets(s).tabcolor IS not null THEN '<sheetPr><tabColor rgb="
         END LOOP;
       END;
       xxx_ := xxx_ || '</authors><commentList>';
-      FOR c IN 1 .. workbook.sheets( s ).comments.count() LOOP
-        xxx_ := xxx_ || ( '<comment ref="' || alfan_col( workbook.sheets(s).comments(c).column ) ||
-           to_char (workbook.sheets(s).comments(c).row || '" authorId="' || authors(workbook.sheets(s).comments(c).author ) ) || '">
+      FOR c IN 1 .. workbook.sheets(s_).comments.count() LOOP
+        xxx_ := xxx_ || ( '<comment ref="' || alfan_col( workbook.sheets(s_).comments(c).column ) ||
+           to_char (workbook.sheets(s_).comments(c).row || '" authorId="' || authors(workbook.sheets(s_).comments(c).author ) ) || '">
 <text>');
-        IF workbook.sheets(s).comments(c).author IS not null THEN
+        IF workbook.sheets(s_).comments(c).author IS not null THEN
           xxx_ := xxx_ || ( '<r><rPr><b/><sz val="9"/><color indexed="81"/><rFont val="Tahoma"/><charset val="1"/></rPr><t xml:space="preserve">' ||
-             workbook.sheets(s).comments(c).author || ':</t></r>' );
+             workbook.sheets(s_).comments(c).author || ':</t></r>' );
         END IF;
         xxx_ := xxx_ || ( '<r><rPr><sz val="9"/><color indexed="81"/><rFont val="Tahoma"/><charset val="1"/></rPr><t xml:space="preserve">' ||
-             CASE WHEN workbook.sheets(s).comments(c).author IS not null THEN '
-' END || workbook.sheets(s).comments(c).text || '</t></r></text></comment>' );
+             CASE WHEN workbook.sheets(s_).comments(c).author IS not null THEN '
+' END || workbook.sheets(s_).comments(c).text || '</t></r></text></comment>' );
       END LOOP;
       xxx_ := xxx_ || '</commentList></comments>';
-      add1xml (excel_, 'xl/comments' || s || '.xml', xxx_);
+      add1xml (excel_, 'xl/comments' || s_ || '.xml', xxx_);
       xxx_ := '<xml xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel">
 <o:shapelayout v:ext="edit"><o:idmap v:ext="edit" data="2"/></o:shapelayout>
 <v:shapetype id="_x0000_t202" coordsize="21600,21600" o:spt="202" path="m,l,21600r21600,l21600,xe"><v:stroke joinstyle="miter"/><v:path gradientshapeok="t" o:connecttype="rect"/></v:shapetype>';
-      FOR c IN 1 .. workbook.sheets(s).comments.count() LOOP
+      FOR c IN 1 .. workbook.sheets(s_).comments.count() LOOP
         xxx_ := xxx_ || ( '<v:shape id="_x0000_s' || to_char(c) || '" type="#_x0000_t202"
 style="position:absolute;margin-left:35.25pt;margin-top:3pt;z-index:' || to_char( c ) || ';visibility:hidden;" fillcolor="#ffffe1" o:insetmode="auto">
 <v:fill color2="#ffffe1"/><v:shadow on="t" color="black" obscured="t"/><v:path o:connecttype="none"/>
 <v:textbox style="mso-direction-alt:auto"><div style="text-align:left"></div></v:textbox>
 <x:ClientData ObjectType="Note"><x:MoveWithCells/><x:SizeWithCells/>' );
-        w_ := workbook.sheets(s).comments(c).width;
+        w_ := workbook.sheets(s_).comments(c).width;
         c_ := 1;
         LOOP
-          IF workbook.sheets(s).widths.exists(workbook.sheets(s).comments(c).column+c_) THEN
-            cw_ := 256 * workbook.sheets(s).widths(workbook.sheets(s).comments(c).column+c_);
+          IF workbook.sheets(s_).widths.exists(workbook.sheets(s_).comments(c).column+c_) THEN
+            cw_ := 256 * workbook.sheets(s_).widths(workbook.sheets(s_).comments(c).column+c_);
             cw_ := trunc((cw_+18)/256*7); -- assume default 11 point Calibri
           ELSE
             cw_ := 64;
@@ -3417,31 +3370,31 @@ style="position:absolute;margin-left:35.25pt;margin-top:3pt;z-index:' || to_char
           c_ := c_ + 1;
           w_ := w_ - cw_;
         END LOOP;
-        h_ := workbook.sheets(s).comments(c).height;
-        xxx_ := xxx_ || ( '<x:Anchor>' || workbook.sheets(s).comments(c).column || ',15,' ||
-            workbook.sheets(s).comments(c).row || ',30,' ||
-            (workbook.sheets(s).comments(c).column+c_-1) || ',' || round(w_) || ',' ||
-            (workbook.sheets(s).comments(c).row + 1 + trunc(h_/20)) || ',' || mod(h_, 20) || '</x:Anchor>' );
+        h_ := workbook.sheets(s_).comments(c).height;
+        xxx_ := xxx_ || ( '<x:Anchor>' || workbook.sheets(s_).comments(c).column || ',15,' ||
+            workbook.sheets(s_).comments(c).row || ',30,' ||
+            (workbook.sheets(s_).comments(c).column+c_-1) || ',' || round(w_) || ',' ||
+            (workbook.sheets(s_).comments(c).row + 1 + trunc(h_/20)) || ',' || mod(h_, 20) || '</x:Anchor>' );
         xxx_ := xxx_ || ( '<x:AutoFill>False</x:AutoFill><x:Row>' ||
-            (workbook.sheets(s).comments(c).row-1) || '</x:Row><x:Column>' ||
-            (workbook.sheets(s).comments(c).column-1) || '</x:Column></x:ClientData></v:shape>' );
+            (workbook.sheets(s_).comments(c).row-1) || '</x:Row><x:Column>' ||
+            (workbook.sheets(s_).comments(c).column-1) || '</x:Column></x:ClientData></v:shape>' );
       END LOOP;
       xxx_ := xxx_ || '</xml>';
-      add1xml( excel_, 'xl/drawings/vmlDrawing' || s || '.vml', xxx_ );
+      add1xml( excel_, 'xl/drawings/vmlDrawing' || s_ || '.vml', xxx_ );
     END IF;
 --
-    s := workbook.sheets.next(s);
+    s_ := workbook.sheets.next(s_);
   END LOOP;
   xxx_ := '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
 <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/>
 <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
 <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme" Target="theme/theme1.xml"/>';
-  s := workbook.sheets.first;
-  WHILE s IS not null LOOP
+  s_ := workbook.sheets.first;
+  WHILE s_ IS not null LOOP
     xxx_ := xxx_ || ( '
-<Relationship Id="rId' || (9+s) || '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet' || s || '.xml"/>' );
-    s := workbook.sheets.next(s);
+<Relationship Id="rId' || (9+s_) || '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet' || s_ || '.xml"/>' );
+    s_ := workbook.sheets.next(s_);
   END LOOP;
   xxx_ := xxx_ || '</Relationships>';
   add1xml (excel_, 'xl/_rels/workbook.xml.rels', xxx_);
@@ -3662,12 +3615,12 @@ PROCEDURE Query2Sheet (
    hdr_fill_    IN PLS_INTEGER := null,
    col_fmts_    IN numFmt_cols := numFmt_cols() )
 IS
-   cur_ INTEGER := Dbms_Sql.Open_Cursor;
-   res_ INTEGER;
+   cur_   INTEGER := Dbms_Sql.Open_Cursor;
+   throw_ INTEGER;
 BEGIN
    Dbms_Sql.Parse (cur_, sql_, dbms_sql.native);
    Do_Binding (cur_, binds_);
-   res_ := Dbms_Sql.Execute(cur_); -- ignore
+   throw_ := Dbms_Sql.Execute(cur_); -- ignore
    Query2Sheet (
       col_count_, row_count_, cur_, col_headers_,
       sheet_, UseXf_, hdr_font_, hdr_fill_, col_fmts_
@@ -3961,7 +3914,7 @@ BEGIN
    row_ := row_ + 1;
    IF show_user_ THEN
       Cell (2, row_, 'Executed by', fontId_ => fonts_('bold'), sheet_ => sh_);
-      Cell (3, row_, value_str_ => Fnd_User_API.Get_Description(Fnd_Session_API.Get_Fnd_User), sheet_ => sh_);
+      Cell (3, row_, value_str_ => user, sheet_ => sh_);
       row_ := row_ + 1;
    END IF;
 
@@ -3984,5 +3937,5 @@ BEGIN
 
 END Create_Params_Sheet;
 
-END AS_XLSX;
+END as_xlsx;
 /
