@@ -57,7 +57,7 @@ CREATE OR REPLACE PACKAGE CBH_UTILS_API IS
       trunc_str_   IN VARCHAR2,
       trunc_len_   IN NUMBER  := 4000 ) RETURN VARCHAR2;
 
-   FUNCTION Text_Replace (
+   FUNCTION Rep (
       msg_text_ IN CLOB,
       p1_       IN VARCHAR2 := null,
       p2_       IN VARCHAR2 := null,
@@ -70,7 +70,7 @@ CREATE OR REPLACE PACKAGE CBH_UTILS_API IS
       p9_       IN VARCHAR2 := null,
       p0_       IN VARCHAR2 := null,
       repl_nl_  IN BOOLEAN  := true ) RETURN CLOB;
-   FUNCTION Rep (
+   FUNCTION Reps (
       msg_     IN CLOB,
       p1_      IN VARCHAR2 := null,
       p2_      IN VARCHAR2 := null,
@@ -286,7 +286,7 @@ IS BEGIN
 END Trunc_Ellipsis;
 
 
-FUNCTION Text_Replace (
+FUNCTION Rep (
    msg_text_ IN CLOB,
    p1_       IN VARCHAR2 := null,
    p2_       IN VARCHAR2 := null,
@@ -318,9 +318,9 @@ BEGIN
       rtn_text_ := replace (rtn_text_, '<dnl/>', utl_tcp.crlf||utl_tcp.crlf);
    END IF;
    RETURN rtn_text_;
-END Text_Replace;
+END Rep;
 
-FUNCTION Rep (
+FUNCTION Reps (
    msg_     IN CLOB,
    p1_      IN VARCHAR2 := null,
    p2_      IN VARCHAR2 := null,
@@ -335,10 +335,10 @@ FUNCTION Rep (
    repl_nl_ IN BOOLEAN  := true ) RETURN VARCHAR2
 IS BEGIN
    RETURN  Dbms_Lob.Substr (
-      Text_Replace (msg_, p1_, p2_, p3_, p4_, p5_, p6_, p7_, p8_, p9_, p0_, repl_nl_),
+      Rep (msg_, p1_, p2_, p3_, p4_, p5_, p6_, p7_, p8_, p9_, p0_, repl_nl_),
       32000, 1
    );
-END Rep;
+END Reps;
 
 -- Only useful for debugging
 PROCEDURE Trace (
@@ -356,7 +356,7 @@ PROCEDURE Trace (
    repl_nl_ IN BOOLEAN  := true,
    quiet_   IN BOOLEAN  := false )
 IS
-   logmsg_ VARCHAR2(32000) := strlim(Text_Replace(msg_, p1_, p2_, p3_, p4_, p5_, p6_, p7_, p8_, p9_, p0_, repl_nl_));
+   logmsg_ VARCHAR2(32000) := strlim(Rep(msg_, p1_, p2_, p3_, p4_, p5_, p6_, p7_, p8_, p9_, p0_, repl_nl_));
 BEGIN
    Dbms_Output.Put_Line (CASE WHEN not quiet_ THEN 'Trace: ' END || logmsg_);
 END Trace;
@@ -394,7 +394,7 @@ PROCEDURE Log_Progress (
    repl_nl_ IN BOOLEAN  := true )
 IS
    PRAGMA AUTONOMOUS_TRANSACTION;
-   logmsg_ VARCHAR2(32000) := strlim(Text_Replace(msg_, p1_, p2_, p3_, p4_, p5_, p6_, p7_, p8_, p9_, p0_, repl_nl_));
+   logmsg_ VARCHAR2(32000) := strlim(Rep(msg_, p1_, p2_, p3_, p4_, p5_, p6_, p7_, p8_, p9_, p0_, repl_nl_));
 BEGIN
    Dbms_Output.Put_Line('Progress: ' || logmsg_);
    COMMIT;
@@ -422,7 +422,7 @@ PROCEDURE Log_Info (
    repl_nl_ IN BOOLEAN  := true )
 IS
    PRAGMA AUTONOMOUS_TRANSACTION;
-   logmsg_ VARCHAR2(32000) := strlim(Text_Replace(msg_, p1_, p2_, p3_, p4_, p5_, p6_, p7_, p8_, p9_, p0_, repl_nl_));
+   logmsg_ VARCHAR2(32000) := strlim(Rep(msg_, p1_, p2_, p3_, p4_, p5_, p6_, p7_, p8_, p9_, p0_, repl_nl_));
 BEGIN
    Dbms_Output.Put_Line ('Info: ' || logmsg_);
    COMMIT;
@@ -462,7 +462,7 @@ PROCEDURE Log_Error (
    repl_nl_ IN BOOLEAN  := true )
 IS
    PRAGMA AUTONOMOUS_TRANSACTION;
-   logmsg_ VARCHAR2(32000) := strlim(Text_Replace(msg_, p1_, p2_, p3_, p4_, p5_, p6_, p7_, p8_, p9_, p0_, repl_nl_));
+   logmsg_ VARCHAR2(32000) := strlim(Rep(msg_, p1_, p2_, p3_, p4_, p5_, p6_, p7_, p8_, p9_, p0_, repl_nl_));
 BEGIN
    --Transaction_SYS.Set_Status_Info (logmsg_, 'WARNING', write_key_value_ => true);
    Dbms_Output.Put_Line('Error: ' || logmsg_);

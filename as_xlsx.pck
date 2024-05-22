@@ -594,6 +594,13 @@ VERSION_ CONSTANT VARCHAR2(20) := 'as_xlsx20';
 LOCAL_FILE_HEADER_        CONSTANT RAW(4) := hextoraw('504B0304'); -- Local file header signature
 END_OF_CENTRAL_DIRECTORY_ CONSTANT RAW(4) := hextoraw('504B0506'); -- End of central directory signature
 
+
+---------------------------------------
+---------------------------------------
+--
+-- Type Definitions
+--
+--
 TYPE tp_XF_fmt IS RECORD (
    numFmtId  PLS_INTEGER,
    fontId    PLS_INTEGER,
@@ -762,9 +769,13 @@ workbook              tp_book;
 g_useXf_              BOOLEAN := true;
 g_addtxt2utf8blob_tmp VARCHAR2(32767);
 
+TYPE xml_attrs_arr IS TABLE OF VARCHAR2(2000) INDEX BY VARCHAR2(200);
 
------
--- Function Definitions
+---------------------------------------
+---------------------------------------
+-- 
+-- Function Definitions - value getters
+--
 --
 FUNCTION Get_Cell_Xf (
    sheet_ IN PLS_INTEGER,
@@ -775,26 +786,142 @@ FUNCTION Get_Cell_Xff (
    col_   IN PLS_INTEGER,
    row_   IN PLS_INTEGER ) RETURN tp_Xf_fmt;
 
-FUNCTION Get_Cell_Value_Num (
-   col_   IN PLS_INTEGER,
-   row_   IN PLS_INTEGER,
-   sheet_ IN PLS_INTEGER := null ) RETURN NUMBER;
-FUNCTION Get_Cell_Value_Str (
-   col_   IN PLS_INTEGER,
-   row_   IN PLS_INTEGER,
-   sheet_ IN PLS_INTEGER := null ) RETURN VARCHAR2;
-FUNCTION Get_Cell_Value_Date (
-   col_   IN PLS_INTEGER,
-   row_   IN PLS_INTEGER,
-   sheet_ IN PLS_INTEGER := null ) RETURN DATE;
-FUNCTION Get_Cell_Value (
-   col_   IN PLS_INTEGER,
-   row_   IN PLS_INTEGER,
-   sheet_ IN PLS_INTEGER := null ) RETURN VARCHAR2;
+
+---------------------------------------
+---------------------------------------
+-- 
+-- General Helper Functions
+--
+--
+FUNCTION Rep (
+   msg_     IN CLOB,
+   p1_      IN VARCHAR2 := null,
+   p2_      IN VARCHAR2 := null,
+   p3_      IN VARCHAR2 := null,
+   p4_      IN VARCHAR2 := null,
+   p5_      IN VARCHAR2 := null,
+   p6_      IN VARCHAR2 := null,
+   p7_      IN VARCHAR2 := null,
+   p8_      IN VARCHAR2 := null,
+   p9_      IN VARCHAR2 := null,
+   p0_      IN VARCHAR2 := null,
+   repl_nl_ IN BOOLEAN  := true ) RETURN VARCHAR2
+IS BEGIN
+   RETURN Cbh_Utils_API.Rep (msg_, p1_, p2_, p3_, p4_, p5_, p6_, p7_, p8_, p9_, p0_, repl_nl_);
+END Rep;
+
+---------------------------------------
+---------------------------------------
+--
+-- XML generators and helpers
+--
+--
+FUNCTION Xml_Date_Time (
+   dt_ IN DATE ) RETURN VARCHAR2
+IS BEGIN
+   RETURN replace (to_char(dt_, 'YYYY-MM-DD_HH24:MI:SS'),'_','T');
+END Xml_Date_Time;
+
+FUNCTION Xml_Number (
+   num_ IN NUMBER,
+   fm_  IN VARCHAR2 := null ) RETURN VARCHAR2
+IS
+   mask_ VARCHAR2(99) := nvl (fm_, 'fm99999999999999999999.99999');
+BEGIN
+   RETURN rtrim (to_char (num_, mask_), '.');
+END Xml_Number;
+
+FUNCTION Make_Tag (
+   doc_      IN OUT NOCOPY dbms_XmlDom.DomDocument,
+   tag_name_ IN VARCHAR2,
+   attrs_    IN xml_attrs_arr := xml_attrs_arr() ) RETURN dbms_XmlDom.DomElement
+IS
+   el_ dbms_XmlDom.DomElement := Dbms_XmlDom.createElement (doc_, tag_name_);
+   ix_ VARCHAR2(200)          := attrs_.FIRST;
+BEGIN
+   WHILE ix_ IS NOT null LOOP
+      Dbms_XmlDom.setAttribute (el_, ix_, attrs_(ix_));
+      ix_ := attrs_.NEXT(ix_);
+   END LOOP;
+   RETURN el_;
+END Make_Tag;
+
+FUNCTION Make_Node (
+   doc_      IN OUT NOCOPY dbms_XmlDom.DomDocument,
+   tag_name_ IN VARCHAR2,
+   attrs_    IN xml_attrs_arr := xml_attrs_arr() ) RETURN dbms_XmlDom.DomNode
+IS BEGIN
+   RETURN Dbms_XmlDom.makeNode (Make_Tag (doc_, tag_name_, attrs_));
+END Make_Node;
+
+PROCEDURE Make_Node (
+   doc_      IN OUT NOCOPY dbms_XmlDom.DomDocument,
+   tag_name_ IN VARCHAR2,
+   attrs_    IN xml_attrs_arr := xml_attrs_arr() )
+IS
+   throw_nd_ dbms_XmlDom.DomNode;
+BEGIN
+   throw_nd_ := Make_Node (doc_, tag_name_, attrs_);
+END Make_Node;
+
+FUNCTION Add_New_Node_To_Dom (
+   doc_          IN OUT NOCOPY dbms_XmlDom.DomDocument,
+   append_to_    IN dbms_XmlDom.DomNode,
+   tag_name_     IN VARCHAR2,
+   attrs_        IN xml_attrs_arr := xml_attrs_arr() ) RETURN dbms_XmlDom.DomNode
+IS BEGIN
+   RETURN Dbms_XmlDom.appendChild (append_to_, Make_Node(doc_,tag_name_,attrs_));
+END Add_New_Node_To_Dom;
+
+PROCEDURE Add_New_Node_To_Dom (
+   doc_          IN OUT NOCOPY dbms_XmlDom.DomDocument,
+   append_to_    IN dbms_XmlDom.DomNode,
+   tag_name_     IN VARCHAR2,
+   attrs_        IN xml_attrs_arr := xml_attrs_arr() )
+IS
+   throw_nd_ dbms_XmlDom.DomNode;
+BEGIN
+   throw_nd_ := Dbms_XmlDom.appendChild (append_to_, Make_Node(doc_,tag_name_,attrs_));
+END Add_New_Node_To_Dom;
+
+PROCEDURE Add_Text_Node_To_Dom (
+   doc_          IN OUT NOCOPY dbms_XmlDom.DomDocument,
+   append_to_    IN dbms_XmlDom.DomNode,
+   tag_name_     IN VARCHAR2,
+   text_content_ IN VARCHAR2,
+   attrs_        IN xml_attrs_arr := xml_attrs_arr() )
+IS
+   throw_nd_ dbms_XmlDom.DomNode;
+BEGIN
+   throw_nd_ := Dbms_XmlDom.appendChild (
+      Dbms_XmlDom.appendChild (append_to_, Make_Node(doc_,tag_name_,attrs_)),
+      Dbms_XmlDom.makeNode (Dbms_XmlDom.createTextNode (doc_, text_content_))
+   );
+END Add_Text_Node_To_Dom;
+
+PROCEDURE Add_Text_Node_To_Dom (
+   doc_         IN OUT NOCOPY dbms_XmlDom.DomDocument,
+   append_to_   IN dbms_XmlDom.DomNode,
+   tag_name_    IN VARCHAR2,
+   num_content_ IN NUMBER,
+   decimals_    IN NUMBER        := 0,
+   attrs_       IN xml_attrs_arr := xml_attrs_arr() )
+IS BEGIN
+   Add_Text_Node_To_Dom (
+      doc_          => doc_,
+      append_to_    => append_to_,
+      tag_name_     => tag_name_,
+      text_content_ => Xml_Number (num_content_, decimals_),
+      attrs_        => attrs_
+   );
+END Add_Text_Node_To_Dom;
 
 
------
--- Function Implementations
+---------------------------------------
+---------------------------------------
+--
+-- Finnishing functions
+--
 --
 PROCEDURE addtxt2utf8blob_init (
    blob_ IN OUT NOCOPY BLOB )
@@ -880,7 +1007,7 @@ IS
    blob_       BLOB;
    len_        INTEGER;
    clen_       INTEGER;
-   crc32_      RAW(4) := hextoraw( '00000000' );
+   crc32_      RAW(4) := hextoraw('00000000');
    compressed_ BOOLEAN := false;
    name_raw_   RAW(32767);
 BEGIN
@@ -911,12 +1038,14 @@ BEGIN
             THEN hextoraw('0800') -- deflate
             ELSE hextoraw('0000') -- stored
          END,
-         Little_Endian (to_number(to_char (now_, 'ss'))/2
-                        + to_number(to_char (now_, 'mi'))*32
-                        + to_number(to_char (now_, 'hh24'))*2048, 2), -- File last modification time
-         Little_Endian (to_number(to_char(now_,'dd'))
-                        + to_number(to_char(now_,'mm'))*32
-                        + (to_number(to_char(now_,'yyyy'))-1980)*512, 2), -- File last modification date
+         Little_Endian (
+            to_number(to_char (now_, 'ss'))/2 + to_number(to_char (now_, 'mi'))*32 +
+            to_number(to_char (now_, 'hh24'))*2048, 2
+         ), -- File last modification time
+         Little_Endian (
+            to_number(to_char(now_,'dd')) + to_number(to_char(now_,'mm'))*32 +
+            (to_number(to_char(now_,'yyyy'))-1980)*512, 2
+         ), -- File last modification date
          crc32_,               -- CRC-32
          Little_Endian(clen_), -- compressed size
          Little_Endian(len_),  -- uncompressed size
@@ -934,6 +1063,26 @@ BEGIN
       Dbms_Lob.FreeTemporary (blob_);
    END IF;
 END Add1File;
+
+PROCEDURE Add1Xml (
+   excel_    IN OUT NOCOPY BLOB,
+   filename_ VARCHAR2,
+   xml_      CLOB )
+IS
+   xml_blob_     BLOB;
+   dest_offset_  INTEGER := 1;
+   src_offset_   INTEGER := 1;
+   lang_context_ INTEGER := Dbms_Lob.DEFAULT_LANG_CTX;
+   warning_      INTEGER;
+BEGIN
+   Dbms_Lob.CreateTemporary (xml_blob_, true);
+   Dbms_Lob.ConvertToBlob (
+      xml_blob_, xml_, Dbms_Lob.LobMaxSize, dest_offset_, src_offset_,
+      nls_charset_id('AL32UTF8'), lang_context_, warning_
+   );
+   Add1File (excel_, filename_, xml_blob_);
+   Dbms_Lob.freetemporary(xml_blob_);
+END Add1Xml;
 
 PROCEDURE Finish_Zip (
    zipped_blob_ IN OUT BLOB )
@@ -994,6 +1143,14 @@ BEGIN
     );
 END Finish_Zip;
 
+
+---------------------------------------
+---------------------------------------
+--
+-- Cell reference converters
+-- > Alfanumeric to number reference.  Useful for generating formulas
+--
+--
 FUNCTION Alfan_Col (
    col_ IN PLS_INTEGER ) RETURN VARCHAR2
 IS BEGIN
@@ -1029,6 +1186,65 @@ IS BEGIN
       + nvl((ascii(substr(col_,-3,1))-64) * 676, 0);
 END Col_Alfan;
 
+
+---------------------------------------
+---------------------------------------
+-- 
+-- Cell value getters
+--
+--
+FUNCTION Get_Cell_Value_Num (
+   col_    IN PLS_INTEGER,
+   row_    IN PLS_INTEGER,
+   sheet_  IN PLS_INTEGER := null ) RETURN NUMBER
+IS
+   sh_ PLS_INTEGER  := nvl(sheet_, workbook.sheets.count());
+BEGIN
+   RETURN workbook.sheets(sh_).rows(row_)(col_).ora_value.num_val;
+END Get_Cell_Value_Num;
+
+FUNCTION Get_Cell_Value_Str (
+   col_    IN PLS_INTEGER,
+   row_    IN PLS_INTEGER,
+   sheet_  IN PLS_INTEGER := null ) RETURN VARCHAR2
+IS
+   sh_ PLS_INTEGER := nvl(sheet_, workbook.sheets.count());
+BEGIN
+   RETURN workbook.sheets(sh_).rows(row_)(col_).ora_value.str_val;
+END Get_Cell_Value_Str;
+
+FUNCTION Get_Cell_Value_Date (
+   col_    IN PLS_INTEGER,
+   row_    IN PLS_INTEGER,
+   sheet_  IN PLS_INTEGER := null ) RETURN DATE
+IS
+   sh_ PLS_INTEGER := nvl(sheet_, workbook.sheets.count());
+BEGIN
+   RETURN workbook.sheets(sh_).rows(row_)(col_).ora_value.dt_val;
+END Get_Cell_Value_Date;
+
+FUNCTION Get_Cell_Value (
+   col_    IN PLS_INTEGER,
+   row_    IN PLS_INTEGER,
+   sheet_  IN PLS_INTEGER := null ) RETURN VARCHAR2
+IS
+   sh_ PLS_INTEGER := nvl(sheet_, workbook.sheets.count());
+BEGIN
+   IF workbook.sheets(sh_).rows(row_)(col_).datatype = 'string' THEN
+      RETURN Get_Cell_Value_Str (col_, row_, sheet_);
+   ELSIF workbook.sheets(sh_).rows(row_)(col_).datatype = 'number' THEN
+      RETURN to_char(Get_Cell_VAlue_Num (col_, row_, sheet_));
+   ELSIF workbook.sheets(sh_).rows(row_)(col_).datatype = 'date' THEN
+      RETURN to_char (Get_Cell_Value_Date (col_, row_, sheet_), 'YYYY-MM-DD-HH24:MI');
+   END IF;
+END Get_Cell_Value;
+
+---------------------------------------
+---------------------------------------
+--
+-- Functions that build the internal PL/SQL model of the Excel sheet
+--
+--
 PROCEDURE Clear_Workbook
 IS
    s_      PLS_INTEGER := workbook.sheets.first;
@@ -1654,52 +1870,21 @@ BEGIN
    END IF;
 END Get_Cell_Xff;
 
-FUNCTION Get_Cell_Value_Num (
-   col_    IN PLS_INTEGER,
-   row_    IN PLS_INTEGER,
-   sheet_  IN PLS_INTEGER := null ) RETURN NUMBER
-IS
-   sh_ PLS_INTEGER  := nvl(sheet_, workbook.sheets.count());
-BEGIN
-   RETURN workbook.sheets(sh_).rows(row_)(col_).ora_value.num_val;
-END Get_Cell_Value_Num;
 
-FUNCTION Get_Cell_Value_Str (
-   col_    IN PLS_INTEGER,
-   row_    IN PLS_INTEGER,
-   sheet_  IN PLS_INTEGER := null ) RETURN VARCHAR2
-IS
-   sh_ PLS_INTEGER := nvl(sheet_, workbook.sheets.count());
-BEGIN
-   RETURN workbook.sheets(sh_).rows(row_)(col_).ora_value.str_val;
-END Get_Cell_Value_Str;
-
-FUNCTION Get_Cell_Value_Date (
-   col_    IN PLS_INTEGER,
-   row_    IN PLS_INTEGER,
-   sheet_  IN PLS_INTEGER := null ) RETURN DATE
-IS
-   sh_ PLS_INTEGER := nvl(sheet_, workbook.sheets.count());
-BEGIN
-   RETURN workbook.sheets(sh_).rows(row_)(col_).ora_value.dt_val;
-END Get_Cell_Value_Date;
-
-FUNCTION Get_Cell_Value (
-   col_    IN PLS_INTEGER,
-   row_    IN PLS_INTEGER,
-   sheet_  IN PLS_INTEGER := null ) RETURN VARCHAR2
-IS
-   sh_ PLS_INTEGER := nvl(sheet_, workbook.sheets.count());
-BEGIN
-   IF workbook.sheets(sh_).rows(row_)(col_).datatype = 'string' THEN
-      RETURN Get_Cell_Value_Str (col_, row_, sheet_);
-   ELSIF workbook.sheets(sh_).rows(row_)(col_).datatype = 'number' THEN
-      RETURN to_char(Get_Cell_VAlue_Num (col_, row_, sheet_));
-   ELSIF workbook.sheets(sh_).rows(row_)(col_).datatype = 'date' THEN
-      RETURN to_char (Get_Cell_Value_Date (col_, row_, sheet_), 'YYYY-MM-DD-HH24:MI');
-   END IF;
-END Get_Cell_Value;
-
+---------------------------------------
+---------------------------------------
+--
+-- Fill Cells with data
+--   This group of functions has been through several iterations.  It would be
+--   nice to have only 1 `Cell()` function that's overloaded with string, date
+--   and number values, but in practice the compiler cannot really distinguish
+--   between them effectively.  Hence it's normally better to use the explicit
+--   version for each type.
+--   We keep the cell's data in a type called `ora_value`; this is useful when
+--   the calling program needs to query the data later, or if we want to apply
+--   conditional formatting based on that data.
+--
+--
 
 PROCEDURE Cell ( -- num version
    col_       IN PLS_INTEGER,
@@ -1754,7 +1939,7 @@ BEGIN
    END IF;
 END Cell;
 
-PROCEDURE CellN ( -- num version overload
+PROCEDURE CellN ( -- num version explicit
    col_       IN PLS_INTEGER,
    row_       IN PLS_INTEGER,
    value_num_ IN NUMBER      := null,
@@ -1846,7 +2031,7 @@ BEGIN
    END IF;
 END Cell;
 
-PROCEDURE CellS ( -- string version overload
+PROCEDURE CellS ( -- string version explicit
    col_       IN PLS_INTEGER,
    row_       IN PLS_INTEGER,
    value_str_ IN VARCHAR2    := '',
@@ -1927,7 +2112,7 @@ BEGIN
    END IF;
 END Cell;
 
-PROCEDURE CellD ( -- date version overload
+PROCEDURE CellD ( -- date version explicit
    col_       IN PLS_INTEGER,
    row_       IN PLS_INTEGER,
    value_dt_  IN DATE,
@@ -2541,29 +2726,12 @@ BEGIN
 END Set_Autofilter;
 
 
------------------------------------
--- Finishing functions
+---------------------------------------
+---------------------------------------
 --
-PROCEDURE Add1Xml (
-   excel_    IN OUT NOCOPY BLOB,
-   filename_ VARCHAR2,
-   xml_      CLOB )
-IS
-   xml_blob_     BLOB;
-   dest_offset_  INTEGER := 1;
-   src_offset_   INTEGER := 1;
-   lang_context_ INTEGER := Dbms_Lob.DEFAULT_LANG_CTX;
-   warning_      INTEGER;
-BEGIN
-   Dbms_Lob.CreateTemporary (xml_blob_, true);
-   Dbms_Lob.ConvertToBlob (
-      xml_blob_, xml_, Dbms_Lob.LobMaxSize, dest_offset_, src_offset_,
-      nls_charset_id('AL32UTF8'), lang_context_, warning_
-   );
-   Add1File (excel_, filename_, xml_blob_);
-   Dbms_Lob.freetemporary(xml_blob_);
-END Add1Xml;
-
+-- The Excel file's XML creators
+--
+--
 FUNCTION Finish_Drawing (
    drawing_ tp_drawing,
    ix_      PLS_INTEGER,
@@ -2680,15 +2848,15 @@ BEGIN
    RETURN rv_;
 END Finish_Drawing;
 
---osian
-/*FUNCTION Finish_Pivot (
+
+FUNCTION Finish_Pivot (
    pivot_  tp_pivot,
    ix_     PLS_INTEGER,
    sheet_  PLS_INTEGER ) RETURN VARCHAR2
 IS
 BEGIN
    null;
-END Finish_Pivot;*/
+END Finish_Pivot;
    
 
 FUNCTION Finish RETURN BLOB
