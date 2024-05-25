@@ -195,25 +195,6 @@ CREATE OR REPLACE PACKAGE BODY CBH_UTILS_API IS
 -- Error Handling
 --
 PROCEDURE Raise_App_Error (
-   error_no_   IN VARCHAR2,
-   error_text_ IN VARCHAR2 )
-IS
-   call_stack_ VARCHAR2(32000);
-   FUNCTION Format_Call_Stack___ RETURN VARCHAR2 
-   IS
-      stack_ VARCHAR2(32000);
-      depth_ PLS_INTEGER := Utl_Call_Stack.Dynamic_Depth();
-   BEGIN
-      FOR i_ IN REVERSE 1 .. depth_ LOOP
-         stack_ := stack_ || UTL_Call_Stack.Concatenate_Subprogram(UTL_Call_Stack.Subprogram(i_)) || ' at line ' || To_Char(UTL_Call_Stack.Unit_Line(i_)) || chr(10);
-      END LOOP;
-      RETURN stack_;
-   END Format_Call_Stack___;
-BEGIN
-   Raise_Application_Error (error_no_, error_text_);
-END Raise_App_Error;
-
-PROCEDURE Raise_App_Error (
    err_text_ IN VARCHAR2,
    p1_       IN VARCHAR2 := null,
    p2_       IN VARCHAR2 := null,

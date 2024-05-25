@@ -13,7 +13,7 @@ CREATE OR REPLACE PACKAGE as_xlsx IS
  ** 2021 in Git Hub:
  **    >> https://github.com/cartbeforehorse/as_xlsx
  ** Documentation updated in README.md
- ** 
+ **
  *****************************************************************************
  *****************************************************************************/
 
@@ -626,6 +626,7 @@ TYPE tp_cell IS RECORD (
 );
 TYPE tp_cells is table of tp_cell index by PLS_INTEGER;
 TYPE tp_rows is table of tp_cells index by PLS_INTEGER;
+
 TYPE tp_autofilter is record (
    column_start PLS_INTEGER,
    column_end   PLS_INTEGER,
@@ -633,15 +634,19 @@ TYPE tp_autofilter is record (
    row_end PLS_INTEGER
 );
 TYPE tp_autofilters is table of tp_autofilter index by PLS_INTEGER;
+
 TYPE tp_hyperlink is record (
    cell VARCHAR2(10),
    url  VARCHAR2(1000)
 );
 TYPE tp_hyperlinks is table of tp_hyperlink index by PLS_INTEGER;
+
 SUBTYPE tp_author is VARCHAR2(32767 char);
 TYPE tp_authors is table of PLS_INTEGER index by tp_author;
 authors tp_authors;
+
 TYPE tp_formulas is table of VARCHAR2(32767) index by PLS_INTEGER;
+
 TYPE tp_comment is record (
    text   VARCHAR2(32767 char),
    author tp_author,
@@ -651,7 +656,9 @@ TYPE tp_comment is record (
    height PLS_INTEGER
 );
 TYPE tp_comments   is table of tp_comment index by PLS_INTEGER;
+
 TYPE tp_mergecells is table of VARCHAR2(21) index by PLS_INTEGER;
+
 TYPE tp_validation IS RECORD (
    type             VARCHAR2(10),
    errorstyle       VARCHAR2(32),
@@ -667,6 +674,12 @@ TYPE tp_validation IS RECORD (
    sqref            VARCHAR2(32767 CHAR)
 );
 TYPE tp_validations IS TABLE OF tp_validation INDEX BY PLS_INTEGER;
+
+TYPE tp_pivot IS RECORD (
+   pivot_name VARCHAR2(2000)
+);
+TYPE tp_pivots IS TABLE OF tp_pivot index by PLS_INTEGER;
+
 TYPE tp_drawing IS RECORD (
    img_id      PLS_INTEGER,
    row         PLS_INTEGER,
@@ -677,6 +690,7 @@ TYPE tp_drawing IS RECORD (
    description VARCHAR2(4000)
 );
 TYPE tp_drawings IS TABLE OF tp_drawing INDEX BY PLS_INTEGER;
+
 TYPE tp_sheet IS RECORD (
    rows        tp_rows,
    widths      tp_widths,
@@ -692,6 +706,7 @@ TYPE tp_sheet IS RECORD (
    validations tp_validations,
    tabcolor    VARCHAR2(8),
    fontid      PLS_INTEGER,
+   pivots      tp_pivots,
    drawings    tp_drawings
 );
 TYPE tp_sheets is table of tp_sheet index by PLS_INTEGER;
@@ -735,10 +750,6 @@ TYPE tp_defined_name is record (
 );
 TYPE tp_defined_names IS TABLE OF tp_defined_name index by PLS_INTEGER;
 
-TYPE tp_pivot IS RECORD (
-   pivot_name VARCHAR2(2000)
-);
-TYPE tp_pivots IS TABLE OF tp_pivot index by PLS_INTEGER;
 TYPE tp_image IS RECORD (
    img_blob    BLOB,
    img_hash    RAW(128), --NUMBER,
@@ -793,6 +804,23 @@ FUNCTION Get_Cell_Xff (
 -- General Helper Functions
 --
 --
+PROCEDURE Trace (
+   msg_     IN CLOB,
+   p1_      IN VARCHAR2 := null,
+   p2_      IN VARCHAR2 := null,
+   p3_      IN VARCHAR2 := null,
+   p4_      IN VARCHAR2 := null,
+   p5_      IN VARCHAR2 := null,
+   p6_      IN VARCHAR2 := null,
+   p7_      IN VARCHAR2 := null,
+   p8_      IN VARCHAR2 := null,
+   p9_      IN VARCHAR2 := null,
+   p0_      IN VARCHAR2 := null,
+   repl_nl_ IN BOOLEAN  := true,
+   quiet_   IN BOOLEAN  := false )
+IS BEGIN
+   Cbh_Utils_API.Trace (msg_, p1_, p2_, p3_, p4_, p5_, p6_, p7_, p8_, p9_, p0_, repl_nl_, quiet_);
+END Trace;
 FUNCTION Rep (
    msg_     IN CLOB,
    p1_      IN VARCHAR2 := null,
@@ -834,11 +862,16 @@ END Xml_Number;
 FUNCTION Make_Tag (
    doc_      IN OUT NOCOPY dbms_XmlDom.DomDocument,
    tag_name_ IN VARCHAR2,
+   ns_       IN VARCHAR2      := '',
    attrs_    IN xml_attrs_arr := xml_attrs_arr() ) RETURN dbms_XmlDom.DomElement
 IS
-   el_ dbms_XmlDom.DomElement := Dbms_XmlDom.createElement (doc_, tag_name_);
-   ix_ VARCHAR2(200)          := attrs_.FIRST;
+   el_ dbms_XmlDom.DomElement;
+   ix_ VARCHAR2(200) := attrs_.FIRST;
 BEGIN
+   el_ := CASE
+      WHEN ns_ IS NOT null THEN Dbms_XmlDom.createElement (doc_, tag_name_, ns_)
+      ELSE Dbms_XmlDom.createElement (doc_, tag_name_)
+   END;
    WHILE ix_ IS NOT null LOOP
       Dbms_XmlDom.setAttribute (el_, ix_, attrs_(ix_));
       ix_ := attrs_.NEXT(ix_);
@@ -849,72 +882,97 @@ END Make_Tag;
 FUNCTION Make_Node (
    doc_      IN OUT NOCOPY dbms_XmlDom.DomDocument,
    tag_name_ IN VARCHAR2,
+   ns_       IN VARCHAR2      := '',
    attrs_    IN xml_attrs_arr := xml_attrs_arr() ) RETURN dbms_XmlDom.DomNode
 IS BEGIN
-   RETURN Dbms_XmlDom.makeNode (Make_Tag (doc_, tag_name_, attrs_));
+   RETURN Dbms_XmlDom.makeNode (Make_Tag (doc_, tag_name_, ns_, attrs_));
 END Make_Node;
 
 PROCEDURE Make_Node (
    doc_      IN OUT NOCOPY dbms_XmlDom.DomDocument,
    tag_name_ IN VARCHAR2,
+   ns_       IN VARCHAR2      := '',
    attrs_    IN xml_attrs_arr := xml_attrs_arr() )
 IS
    throw_nd_ dbms_XmlDom.DomNode;
 BEGIN
-   throw_nd_ := Make_Node (doc_, tag_name_, attrs_);
+   throw_nd_ := Make_Node (doc_, tag_name_, ns_, attrs_);
 END Make_Node;
 
-FUNCTION Add_New_Node_To_Dom (
-   doc_          IN OUT NOCOPY dbms_XmlDom.DomDocument,
-   append_to_    IN dbms_XmlDom.DomNode,
-   tag_name_     IN VARCHAR2,
-   attrs_        IN xml_attrs_arr := xml_attrs_arr() ) RETURN dbms_XmlDom.DomNode
+FUNCTION Xml_Node (
+   doc_       IN OUT NOCOPY dbms_XmlDom.DomDocument,
+   append_to_ IN dbms_XmlDom.DomNode,
+   tag_name_  IN VARCHAR2,
+   ns_        IN VARCHAR2      := '',
+   attrs_     IN xml_attrs_arr := xml_attrs_arr() ) RETURN dbms_XmlDom.DomNode
 IS BEGIN
-   RETURN Dbms_XmlDom.appendChild (append_to_, Make_Node(doc_,tag_name_,attrs_));
-END Add_New_Node_To_Dom;
+   RETURN Dbms_XmlDom.appendChild (append_to_, Make_Node(doc_,tag_name_,ns_,attrs_));
+END Xml_Node;
 
-PROCEDURE Add_New_Node_To_Dom (
-   doc_          IN OUT NOCOPY dbms_XmlDom.DomDocument,
-   append_to_    IN dbms_XmlDom.DomNode,
-   tag_name_     IN VARCHAR2,
-   attrs_        IN xml_attrs_arr := xml_attrs_arr() )
+FUNCTION Xml_Node (
+   doc_       IN OUT NOCOPY dbms_XmlDom.DomDocument,
+   append_to_ IN dbms_XmlDom.DomNode,
+   tag_name_  IN VARCHAR2,
+   attrs_     IN xml_attrs_arr := xml_attrs_arr() ) RETURN dbms_XmlDom.DomNode
+IS BEGIN
+   RETURN Xml_Node (doc_, append_to_, tag_name_, '', attrs_);
+END Xml_Node;
+
+PROCEDURE Xml_Node (
+   doc_       IN OUT NOCOPY dbms_XmlDom.DomDocument,
+   append_to_ IN dbms_XmlDom.DomNode,
+   tag_name_  IN VARCHAR2,
+   ns_        IN VARCHAR2      := '',
+   attrs_     IN xml_attrs_arr := xml_attrs_arr() )
 IS
    throw_nd_ dbms_XmlDom.DomNode;
 BEGIN
-   throw_nd_ := Dbms_XmlDom.appendChild (append_to_, Make_Node(doc_,tag_name_,attrs_));
-END Add_New_Node_To_Dom;
+   throw_nd_ := Dbms_XmlDom.appendChild (append_to_, Make_Node(doc_,tag_name_,ns_,attrs_));
+END Xml_Node;
 
-PROCEDURE Add_Text_Node_To_Dom (
+PROCEDURE Xml_Node (
+   doc_       IN OUT NOCOPY dbms_XmlDom.DomDocument,
+   append_to_ IN dbms_XmlDom.DomNode,
+   tag_name_  IN VARCHAR2,
+   attrs_     IN xml_attrs_arr := xml_attrs_arr() )
+IS BEGIN
+   Xml_Node (doc_, append_to_, tag_name_, '', attrs_);
+END Xml_Node;
+
+PROCEDURE Xml_Text_Node (
    doc_          IN OUT NOCOPY dbms_XmlDom.DomDocument,
    append_to_    IN dbms_XmlDom.DomNode,
    tag_name_     IN VARCHAR2,
    text_content_ IN VARCHAR2,
+   ns_           IN VARCHAR2      := '',
    attrs_        IN xml_attrs_arr := xml_attrs_arr() )
 IS
    throw_nd_ dbms_XmlDom.DomNode;
 BEGIN
    throw_nd_ := Dbms_XmlDom.appendChild (
-      Dbms_XmlDom.appendChild (append_to_, Make_Node(doc_,tag_name_,attrs_)),
+      Dbms_XmlDom.appendChild (append_to_, Make_Node(doc_,tag_name_,ns_,attrs_)),
       Dbms_XmlDom.makeNode (Dbms_XmlDom.createTextNode (doc_, text_content_))
    );
-END Add_Text_Node_To_Dom;
+END Xml_Text_Node;
 
-PROCEDURE Add_Text_Node_To_Dom (
+PROCEDURE Xml_Text_Node (
    doc_         IN OUT NOCOPY dbms_XmlDom.DomDocument,
    append_to_   IN dbms_XmlDom.DomNode,
    tag_name_    IN VARCHAR2,
    num_content_ IN NUMBER,
    decimals_    IN NUMBER        := 0,
+   ns_          IN VARCHAR2      := '',
    attrs_       IN xml_attrs_arr := xml_attrs_arr() )
 IS BEGIN
-   Add_Text_Node_To_Dom (
+   Xml_Text_Node (
       doc_          => doc_,
       append_to_    => append_to_,
       tag_name_     => tag_name_,
       text_content_ => Xml_Number (num_content_, decimals_),
+      ns_           => ns_,
       attrs_        => attrs_
    );
-END Add_Text_Node_To_Dom;
+END Xml_Text_Node;
 
 
 ---------------------------------------
@@ -945,13 +1003,15 @@ EXCEPTION
       dbms_lob.writeappend (blob_, utl_raw.length(raw_), raw_);
 END Addtxt2utf8blob_Finish;
 
-PROCEDURE addtxt2utf8blob( p_txt VARCHAR2, p_blob in out nocopy blob )
+PROCEDURE addtxt2utf8blob (
+   txt_  IN            VARCHAR2,
+   blob_ IN OUT NOCOPY BLOB )
 IS BEGIN
-   g_addtxt2utf8blob_tmp := g_addtxt2utf8blob_tmp || p_txt;
+   g_addtxt2utf8blob_tmp := g_addtxt2utf8blob_tmp || txt_;
 EXCEPTION
    WHEN value_error THEN
-      addtxt2utf8blob_finish(p_blob);
-      g_addtxt2utf8blob_tmp := p_txt;
+      addtxt2utf8blob_finish (blob_);
+      g_addtxt2utf8blob_tmp := txt_;
 END addtxt2utf8blob;
 
 PROCEDURE Blob2File (
@@ -1066,8 +1126,8 @@ END Add1File;
 
 PROCEDURE Add1Xml (
    excel_    IN OUT NOCOPY BLOB,
-   filename_ VARCHAR2,
-   xml_      CLOB )
+   filename_ IN VARCHAR2,
+   xml_      IN CLOB )
 IS
    xml_blob_     BLOB;
    dest_offset_  INTEGER := 1;
@@ -1087,58 +1147,58 @@ END Add1Xml;
 PROCEDURE Finish_Zip (
    zipped_blob_ IN OUT BLOB )
 IS
-   t_cnt             PLS_INTEGER := 0;
-   t_offs            INTEGER;
-   t_offs_dir_header INTEGER;
-   t_offs_end_header INTEGER;
-   t_comment         RAW(200) := Utl_Raw.Cast_To_Raw (
+   nr_             PLS_INTEGER := 0;
+   offset_            INTEGER;
+   offs_dir_header_ INTEGER;
+   offs_end_header_ INTEGER;
+   watermark_         RAW(200) := Utl_Raw.Cast_To_Raw (
       'Implementation by Anton Scheffer, ' || VERSION_
    );
 BEGIN
-   t_offs_dir_header := dbms_lob.getlength (zipped_blob_);
-   t_offs := 1;
-   WHILE Dbms_Lob.Substr(zipped_blob_, utl_raw.length(LOCAL_FILE_HEADER_), t_offs) = LOCAL_FILE_HEADER_ LOOP
-      t_cnt := t_cnt + 1;
+   offs_dir_header_ := dbms_lob.getlength (zipped_blob_);
+   offset_ := 1;
+   WHILE Dbms_Lob.Substr(zipped_blob_, utl_raw.length(LOCAL_FILE_HEADER_), offset_) = LOCAL_FILE_HEADER_ LOOP
+      nr_ := nr_ + 1;
       Dbms_Lob.Append (
          zipped_blob_,
          Utl_Raw.Concat (
             hextoraw('504B0102'),      -- Central directory file header signature
             hextoraw('1400'),          -- version 2.0
-            dbms_lob.substr(zipped_blob_, 26, t_offs+4),
+            dbms_lob.substr(zipped_blob_, 26, offset_+4),
             hextoraw('0000'),          -- File comment length
             hextoraw('0000'),          -- Disk number where file starts
             hextoraw('0000'),          -- Internal file attributes => 0000=binary-file; 0100(ascii)=text-file
             CASE
                WHEN Dbms_Lob.Substr (
-                  zipped_blob_, 1, t_offs+30+blob2num(zipped_blob_,2,t_offs+26)-1
+                  zipped_blob_, 1, offset_+30+blob2num(zipped_blob_,2,offset_+26)-1
                ) IN (hextoraw('2F'), hextoraw('5C'))
                THEN
                   hextoraw('10000000') -- a directory/folder
                ELSE
                   hextoraw('2000B681') -- a file
             END,                       -- External file attributes
-            little_endian(t_offs-1),   -- Relative offset of local file header
-            dbms_lob.substr(zipped_blob_, blob2num(zipped_blob_,2,t_offs+26),t_offs+30) -- File name
+            little_endian(offset_-1),  -- Relative offset of local file header
+            dbms_lob.substr(zipped_blob_, blob2num(zipped_blob_,2,offset_+26),offset_+30) -- File name
          )
       );
-      t_offs := t_offs + 30 +
-         blob2num(zipped_blob_, 4, t_offs+18 ) + -- compressed size
-         blob2num(zipped_blob_, 2, t_offs+26 ) + -- File name length
-         blob2num(zipped_blob_, 2, t_offs+28 );  -- Extra field length
+      offset_ := offset_ + 30 +
+         blob2num (zipped_blob_, 4, offset_+18 ) + -- compressed size
+         blob2num (zipped_blob_, 2, offset_+26 ) + -- File name length
+         blob2num (zipped_blob_, 2, offset_+28 );  -- Extra field length
    END LOOP;
-   t_offs_end_header := dbms_lob.getlength(zipped_blob_);
+   offs_end_header_ := dbms_lob.getlength(zipped_blob_);
    Dbms_Lob.Append (
        zipped_blob_,
        Utl_Raw.Concat (
-          END_OF_CENTRAL_DIRECTORY_,                          -- End of central directory signature
-          hextoraw('0000'),                                   -- Number of this disk
-          hextoraw('0000'),                                   -- Disk where central directory starts
-          little_endian(t_cnt,2),                             -- Number of central directory records on this disk
-          little_endian(t_cnt,2),                             -- Total number of central directory records
-          little_endian(t_offs_end_header-t_offs_dir_header), -- Size of central directory
-          little_endian(t_offs_dir_header),                   -- Offset of start of central directory, relative to start of archive
-          little_endian(nvl(Utl_Raw.Length(t_comment),0),2),  -- ZIP file comment length
-          t_comment
+          END_OF_CENTRAL_DIRECTORY_,                           -- End of central directory signature
+          hextoraw ('0000'),                                   -- Number of this disk
+          hextoraw ('0000'),                                   -- Disk where central directory starts
+          little_endian (nr_, 2),                              -- Number of central directory records on this disk
+          little_endian (nr_, 2),                              -- Total number of central directory records
+          little_endian (offs_end_header_ - offs_dir_header_), -- Size of central directory
+          little_endian (offs_dir_header_),                    -- Offset of start of central directory, relative to start of archive
+          little_endian (nvl(Utl_Raw.Length(watermark_),0),2), -- ZIP file comment length
+          watermark_
        )
     );
 END Finish_Zip;
@@ -2849,15 +2909,70 @@ BEGIN
 END Finish_Drawing;
 
 
-FUNCTION Finish_Pivot (
-   pivot_  tp_pivot,
-   ix_     PLS_INTEGER,
-   sheet_  PLS_INTEGER ) RETURN VARCHAR2
+PROCEDURE Finish_Ws_Relationships (
+   excel_ IN OUT NOCOPY BLOB,
+   s_     IN            PLS_INTEGER )
 IS
+   id_            PLS_INTEGER := 1;
+   nr_hyperlinks_ PLS_INTEGER := workbook.sheets(s_).hyperlinks.count;
+   nr_comments_   PLS_INTEGER := workbook.sheets(s_).comments.count;
+   nr_pivots_     PLS_INTEGER := workbook.sheets(s_).pivots.count;
+   nr_drawings_   PLS_INTEGER := workbook.sheets(s_).drawings.count;
+   doc_           dbms_XmlDom.DomDocument := Dbms_XmlDom.newDomDocument;
+   xml_type_      XmlType;
+   attrs_         xml_attrs_arr;
+   nd_rels_       dbms_XmlDom.DomNode;
 BEGIN
-   null;
-END Finish_Pivot;
-   
+   IF nr_hyperlinks_ > 0 OR nr_comments_ > 0 OR nr_pivots_ > 0 OR nr_drawings_ > 0 THEN
+
+      Dbms_XmlDom.setVersion (doc_, '1.0" encoding="UTF-8" standalone="yes');
+      attrs_('xmlns') := 'http://schemas.openxmlformats.org/package/2006/relationships';
+      nd_rels_ := Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'Relationships', attrs_);
+
+      IF nr_comments_ > 0 THEN
+         attrs_.delete;
+         attrs_('Id')     := rep('rId:P1', nr_hyperlinks_+2);
+         attrs_('Type')   := 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments';
+         attrs_('Target') := rep ('../comments:P1.xml', s_);
+         Xml_Node (doc_, nd_rels_, 'Relationship', attrs_);
+         attrs_('Id')     := rep ('rId:P1', nr_hyperlinks_+1);
+         attrs_('Type')   := 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/vmlDrawing';
+         attrs_('Target') := rep ('../drawings/vmlDrawing:P1.vml', s_);
+         Xml_Node (doc_, nd_rels_, 'Relationship', attrs_);
+         id_ := id_ + 2;
+      END IF;
+      FOR h_ IN 1 .. nr_hyperlinks_ LOOP
+         IF workbook.sheets(s_).hyperlinks(h_).url IS NOT null THEN
+            attrs_('Id')         := rep ('rId:P1', h_);
+            attrs_('Type')       := 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink';
+            attrs_('Target')     := workbook.sheets(s_).hyperlinks(h_).url;
+            attrs_('TargetMode') := 'External';
+            Xml_Node (doc_, nd_rels_, 'Relationship', attrs_);
+            id_ := id_ + 1;
+         END IF;
+      END LOOP;
+      IF nr_drawings_ > 0 THEN
+         attrs_.delete;
+         attrs_('Id')     := rep ('rId:P1', id_);
+         attrs_('Type')   := 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing';
+         attrs_('Target') := rep ('../drawings/drawing:P1.xml', s_);
+         Xml_Node (doc_, nd_rels_, 'Relationship', attrs_);
+      END IF;
+      FOR p_ IN 1 .. nr_pivots_ LOOP
+         attrs_.delete;
+         attrs_('Id')     := rep ('rId:P1', id_);
+         attrs_('Type')   := 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotCacheDefinition';
+         attrs_('Target') := rep ('../pivotCache/pivotCacheDefinition:P1.xml',1);
+         Xml_Node (doc_, nd_rels_, 'Relationship', attrs_);
+         id_ := id_ + 1;
+      END LOOP;
+
+      xml_type_ := Dbms_XmlDom.getXmlType (doc_);
+      Dbms_XmlDom.freeDocument (doc_);
+      Add1Xml (excel_, rep('xl/worksheets/_rels/sheet:P1.xml.rels',s_), xml_type_.getClobVal);
+   END IF;
+END Finish_Ws_Relationships;
+
 
 FUNCTION Finish RETURN BLOB
 IS
@@ -2967,7 +3082,7 @@ BEGIN
 <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/>
 <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
 </Relationships>';
-  add1xml( excel_, '_rels/.rels', xxx_ );
+  add1xml (excel_, '_rels/.rels', xxx_);
   xxx_ := '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" mc:Ignorable="x14ac" xmlns:x14ac="http://schemas.microsoft.com/office/spreadsheetml/2009/9/ac">';
   IF workbook.numFmts.count() > 0 THEN
@@ -3043,7 +3158,7 @@ BEGIN
 </ext>
 </extLst>
 </styleSheet>' );
-  add1xml( excel_, 'xl/styles.xml', xxx_ );
+  add1xml (excel_, 'xl/styles.xml', xxx_);
   xxx_ := '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
 <fileVersion appName="xl" lastEdited="5" lowestEdited="5" rupBuild="9302"/>
@@ -3070,7 +3185,7 @@ BEGIN
     xxx_ := xxx_ || '</definedNames>';
   END IF;
   xxx_ := xxx_ || '<calcPr calcId="144525"/></workbook>';
-  add1xml( excel_, 'xl/workbook.xml', xxx_ );
+  add1xml (excel_, 'xl/workbook.xml', xxx_);
   xxx_ := '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" name="Office Theme">
   <a:themeElements>
@@ -3449,26 +3564,12 @@ CASE WHEN workbook.sheets(s_).tabcolor IS not null THEN '<sheetPr><tabColor rgb=
     END IF;
 
     addtxt2utf8blob( '</worksheet>', yyy_);
-    addtxt2utf8blob_finish( yyy_ );
+    addtxt2utf8blob_finish(yyy_);
     add1file (excel_, 'xl/worksheets/sheet' || s_ || '.xml', yyy_);
-    IF workbook.sheets(s_).hyperlinks.count > 0 OR workbook.sheets(s_).comments.count > 0 OR workbook.sheets(s_).drawings.count > 0 THEN
-      xxx_ := '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">';
-      IF workbook.sheets(s_).comments.count() > 0 THEN
-        xxx_ := xxx_ || ('<Relationship Id="rId' || ( workbook.sheets(s_).hyperlinks.count() + 2 ) || '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments" Target="../comments' || s_ || '.xml"/>' );
-        xxx_ := xxx_ || ('<Relationship Id="rId' || ( workbook.sheets(s_).hyperlinks.count() + 1 ) || '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/vmlDrawing" Target="../drawings/vmlDrawing' || s_ || '.vml"/>' );
-      END IF;
-      FOR h IN 1 ..  workbook.sheets(s_).hyperlinks.count() LOOP
-        IF workbook.sheets(s_).hyperlinks(h).url IS NOT null THEN
-          xxx_ := xxx_ || ( '<Relationship Id="rId' || h || '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="' || workbook.sheets(s_).hyperlinks( h ).url || '" TargetMode="External"/>' );
-        END IF;
-      END LOOP;
-      IF workbook.sheets(s_).drawings.count > 0 THEN
-        xxx_ := xxx_ || ( '<Relationship Id="rId' || ( workbook.sheets(s_).hyperlinks.count + sign(workbook.sheets(s_).comments.count)*2+1)|| '" Target="../drawings/drawing' || s_ || '.xml" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing"/>' );
-      END IF;
-      xxx_ := xxx_ || '</Relationships>';
-      add1xml (excel_, 'xl/worksheets/_rels/sheet' || s_ || '.xml.rels', xxx_);
-    END IF;
+
+    -- create worksheet rel START
+    Finish_Ws_Relationships (excel_, s_);
+    -- create worksheet rel END
 
     IF workbook.sheets(s_).drawings.count > 0 THEN
       xxx_ := '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -3548,7 +3649,7 @@ style="position:absolute;margin-left:35.25pt;margin-top:3pt;z-index:' || to_char
             (workbook.sheets(s_).comments(c).column-1) || '</x:Column></x:ClientData></v:shape>' );
       END LOOP;
       xxx_ := xxx_ || '</xml>';
-      add1xml( excel_, 'xl/drawings/vmlDrawing' || s_ || '.vml', xxx_ );
+      add1xml (excel_, 'xl/drawings/vmlDrawing' || s_ || '.vml', xxx_);
     END IF;
 --
     s_ := workbook.sheets.next(s_);
