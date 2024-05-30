@@ -1089,13 +1089,29 @@ BEGIN
    workbook.sheets(sh_).tabcolor := substr(tabcolor_, 1, 8);
 END Set_Tabcolor;
 
+PROCEDURE Check_Duplicate_Sheet_Name (
+   new_name_ IN VARCHAR2 )
+IS BEGIN
+   IF workbook.sheets.count > 0 THEN
+      FOR sh_ IN workbook.sheets.first .. workbook.sheets.last LOOP
+         IF workbook.sheets(sh_).name = new_name_ THEN
+            Cbh_Utils_API.Raise_App_Error ('A sheet with the name ":P1" already exists', new_name_);
+         END IF;
+      END LOOP;
+   END IF;
+END Check_Duplicate_Sheet_Name;
+
 FUNCTION New_Sheet (
    sheetname_ VARCHAR2 := null,
    tab_color_ VARCHAR2 := null ) RETURN PLS_INTEGER
 IS
-   s_ PLS_INTEGER := workbook.sheets.count() + 1;
+   s_          PLS_INTEGER   := workbook.sheets.count() + 1;
+   clean_name_ VARCHAR2(200) := nvl(dbms_xmlgen.convert(
+      translate (sheetname_, 'a/\[]*:?', 'a')), 'Sheet'||s_
+   );
 BEGIN
-   workbook.sheets(s_).name := nvl(dbms_xmlgen.convert(translate(sheetname_, 'a/\[]*:?', 'a')), 'Sheet'||s_);
+   Check_Duplicate_Sheet_Name (clean_name_);
+   workbook.sheets(s_).name := clean_name_;
    IF workbook.strings.count() = 0 THEN
       workbook.str_cnt := 0;
    END IF;
@@ -1126,8 +1142,13 @@ END New_Sheet;
 PROCEDURE Set_Sheet_Name (
    sheet_  IN PLS_INTEGER,
    name_   IN VARCHAR2 )
-IS BEGIN
-   workbook.sheets(sheet_).name := nvl(dbms_xmlgen.convert(translate(name_, 'a/\[]*:?', 'a')), 'Sheet'||sheet_);
+IS
+   clean_name_ VARCHAR2(200) := nvl(dbms_xmlgen.convert(
+      translate (name_, 'a/\[]*:?', 'a')), 'Sheet'||sheet_
+   );
+BEGIN
+   Check_Duplicate_Sheet_Name (clean_name_);
+   workbook.sheets(sheet_).name := clean_name_;
 END Set_Sheet_Name;
 
 PROCEDURE Set_Col_Width (
@@ -3801,6 +3822,7 @@ BEGIN
 
    fonts_('head1')       := Get_Font (rgb_ => 'FFDBE5F1', bold_ => true);
    fonts_('bold')        := Get_Font (bold_ => true);
+   fonts_('italic')      := Get_Font (italic_ => true);
    fonts_('bold_lg')     := Get_Font (bold_ => true, fontsize_ => 14);
    fonts_('bld_wht')     := Get_Font (rgb_ => 'FFFFFFFF', bold_ => true);
    fonts_('bld_dk_bl')   := Get_Font (rgb_ => 'FF244062', bold_ => true);
