@@ -7,51 +7,6 @@ CREATE OR REPLACE PACKAGE AS_XLSX IS
  ** Website: http://technology.amis.nl/blog
  ** See also: http://technology.amis.nl/blog/?p=10995
  **
- ** Changelog:
- **   Date: 21-02-2011
- **     Added Aligment, horizontal, vertical, wrapText
- **   Date: 06-03-2011
- **     Added Comments, MergeCells, fixed bug for dependency on NLS-settings
- **   Date: 16-03-2011
- **     Added bold and italic fonts
- **   Date: 22-03-2011
- **     Fixed issue with timezone's set to a region(name) instead of a offset
- **   Date: 08-04-2011
- **     Fixed issue with XML-escaping from text
- **   Date: 27-05-2011
- **     Added MIT-license
- **   Date: 11-08-2011
- **     Fixed NLS-issue with column width
- **   Date: 29-09-2011
- **     Added font color
- **   Date: 16-10-2011
- **     fixed bug in add_string
- **   Date: 26-04-2012
- **     Fixed set_autofilter (only one autofilter per sheet, added _xlnm._FilterDatabase)
- **     Added list_validation = drop-down
- **   Date: 27-08-2013
- **     Added freeze_pane
- **   Date: 05-09-2013
- **     Performance
- **   Date: 14-07-2014
- **      Added p_UseXf to query2sheet
- **   Date: 23-10-2014
- **      Added xml:space="preserve"
- **   Date: 29-02-2016
- **     Fixed issue with alignment in get_XfId
- **     Thank you Bertrand Gouraud
- **   Date: 01-04-2017
- **     Added p_height to set_row
- **   Date: 23-05-2018
- **     fixed bug in add_string (thank you David Short)
- **     added tabColor to new_sheet
- **   Date: 13-06-2018
- **     added  c_version
- **     added formulas
- **   Date: 12-02-2020
- **     added sys_refcursor overload of query2sheet
- **     use default date format in query2sheet
- **     changed to date1904=false
  *****************************************************************************
  *****************************************************************************
 
@@ -102,15 +57,24 @@ TYPE params_arr IS TABLE OF param_rec;
 --------------------------------------------------
 -- Fonts and fills stored by ID
 --
-TYPE fonts_list IS TABLE OF INTEGER INDEX BY VARCHAR2(50);
-TYPE fills_list IS TABLE OF INTEGER INDEX BY VARCHAR2(50);
+TYPE fonts_list  IS TABLE OF INTEGER INDEX BY VARCHAR2(50);
+TYPE fills_list  IS TABLE OF INTEGER INDEX BY VARCHAR2(50);
+TYPE border_list IS TABLE OF INTEGER INDEX BY VARCHAR2(50);
+TYPE numFmt_list IS TABLE OF INTEGER INDEX BY VARCHAR2(50);
+TYPE align_list  IS TABLE OF tp_alignment INDEX BY VARCHAR2(50);
+TYPE numFmt_cols IS TABLE OF INTEGER INDEX BY PLS_INTEGER;
 
-fonts_ fonts_list;
-fills_ fills_list;
+fonts_  fonts_list;
+fills_  fills_list;
+bdrs_   border_list;
+numFmt_ numFmt_list;
+align_  align_list;
 
 --------------------------------------------------
 -- Public Procedures and Functions
 --
+PROCEDURE Init_Workbook;
+
 PROCEDURE Clear_Workbook;
 
 FUNCTION New_Sheet (
@@ -162,6 +126,33 @@ PROCEDURE Get_Fill (
    fgRGB_       IN VARCHAR2 := null,
    bgRGB_       IN VARCHAR2 := null );
 
+PROCEDURE Add_Fill (
+   fill_id_     IN VARCHAR2,
+   patternType_ IN VARCHAR2,
+   fgRGB_       IN VARCHAR2 := null,
+   bgRGB_       IN VARCHAR2 := null );
+
+PROCEDURE Add_NumFmt (
+   fmt_id_ IN VARCHAR2,
+   format_ IN VARCHAR2 );
+
+---------------------------------------
+-- Alfan_Cell(), Alfan_Range()
+--  Transforms a numeric cell or range reference into an Excel reference.  For
+--  example [1, 2] becomes "A2"; [1, 2, 3, 8] becomes "A2:C8".  This is useful
+--  when external code is trying to generate formulas.
+--
+FUNCTION Alfan_Cell (
+   col_ IN PLS_INTEGER,
+   row_ IN PLS_INTEGER ) RETURN VARCHAR2;
+
+FUNCTION Alfan_Range (
+   col_tl_ IN PLS_INTEGER,
+   row_tl_ IN PLS_INTEGER,
+   col_br_ IN PLS_INTEGER,
+   row_br_ IN PLS_INTEGER ) RETURN VARCHAR2;
+
+
 ---------------------------------------
 -- Get_Border()
 --  Values allowed in all these parameters are as follows:
@@ -180,6 +171,14 @@ PROCEDURE Get_Border (
    left_   IN VARCHAR2 := 'thin',
    right_  IN VARCHAR2 := 'thin' );
 
+PROCEDURE Add_Border_To_Range (
+   cell_left_ IN PLS_INTEGER,
+   cell_top_  IN PLS_INTEGER,
+   width_     IN PLS_INTEGER,
+   height_    IN PLS_INTEGER,
+   style_     IN VARCHAR2    := 'medium',
+   sheet_     IN PLS_INTEGER := null );
+
 ---------------------------------------
 -- Get_Alignment()
 --  Values allowed in vert/horiz: horizontal;center;centerContinuous;distributed;fill;general;justify;left;right
@@ -190,7 +189,7 @@ FUNCTION Get_Alignment (
    horizontal_ IN VARCHAR2 := null,
    wrapText_   IN BOOLEAN  := null ) RETURN tp_alignment;
 
-PROCEDURE Cell (
+PROCEDURE Cell ( -- NUMBER
    col_       IN PLS_INTEGER,
    row_       IN PLS_INTEGER,
    value_     IN NUMBER,
@@ -200,8 +199,30 @@ PROCEDURE Cell (
    borderId_  IN PLS_INTEGER  := null,
    alignment_ IN tp_alignment := null,
    sheet_     IN PLS_INTEGER  := null );
-
 PROCEDURE Cell (
+   col_       IN PLS_INTEGER,
+   row_       IN PLS_INTEGER,
+   value_num_ IN NUMBER      := null,
+   formula_   IN VARCHAR2    := '',
+   numFmtId_  IN VARCHAR2    := null,
+   fontId_    IN VARCHAR2    := null,
+   fillId_    IN VARCHAR2    := null,
+   borderId_  IN VARCHAR2    := null,
+   alignment_ IN VARCHAR2    := null,
+   sheet_     IN PLS_INTEGER := null );
+PROCEDURE CellN ( -- num version overload
+   col_       IN PLS_INTEGER,
+   row_       IN PLS_INTEGER,
+   value_num_ IN NUMBER      := null,
+   formula_   IN VARCHAR2    := '',
+   numFmtId_  IN VARCHAR2    := null,
+   fontId_    IN VARCHAR2    := null,
+   fillId_    IN VARCHAR2    := null,
+   borderId_  IN VARCHAR2    := null,
+   alignment_ IN VARCHAR2    := null,
+   sheet_     IN PLS_INTEGER := null );
+
+PROCEDURE Cell ( -- VARCHAR
    col_       IN PLS_INTEGER,
    row_       IN PLS_INTEGER,
    value_     IN VARCHAR2,
@@ -211,8 +232,30 @@ PROCEDURE Cell (
    borderId_  IN PLS_INTEGER  := null,
    alignment_ IN tp_alignment := null,
    sheet_     IN PLS_INTEGER  := null );
-
 PROCEDURE Cell (
+   col_       IN PLS_INTEGER,
+   row_       IN PLS_INTEGER,
+   value_str_ IN VARCHAR2    := '',
+   formula_   IN VARCHAR2    := '',
+   numFmtId_  IN VARCHAR2    := null,
+   fontId_    IN VARCHAR2    := null,
+   fillId_    IN VARCHAR2    := null,
+   borderId_  IN VARCHAR2    := null,
+   alignment_ IN VARCHAR2    := null,
+   sheet_     IN PLS_INTEGER := null );
+PROCEDURE CellS ( -- string version overload
+   col_       IN PLS_INTEGER,
+   row_       IN PLS_INTEGER,
+   value_str_ IN VARCHAR2    := '',
+   formula_   IN VARCHAR2    := '',
+   numFmtId_  IN VARCHAR2    := null,
+   fontId_    IN VARCHAR2    := null,
+   fillId_    IN VARCHAR2    := null,
+   borderId_  IN VARCHAR2    := null,
+   alignment_ IN VARCHAR2    := null,
+   sheet_     IN PLS_INTEGER := null );
+
+PROCEDURE Cell ( -- DATE
    col_       IN PLS_INTEGER,
    row_       IN PLS_INTEGER,
    value_     IN DATE,
@@ -222,6 +265,42 @@ PROCEDURE Cell (
    borderId_  IN PLS_INTEGER  := null,
    alignment_ IN tp_alignment := null,
    sheet_     IN PLS_INTEGER  := null );
+PROCEDURE Cell (
+   col_       IN PLS_INTEGER,
+   row_       IN PLS_INTEGER,
+   value_dt_  IN DATE        := null,
+   formula_   IN VARCHAR2    := '',
+   numFmtId_  IN VARCHAR2    := null,
+   fontId_    IN VARCHAR2    := null,
+   fillId_    IN VARCHAR2    := null,
+   borderId_  IN VARCHAR2    := null,
+   alignment_ IN VARCHAR2    := null,
+   sheet_     IN PLS_INTEGER := null );
+PROCEDURE CellD ( -- date version overload
+   col_       IN PLS_INTEGER,
+   row_       IN PLS_INTEGER,
+   value_dt_  IN DATE,
+   formula_   IN VARCHAR2    := '',
+   numFmtId_  IN VARCHAR2    := null,
+   fontId_    IN VARCHAR2    := null,
+   fillId_    IN VARCHAR2    := null,
+   borderId_  IN VARCHAR2    := null,
+   alignment_ IN VARCHAR2    := null,
+   sheet_     IN PLS_INTEGER := null );
+
+PROCEDURE CellB ( -- empty
+   col_       IN PLS_INTEGER,
+   row_       IN PLS_INTEGER,
+   numFmtId_  IN VARCHAR2    := null,
+   fontId_    IN VARCHAR2    := null,
+   fillId_    IN VARCHAR2    := null,
+   borderId_  IN VARCHAR2    := null,
+   alignment_ IN VARCHAR2    := null,
+   sheet_     IN PLS_INTEGER := null );
+
+PROCEDURE Condition_Color_Col (
+   col_   IN PLS_INTEGER,
+   sheet_ IN PLS_INTEGER := null );
 
 PROCEDURE Hyperlink (
    col_   IN PLS_INTEGER,
@@ -261,6 +340,42 @@ PROCEDURE Str_Formula (
    fillId_        IN PLS_INTEGER  := null,
    borderId_      IN PLS_INTEGER  := null,
    alignment_     IN tp_alignment := null,
+   sheet_         IN PLS_INTEGER  := null );
+
+PROCEDURE Formula (
+   col_           IN PLS_INTEGER,
+   row_           IN PLS_INTEGER,
+   formula_       IN VARCHAR2,
+   default_value_ IN NUMBER      := null,
+   numFmtId_      IN VARCHAR2    := null,
+   fontId_        IN VARCHAR2    := null,
+   fillId_        IN VARCHAR2    := null,
+   borderId_      IN VARCHAR2    := null,
+   alignment_     IN VARCHAR2    := null,
+   sheet_         IN PLS_INTEGER := null );
+
+PROCEDURE Formula (
+   col_           IN PLS_INTEGER,
+   row_           IN PLS_INTEGER,
+   formula_       IN VARCHAR2,
+   default_value_ IN VARCHAR2    := null,
+   numFmtId_      IN VARCHAR2    := null,
+   fontId_        IN VARCHAR2    := null,
+   fillId_        IN VARCHAR2    := null,
+   borderId_      IN VARCHAR2    := null,
+   alignment_     IN VARCHAR2    := null,
+   sheet_         IN PLS_INTEGER := null );
+
+PROCEDURE Formula (
+   col_           IN PLS_INTEGER,
+   row_           IN PLS_INTEGER,
+   formula_       IN VARCHAR2,
+   default_value_ IN DATE        := null,
+   numFmtId_      IN VARCHAR2    := null,
+   fontId_        IN VARCHAR2    := null,
+   fillId_        IN VARCHAR2    := null,
+   borderId_      IN VARCHAR2    := null,
+   alignment_     IN VARCHAR2    := null,
    sheet_         IN PLS_INTEGER := null );
 
 PROCEDURE Mergecells (
@@ -277,25 +392,50 @@ PROCEDURE List_Validation (
    p_tl_row       IN PLS_INTEGER,
    p_br_col       IN PLS_INTEGER, -- bottom right
    p_br_row       IN PLS_INTEGER,
-   p_style        IN VARCHAR2 := 'stop', -- stop, warning, information
-   p_title        IN VARCHAR2 := null,
-   p_prompt       IN VARCHAR  := null,
-   p_show_error   IN BOOLEAN  := false,
-   p_error_title  IN VARCHAR2 := null,
-   p_error_txt    IN VARCHAR2 := null,
-   sheet_        IN PLS_INTEGER := null );
+   p_style        IN VARCHAR2    := 'stop', -- stop, warning, information
+   p_title        IN VARCHAR2    := null,
+   p_prompt       IN VARCHAR     := null,
+   p_show_error   IN BOOLEAN     := false,
+   p_error_title  IN VARCHAR2    := null,
+   p_error_txt    IN VARCHAR2    := null,
+   sheet_         IN PLS_INTEGER := null );
 
 PROCEDURE List_Validation (
    p_sqref_col    IN PLS_INTEGER,
    p_sqref_row    IN PLS_INTEGER,
    p_defined_name IN VARCHAR2,
-   p_style        IN VARCHAR2 := 'stop', -- stop, warning, information
-   p_title        IN VARCHAR2 := null,
-   p_prompt       IN VARCHAR  := null,
-   p_show_error   IN BOOLEAN  := false,
-   p_error_title  IN VARCHAR2 := null,
-   p_error_txt    IN VARCHAR2 := null,
-   sheet_        IN PLS_INTEGER := null );
+   p_style        IN VARCHAR2    := 'stop', -- stop, warning, information
+   p_title        IN VARCHAR2    := null,
+   p_prompt       IN VARCHAR     := null,
+   p_show_error   IN BOOLEAN     := false,
+   p_error_title  IN VARCHAR2    := null,
+   p_error_txt    IN VARCHAR2    := null,
+   sheet_         IN PLS_INTEGER := null );
+
+PROCEDURE Add_Image (
+   col_         IN PLS_INTEGER,
+   row_         IN PLS_INTEGER,
+   img_blob_    IN BLOB,
+   name_        IN VARCHAR2    := '',
+   title_       IN VARCHAR2    := '',
+   description_ IN VARCHAR2    := '',
+   scale_       IN NUMBER      := null,
+   sheet_       IN PLS_INTEGER := null,
+   width_       IN PLS_INTEGER := null,
+   height_      IN PLS_INTEGER := null );
+
+PROCEDURE Load_Image (
+   col_         IN PLS_INTEGER,
+   row_         IN PLS_INTEGER,
+   dir_         IN VARCHAR2,
+   filename_    IN VARCHAR2,
+   name_        IN VARCHAR2    := '',
+   title_       IN VARCHAR2    := '',
+   description_ IN VARCHAR2    := '',
+   scale_       IN NUMBER      := null,
+   sheet_       IN PLS_INTEGER := null,
+   width_       IN PLS_INTEGER := null,
+   height_      IN PLS_INTEGER := null );
 
 PROCEDURE Defined_Name (
    tl_col_     IN PLS_INTEGER, -- top left
@@ -376,7 +516,8 @@ PROCEDURE Query2Sheet (
    sheet_       IN PLS_INTEGER := null,
    useXf_       IN BOOLEAN     := false,
    hdr_font_    IN PLS_INTEGER := null,
-   hdr_fill_    IN PLS_INTEGER := null );
+   hdr_fill_    IN PLS_INTEGER := null,
+   col_fmts_    IN numFmt_cols := numFmt_cols() );
 
 PROCEDURE Query2Sheet (
    col_count_   IN OUT PLS_INTEGER,
@@ -388,7 +529,8 @@ PROCEDURE Query2Sheet (
    sheet_       IN PLS_INTEGER := null,
    useXf_       IN BOOLEAN     := false,
    hdr_font_    IN PLS_INTEGER := null,
-   hdr_fill_    IN PLS_INTEGER := null );
+   hdr_fill_    IN PLS_INTEGER := null,
+   col_fmts_    IN numFmt_cols := numFmt_cols() );
 
 PROCEDURE Query2Sheet ( -- using REFCURSOR
    col_count_   IN OUT PLS_INTEGER,
@@ -400,7 +542,8 @@ PROCEDURE Query2Sheet ( -- using REFCURSOR
    sheet_       IN PLS_INTEGER := null,
    useXf_       IN BOOLEAN     := false,
    hdr_font_    IN PLS_INTEGER := null,
-   hdr_fill_    IN PLS_INTEGER := null );
+   hdr_fill_    IN PLS_INTEGER := null,
+   col_fmts_    IN numFmt_cols := numFmt_cols() );
 
 PROCEDURE Query2SheetAndAutofilter ( -- with Binds
    sql_         IN VARCHAR2,
@@ -411,7 +554,8 @@ PROCEDURE Query2SheetAndAutofilter ( -- with Binds
    sheet_       IN PLS_INTEGER := null,
    useXf_       IN BOOLEAN     := false,
    hdr_font_    IN PLS_INTEGER := null,
-   hdr_fill_    IN PLS_INTEGER := null );
+   hdr_fill_    IN PLS_INTEGER := null,
+   col_fmts_    IN numFmt_cols := numFmt_cols() );
 
 PROCEDURE Query2SheetAndAutofilter ( -- no Binds
    sql_         IN VARCHAR2,
@@ -421,7 +565,8 @@ PROCEDURE Query2SheetAndAutofilter ( -- no Binds
    sheet_       IN PLS_INTEGER := null,
    useXf_       IN BOOLEAN     := false,
    hdr_font_    IN PLS_INTEGER := null,
-   hdr_fill_    IN PLS_INTEGER := null );
+   hdr_fill_    IN PLS_INTEGER := null,
+   col_fmts_    IN numFmt_cols := numFmt_cols() );
 
 PROCEDURE SetUseXf (
    p_val BOOLEAN := true );
@@ -429,6 +574,26 @@ PROCEDURE SetUseXf (
 ------------------------------------------------------------------------------
 -- Special Page Generators
 --
+PROCEDURE Set_Param (
+   params_ IN OUT params_arr,
+   ix_     IN NUMBER,
+   name_   IN VARCHAR2,
+   val_    IN VARCHAR2,
+   extra_  IN VARCHAR2 := '' );
+
+PROCEDURE Bind_Value (
+   binds_   IN OUT bind_arr,
+   bind_id_ IN VARCHAR2,
+   val_     IN VARCHAR2 );
+PROCEDURE Bind_Value (
+   binds_   IN OUT bind_arr,
+   bind_id_ IN VARCHAR2,
+   val_     IN NUMBER );
+PROCEDURE Bind_Value (
+   binds_   IN OUT bind_arr,
+   bind_id_ IN VARCHAR2,
+   val_     IN DATE );
+
 PROCEDURE Create_Params_Sheet (
    report_name_ IN VARCHAR2,
    params_      IN params_arr,
@@ -456,7 +621,14 @@ TYPE tp_XF_fmt IS RECORD (
 TYPE tp_col_fmts is table of tp_XF_fmt index by PLS_INTEGER;
 TYPE tp_row_fmts is table of tp_XF_fmt index by PLS_INTEGER;
 TYPE tp_widths is table of NUMBER index by PLS_INTEGER;
+TYPE tp_cell_value IS RECORD (
+   str_val  VARCHAR2(32000),
+   num_val  NUMBER,
+   dt_val   DATE
+);
 TYPE tp_cell IS RECORD (
+   datatype    VARCHAR2(30), -- string|number|date
+   ora_value   tp_cell_value,
    value       NUMBER,
    style       VARCHAR2(50),
    formula_idx PLS_INTEGER
@@ -504,6 +676,16 @@ TYPE tp_validation IS RECORD (
    sqref            VARCHAR2(32767 CHAR)
 );
 TYPE tp_validations IS TABLE OF tp_validation INDEX BY PLS_INTEGER;
+TYPE tp_drawing IS RECORD (
+   img_id      PLS_INTEGER,
+   row         PLS_INTEGER,
+   col         PLS_INTEGER,
+   scale       NUMBER,
+   name        VARCHAR2(100),
+   title       VARCHAR2(100),
+   description VARCHAR2(4000)
+);
+TYPE tp_drawings IS TABLE OF tp_drawing INDEX BY PLS_INTEGER;
 TYPE tp_sheet IS RECORD (
    rows        tp_rows,
    widths      tp_widths,
@@ -518,7 +700,8 @@ TYPE tp_sheet IS RECORD (
    mergecells  tp_mergecells,
    validations tp_validations,
    tabcolor    VARCHAR2(8),
-   fontid      PLS_INTEGER
+   fontid      PLS_INTEGER,
+   drawings    tp_drawings
 );
 TYPE tp_sheets is table of tp_sheet index by PLS_INTEGER;
 TYPE tp_numFmt IS RECORD (
@@ -548,7 +731,7 @@ TYPE tp_border is record (
    top    VARCHAR2(17),
    bottom VARCHAR2(17),
    left   VARCHAR2(17),
-   right VARCHAR2(17)
+   right  VARCHAR2(17)
 );
 TYPE tp_borders is table of tp_border index by PLS_INTEGER;
 TYPE tp_numFmtIndexes is table of PLS_INTEGER index by PLS_INTEGER;
@@ -559,7 +742,14 @@ TYPE tp_defined_name is record (
    ref VARCHAR2(32767 char),
    sheet PLS_INTEGER
 );
-TYPE tp_defined_names is table of tp_defined_name index by PLS_INTEGER;
+TYPE tp_defined_names IS TABLE OF tp_defined_name index by PLS_INTEGER;
+TYPE tp_image IS RECORD (
+   img_blob    BLOB,
+   img_hash    RAW(128), --NUMBER,
+   width       PLS_INTEGER,
+   height      PLS_INTEGER
+);
+TYPE tp_images is table of tp_image index by PLS_INTEGER;
 TYPE tp_book IS RECORD (
    sheets        tp_sheets,
    strings       tp_strings,
@@ -573,13 +763,48 @@ TYPE tp_book IS RECORD (
    numFmtIndexes tp_numFmtIndexes,
    defined_names tp_defined_names,
    formulas      tp_formulas,
-   fontid        PLS_INTEGER
+   fontid        PLS_INTEGER,
+   images        tp_images
 );
 
 workbook              tp_book;
 g_useXf_              BOOLEAN := true;
 g_addtxt2utf8blob_tmp VARCHAR2(32767);
 
+
+-----
+-- Function Definitions
+--
+FUNCTION Get_Cell_Xf (
+   sheet_ IN PLS_INTEGER,
+   col_   IN PLS_INTEGER,
+   row_   IN PLS_INTEGER ) RETURN tp_Xf_fmt;
+FUNCTION Get_Cell_Xff (
+   sheet_ IN PLS_INTEGER,
+   col_   IN PLS_INTEGER,
+   row_   IN PLS_INTEGER ) RETURN tp_Xf_fmt;
+
+FUNCTION Get_Cell_Value_Num (
+   col_   IN PLS_INTEGER,
+   row_   IN PLS_INTEGER,
+   sheet_ IN PLS_INTEGER := null ) RETURN NUMBER;
+FUNCTION Get_Cell_Value_Str (
+   col_   IN PLS_INTEGER,
+   row_   IN PLS_INTEGER,
+   sheet_ IN PLS_INTEGER := null ) RETURN VARCHAR2;
+FUNCTION Get_Cell_Value_Date (
+   col_   IN PLS_INTEGER,
+   row_   IN PLS_INTEGER,
+   sheet_ IN PLS_INTEGER := null ) RETURN DATE;
+FUNCTION Get_Cell_Value (
+   col_   IN PLS_INTEGER,
+   row_   IN PLS_INTEGER,
+   sheet_ IN PLS_INTEGER := null ) RETURN VARCHAR2;
+
+
+-----
+-- Function Implementations
+--
 PROCEDURE addtxt2utf8blob_init (
    blob_ IN OUT NOCOPY BLOB )
 IS BEGIN
@@ -782,21 +1007,38 @@ BEGIN
 END Finish_Zip;
 
 FUNCTION Alfan_Col (
-   p_col PLS_INTEGER ) RETURN VARCHAR2
+   col_ IN PLS_INTEGER ) RETURN VARCHAR2
 IS BEGIN
    RETURN CASE
-      WHEN p_col > 702 THEN chr(64+trunc((p_col-27)/676)) || chr(65+mod(trunc((p_col-1)/26)-1, 26)) || chr(65+mod(p_col-1, 26))
-      WHEN p_col > 26  THEN chr(64+trunc((p_col-1)/26)) || chr(65+mod(p_col-1, 26))
-      ELSE chr(64+p_col)
+      WHEN col_ > 702 THEN chr(64+trunc((col_-27)/676)) || chr(65+mod(trunc((col_-1)/26)-1, 26)) || chr(65+mod(col_-1, 26))
+      WHEN col_ > 26  THEN chr(64+trunc((col_-1)/26)) || chr(65+mod(col_-1, 26))
+      ELSE chr(64+col_)
    END;
 END Alfan_Col;
 
-FUNCTION Col_Alfan(
-   p_col VARCHAR2 ) RETURN PLS_INTEGER
+FUNCTION Alfan_Cell (
+   col_ IN PLS_INTEGER,
+   row_ IN PLS_INTEGER ) RETURN VARCHAR2
+IS
+BEGIN
+   RETURN Alfan_Col (col_) || to_char(row_);
+END Alfan_Cell;
+
+FUNCTION Alfan_Range (
+   col_tl_ IN PLS_INTEGER,
+   row_tl_ IN PLS_INTEGER,
+   col_br_ IN PLS_INTEGER,
+   row_br_ IN PLS_INTEGER ) RETURN VARCHAR2
 IS BEGIN
-   RETURN ascii(substr(p_col,-1)) - 64
-      + nvl((ascii(substr(p_col,-2,1))-64) * 26, 0)
-      + nvl((ascii(substr(p_col,-3,1))-64) * 676, 0);
+   RETURN Alfan_Cell (col_tl_, row_tl_) || ':' || Alfan_Cell (col_br_, row_br_);
+END Alfan_Range;
+
+FUNCTION Col_Alfan(
+   col_ IN VARCHAR2 ) RETURN PLS_INTEGER
+IS BEGIN
+   RETURN ascii(substr(col_,-1)) - 64
+      + nvl((ascii(substr(col_,-2,1))-64) * 26, 0)
+      + nvl((ascii(substr(col_,-3,1))-64) * 676, 0);
 END Col_Alfan;
 
 PROCEDURE Clear_Workbook
@@ -819,6 +1061,7 @@ BEGIN
       workbook.sheets(s_).comments.delete();
       workbook.sheets(s_).mergecells.delete();
       workbook.sheets(s_).validations.delete();
+      workbook.sheets(s_).drawings.delete();
       s_ := workbook.sheets.next(s_);
    END LOOP;
    workbook.strings.delete();
@@ -830,6 +1073,10 @@ BEGIN
    workbook.cellXfs.delete();
    workbook.defined_names.delete();
    workbook.formulas.delete();
+   FOR i_ IN 1 .. workbook.images.count LOOP
+      dbms_lob.freeTemporary (workbook.images(i_).img_blob);
+   END LOOP;
+   workbook.images.delete();
    workbook := null;
 END Clear_Workbook;
 
@@ -842,14 +1089,29 @@ BEGIN
    workbook.sheets(sh_).tabcolor := substr(tabcolor_, 1, 8);
 END Set_Tabcolor;
 
+PROCEDURE Check_Duplicate_Sheet_Name (
+   new_name_ IN VARCHAR2 )
+IS BEGIN
+   IF workbook.sheets.count > 0 THEN
+      FOR sh_ IN workbook.sheets.first .. workbook.sheets.last LOOP
+         IF workbook.sheets(sh_).name = new_name_ THEN
+            Cbh_Utils_API.Raise_App_Error ('A sheet with the name ":P1" already exists', new_name_);
+         END IF;
+      END LOOP;
+   END IF;
+END Check_Duplicate_Sheet_Name;
 
 FUNCTION New_Sheet (
    sheetname_ VARCHAR2 := null,
    tab_color_ VARCHAR2 := null ) RETURN PLS_INTEGER
 IS
-   s_ PLS_INTEGER := workbook.sheets.count() + 1;
+   s_          PLS_INTEGER   := workbook.sheets.count() + 1;
+   clean_name_ VARCHAR2(200) := nvl(dbms_xmlgen.convert(
+      translate (sheetname_, 'a/\[]*:?', 'a')), 'Sheet'||s_
+   );
 BEGIN
-   workbook.sheets(s_).name := nvl(dbms_xmlgen.convert(translate(sheetname_, 'a/\[]*:?', 'a')), 'Sheet'||s_);
+   Check_Duplicate_Sheet_Name (clean_name_);
+   workbook.sheets(s_).name := clean_name_;
    IF workbook.strings.count() = 0 THEN
       workbook.str_cnt := 0;
    END IF;
@@ -880,20 +1142,25 @@ END New_Sheet;
 PROCEDURE Set_Sheet_Name (
    sheet_  IN PLS_INTEGER,
    name_   IN VARCHAR2 )
-IS BEGIN
-   workbook.sheets(sheet_).name := nvl(dbms_xmlgen.convert(translate(name_, 'a/\[]*:?', 'a')), 'Sheet'||sheet_);
+IS
+   clean_name_ VARCHAR2(200) := nvl(dbms_xmlgen.convert(
+      translate (name_, 'a/\[]*:?', 'a')), 'Sheet'||sheet_
+   );
+BEGIN
+   Check_Duplicate_Sheet_Name (clean_name_);
+   workbook.sheets(sheet_).name := clean_name_;
 END Set_Sheet_Name;
 
 PROCEDURE Set_Col_Width (
-   sheet_  PLS_INTEGER,
-   col_    PLS_INTEGER,
-   format_ VARCHAR2 )
+   sheet_  IN PLS_INTEGER,
+   col_    IN PLS_INTEGER,
+   format_ IN VARCHAR2 )
 IS
    width_  NUMBER;
    nr_chr_ PLS_INTEGER;
 BEGIN
    IF format_ IS null THEN
-      RETURN;
+      return;
    END IF;
    IF instr(format_, ';') > 0 THEN
       nr_chr_ := length(translate(substr(format_, 1, instr(format_,';')-1), 'a\"', 'a'));
@@ -956,6 +1223,14 @@ BEGIN
    END IF;
    RETURN numFmtId_;
 END Get_NumFmt;
+
+PROCEDURE Add_NumFmt (
+   fmt_id_ IN VARCHAR2,
+   format_ IN VARCHAR2 )
+IS BEGIN
+   numFmt_(fmt_id_) := format_;
+END Add_NumFmt;
+   
 
 PROCEDURE Set_Font (
    name_      VARCHAR2    := 'Calibri',
@@ -1053,6 +1328,15 @@ BEGIN
    null;
 END Get_Fill;
 
+PROCEDURE Add_Fill (
+   fill_id_     IN VARCHAR2,
+   patternType_ IN VARCHAR2,
+   fgRGB_       IN VARCHAR2 := null,
+   bgRGB_       IN VARCHAR2 := null )
+IS BEGIN
+   fills_(fill_id_) := Get_Fill (patternType_, fgRGB_, bgRGB_);
+END Add_Fill;
+
 
 FUNCTION Get_Border (
    top_    IN VARCHAR2 := 'thin',
@@ -1087,15 +1371,144 @@ PROCEDURE Get_Border (
    left_   IN VARCHAR2 := 'thin',
    right_  IN VARCHAR2 := 'thin' )
 IS
-   ix_ NUMBER := Get_Border (top_, bottom_, left_, right_);
+   throw_ NUMBER := Get_Border (top_, bottom_, left_, right_); -- ignore
 BEGIN
-   SELECT 1 INTO ix_ FROM dual; -- avoid compiler warning
+   null;
 END Get_Border;
 
+-----
+-- Add_Border_To_Cell()
+--   This function applies a border to a given cell while also preserving that
+--   cell's existing styles.  Note that if we ONLY want to apply our border to
+--   the right-wall of the cell, and preserve the border-styles of the other 3
+--   walls, then we should leave those other 3 values null.  If you explicitly
+--   need to unset a border, you can pass in the value 'none'
+--
+PROCEDURE Add_Border_To_Cell (
+   col_     IN PLS_INTEGER,
+   row_     IN PLS_INTEGER,
+   top_     IN VARCHAR2    := '',
+   bottom_  IN VARCHAR2    := '',
+   left_    IN VARCHAR2    := '',
+   right_   IN VARCHAR2    := '',
+   sheet_   IN PLS_INTEGER := null )
+IS
+   sh_          PLS_INTEGER  := nvl(sheet_, workbook.sheets.count());
+   Xf_          tp_Xf_fmt    := Get_Cell_Xff(sh_, col_, row_);
+   cell_border_ tp_border    := workbook.borders(Xf_.borderId);
+   cell_dt_     VARCHAR2(30) := workbook.sheets(sh_).rows(row_)(col_).datatype;
+   border_id_   PLS_INTEGER;
+BEGIN
+
+   cell_border_.top    := nvl (top_,    cell_border_.top);
+   cell_border_.bottom := nvl (bottom_, cell_border_.bottom);
+   cell_border_.left   := nvl (left_,   cell_border_.left);
+   cell_border_.right  := nvl (right_,  cell_border_.right);
+   border_id_          := Get_Border (
+      cell_border_.top, cell_border_.bottom, cell_border_.left, cell_border_.right
+   );
+
+   IF cell_dt_ = 'number' THEN
+      Cell (
+         col_, row_, Get_Cell_Value_Num (col_, row_, sh_), --workbook.sheets(sh_).rows(row_)(col_).ora_value.num_val,
+         Xf_.numFmtId, Xf_.fontId, Xf_.fillId, border_id_, Xf_.alignment, sh_
+      );
+   ELSIF cell_dt_ = 'string' THEN
+      Cell (
+         col_, row_, Get_Cell_Value_Str (col_, row_, sh_), --workbook.sheets(sh_).rows(row_)(col_).ora_value.str_val,
+         Xf_.numFmtId, Xf_.fontId, Xf_.fillId, border_id_, Xf_.alignment, sh_
+      );
+   ELSIF cell_dt_ = 'date' THEN
+      Cell (
+         col_, row_, Get_Cell_Value_Date (col_, row_, sh_), --workbook.sheets(sh_).rows(row_)(col_).ora_value.dt_val,
+         Xf_.numFmtId, Xf_.fontId, Xf_.fillId, border_id_, Xf_.alignment, sh_
+      );
+   END IF;
+
+END Add_Border_To_Cell;
+
+-----
+-- Add_Border_To_Range()
+--   Take a range of cells and put a border around it!  The procedure will not
+--   override other settings in that that range of cells even if some of those
+--   other settings have set borders on some of the internal cells
+--
+PROCEDURE Add_Border_To_Range (
+   cell_left_ IN PLS_INTEGER,
+   cell_top_  IN PLS_INTEGER,
+   width_     IN PLS_INTEGER,
+   height_    IN PLS_INTEGER,
+   style_     IN VARCHAR2    := 'medium', -- thin|medium|thick|dotted...
+   sheet_     IN PLS_INTEGER := null )
+IS
+   sh_         PLS_INTEGER := nvl(sheet_, workbook.sheets.count());
+   col_start_  PLS_INTEGER := cell_left_;
+   col_end_    PLS_INTEGER := cell_left_ + width_ - 1;
+   row_start_  PLS_INTEGER := cell_top_;
+   row_end_    PLS_INTEGER := cell_top_ + height_ - 1;
+BEGIN
+
+   -- for a 1 x 1 span...
+   IF width_ = 1 AND height_ = 1 THEN
+      Add_Border_To_Cell (cell_left_, cell_top_, style_, style_, style_, style_, sh_);
+
+   -- for a n x 1 span...
+   ELSIF height_ = 1 THEN
+      Add_Border_To_Cell (cell_left_, cell_top_, style_, style_, style_, '', sh_);
+      FOR col_ IN (cell_left_+1) .. (cell_left_+width_-2) LOOP
+         Add_Border_To_Cell (col_, cell_top_, style_, style_, '', '', sh_);
+      END LOOP;
+      Add_Border_To_Cell (cell_left_+width_-1, cell_top_, style_, style_, '', style_, sh_);
+
+   -- for a 1 x n span
+   ELSIF width_ = 1 THEN
+      Add_Border_To_Cell (cell_left_, cell_top_, style_, '', style_, style_, sh_);
+      FOR row_ IN (cell_top_+1) .. (cell_top_+height_-2) LOOP
+         Add_Border_To_Cell (cell_left_, row_, '', '', style_, style_, sh_);
+      END LOOP;
+      Add_Border_To_Cell (cell_left_, cell_top_+height_-1, '', style_, style_, style_, sh_);
+
+   -- for an n x m span
+   ELSE
+
+      FOR col_ IN col_start_ .. col_end_ LOOP
+         FOR row_ IN row_start_ .. row_end_ LOOP
+
+            IF col_ = col_start_ THEN -- first column
+               IF row_ = row_start_ THEN
+                  Add_Border_To_Cell (col_, row_, style_, '', style_, '', sh_); -- top-left
+               ELSIF row_ = row_end_ THEN
+                  Add_Border_To_Cell (col_, row_, '', style_, style_, '', sh_); -- bottom-left
+               ELSE
+                  Add_Border_To_Cell (col_, row_, '', '', style_, '', sh_); -- left-only
+               END IF;
+            ELSIF col_ = col_end_ THEN -- last column
+               IF row_ = row_start_ THEN
+                  Add_Border_To_Cell (col_, row_, style_, '', '', style_, sh_); -- top-right
+               ELSIF row_ = row_end_ THEN
+                  Add_Border_To_Cell (col_, row_, '', style_, '', style_, sh_); -- bottom-right
+               ELSE
+                  Add_Border_To_Cell (col_, row_, '', '', '', style_, sh_); -- right-only
+               END IF;
+            ELSE -- middle columns
+               IF row_ = row_start_ THEN
+                  Add_Border_To_Cell (col_, row_, style_, '', '', '', sh_); -- top-only
+               ELSIF row_ = row_end_ THEN
+                  Add_Border_To_Cell (col_, row_, '', style_, '', '', sh_); -- bottom-only
+               END IF;
+            END IF;
+
+         END LOOP;
+      END LOOP;
+
+   END IF;
+
+END Add_Border_To_Range;
+
 FUNCTION Get_Alignment (
-   vertical_    VARCHAR2 := null,
-   horizontal_  VARCHAR2 := null,
-   wrapText_    BOOLEAN := null ) RETURN tp_alignment
+   vertical_   VARCHAR2 := null,
+   horizontal_ VARCHAR2 := null,
+   wrapText_   BOOLEAN  := null ) RETURN tp_alignment
 IS
    rv_ tp_alignment;
 BEGIN
@@ -1105,123 +1518,329 @@ BEGIN
    RETURN rv_;
 END Get_Alignment;
 
-FUNCTION Get_XfId (
-   sheet_     PLS_INTEGER,
-   col_       PLS_INTEGER,
-   row_       PLS_INTEGER,
-   numFmtId_  PLS_INTEGER := null,
-   fontId_    PLS_INTEGER := null,
-   fillId_    PLS_INTEGER := null,
-   borderId_  PLS_INTEGER := null,
-   alignment_ tp_alignment := null ) RETURN VARCHAR2
+FUNCTION Get_Or_Create_XfId (
+   Xf_ tp_Xf_fmt ) RETURN PLS_INTEGER
 IS
-   cnt_    PLS_INTEGER;
-   XfId_   PLS_INTEGER;
-   XF_     tp_XF_fmt;
-   col_XF_ tp_XF_fmt;
-   row_XF_ tp_XF_fmt;
+   xf_count_ PLS_INTEGER := workbook.cellXfs.count();
+   xfId_     PLS_INTEGER;
 BEGIN
+   FOR i_ IN 1 .. xf_count_ LOOP
+      IF (   workbook.cellXfs(i_).numFmtId = Xf_.numFmtId
+         AND workbook.cellXfs(i_).fontId = Xf_.fontId
+         AND workbook.cellXfs(i_).fillId = Xf_.fillId
+         AND workbook.cellXfs(i_).borderId = Xf_.borderId
+         AND nvl(workbook.cellXfs(i_).alignment.vertical, 'x') = nvl (Xf_.alignment.vertical, 'x')
+         AND nvl(workbook.cellXfs(i_).alignment.horizontal, 'x') = nvl (Xf_.alignment.horizontal, 'x')
+         AND nvl(workbook.cellXfs(i_).alignment.wrapText, false) = nvl (Xf_.alignment.wrapText, false)
+      ) THEN
+         XfId_ := i_;
+         exit;
+      END IF;
+   END LOOP;
+   IF XfId_ IS null THEN -- we didn't find a matching style, so create a new one
+      workbook.cellXfs(xf_count_+1) := Xf_;
+      xfId_ := xf_count_ + 1;
+   END IF;
+   RETURN xfId_;
+END Get_Or_Create_XfId;
+
+FUNCTION Get_XfId (
+   sheet_     IN PLS_INTEGER,
+   col_       IN PLS_INTEGER,
+   row_       IN PLS_INTEGER,
+   numFmtId_  IN PLS_INTEGER  := null,
+   fontId_    IN PLS_INTEGER  := null,
+   fillId_    IN PLS_INTEGER  := null,
+   borderId_  IN PLS_INTEGER  := null,
+   alignment_ IN tp_alignment := null ) RETURN VARCHAR2
+IS
+   XfId_   PLS_INTEGER;
+   Xf_     tp_Xf_fmt;
+   col_Xf_ tp_Xf_fmt;
+   row_Xf_ tp_Xf_fmt;
+BEGIN
+
    IF not g_useXf_ THEN
       RETURN '';
    END IF;
+
    IF workbook.sheets(sheet_).col_fmts.exists(col_) THEN
-      col_XF_ := workbook.sheets(sheet_).col_fmts(col_);
+      col_Xf_ := workbook.sheets(sheet_).col_fmts(col_);
    END IF;
    IF workbook.sheets(sheet_).row_fmts.exists(row_) THEN
-      row_XF_ := workbook.sheets(sheet_).row_fmts(row_);
+      row_Xf_ := workbook.sheets(sheet_).row_fmts(row_);
    END IF;
-   XF_.numFmtId := coalesce (numFmtId_, col_XF_.numFmtId, row_XF_.numFmtId, workbook.sheets(sheet_).fontid, workbook.fontid);
-   XF_.fontId   := coalesce (fontId_, col_XF_.fontId, row_XF_.fontId, 0);
-   XF_.fillId   := coalesce (fillId_, col_XF_.fillId, row_XF_.fillId, 0);
-   XF_.borderId := coalesce (borderId_, col_XF_.borderId, row_XF_.borderId, 0);
-   XF_.alignment := Get_Alignment (
-      coalesce (alignment_.vertical, col_XF_.alignment.vertical, row_XF_.alignment.vertical),
-      coalesce (alignment_.horizontal, col_XF_.alignment.horizontal, row_XF_.alignment.horizontal),
-      coalesce (alignment_.wrapText, col_XF_.alignment.wrapText, row_XF_.alignment.wrapText)
+
+   Xf_.numFmtId  := coalesce (numFmtId_, col_Xf_.numFmtId, row_Xf_.numFmtId, workbook.sheets(sheet_).fontid, workbook.fontid);
+   Xf_.fontId    := coalesce (fontId_, col_Xf_.fontId, row_Xf_.fontId, 0);
+   Xf_.fillId    := coalesce (fillId_, col_Xf_.fillId, row_Xf_.fillId, 0);
+   Xf_.borderId  := coalesce (borderId_, col_Xf_.borderId, row_Xf_.borderId, 0);
+   Xf_.alignment := Get_Alignment (
+      coalesce (alignment_.vertical, col_Xf_.alignment.vertical, row_Xf_.alignment.vertical),
+      coalesce (alignment_.horizontal, col_Xf_.alignment.horizontal, row_Xf_.alignment.horizontal),
+      coalesce (alignment_.wrapText, col_Xf_.alignment.wrapText, row_Xf_.alignment.wrapText)
    );
-   IF XF_.numFmtId + XF_.fontId + XF_.fillId + XF_.borderId = 0
-      AND XF_.alignment.vertical IS null
-      AND XF_.alignment.horizontal IS null
-      AND not nvl(XF_.alignment.wrapText, false)
+
+   IF Xf_.numFmtId + Xf_.fontId + Xf_.fillId + Xf_.borderId = 0
+      AND Xf_.alignment.vertical IS null AND Xf_.alignment.horizontal IS null
+      AND not nvl(Xf_.alignment.wrapText, false)
    THEN
       RETURN '';
    END IF;
-   IF XF_.numFmtId > 0 THEN
-      Set_Col_Width (sheet_, col_, workbook.numFmts(workbook.numFmtIndexes(XF_.numFmtId)).formatCode);
+
+   IF Xf_.numFmtId > 0 THEN
+      Set_Col_Width (sheet_, col_, workbook.numFmts(workbook.numFmtIndexes(Xf_.numFmtId)).formatCode);
    END IF;
-   cnt_ := workbook.cellXfs.count();
-   FOR i IN 1 .. cnt_ LOOP
-      IF (   workbook.cellXfs(i).numFmtId = XF_.numFmtId
-         and workbook.cellXfs(i).fontId = XF_.fontId
-         and workbook.cellXfs(i).fillId = XF_.fillId
-         and workbook.cellXfs(i).borderId = XF_.borderId
-         and nvl(workbook.cellXfs(i).alignment.vertical, 'x') = nvl (XF_.alignment.vertical, 'x')
-         and nvl(workbook.cellXfs(i).alignment.horizontal, 'x') = nvl (XF_.alignment.horizontal, 'x')
-         and nvl(workbook.cellXfs(i).alignment.wrapText, false) = nvl (XF_.alignment.wrapText, false)
-      ) THEN
-         XfId_ := i;
-         EXIT;
-      END IF;
-   END LOOP;
-   IF XfId_ IS null THEN
-      cnt_ := cnt_ + 1;
-      XfId_ := cnt_;
-      workbook.cellXfs(cnt_) := XF_;
-   END IF;
+
+   XfId_ := Get_Or_Create_XfId (Xf_);
    RETURN 's="' || XfId_ || '"';
+
 END Get_XfId;
 
-PROCEDURE Cell (
-   col_       PLS_INTEGER,
-   row_       PLS_INTEGER,
-   value_     NUMBER,
-   numFmtId_  PLS_INTEGER  := null,
-   fontId_    PLS_INTEGER  := null,
-   fillId_    PLS_INTEGER  := null,
-   borderId_  PLS_INTEGER  := null,
-   alignment_ tp_alignment := null,
-   sheet_     PLS_INTEGER  := null )
+FUNCTION Extract_Id_From_Style (
+   style_ IN VARCHAR2 ) RETURN PLS_INTEGER
+IS BEGIN
+   RETURN CASE
+      WHEN style_ IS null OR style_ = 't="s" ' THEN to_number(null)
+      ELSE to_number(regexp_replace (style_, '.*s="(\d+)".*', '\1'))
+   END;
+END Extract_Id_From_Style;
+
+FUNCTION Get_Cell_XfId (
+   sheet_ IN PLS_INTEGER,
+   col_   IN PLS_INTEGER,
+   row_   IN PLS_INTEGER ) RETURN PLS_INTEGER
+IS
+   style_tag_ VARCHAR2(50);
+BEGIN
+   IF workbook.sheets(sheet_).rows.exists(row_) AND
+      workbook.sheets(sheet_).rows(row_).exists(col_)
+   THEN
+      style_tag_ := workbook.sheets(sheet_).rows(row_)(col_).style;
+   ELSE
+      -- We need to create the cell in the PlSql model so that later functions
+      -- can manipulate it
+      CellB (col_, row_, sheet_ => sheet_);
+   END IF;
+
+   RETURN CASE
+      WHEN style_tag_ IS null OR style_tag_ = 't="s"' THEN null
+      ELSE Extract_Id_From_Style (style_tag_)
+   END;
+END Get_Cell_XfId;
+
+-----
+-- Get_Cell_Xf()
+--   If the cell has an XfId, then we return that Xf without reverting back to
+--   rows and columns
+--
+FUNCTION Get_Cell_Xf (
+   sheet_ IN PLS_INTEGER,
+   col_   IN PLS_INTEGER,
+   row_   IN PLS_INTEGER ) RETURN tp_Xf_fmt
+IS
+   xfId_ PLS_INTEGER := Get_Cell_XfId (sheet_, col_, row_);
+BEGIN
+   IF xfId_ IS null THEN
+      RETURN null;
+   ELSE
+      RETURN workbook.cellXfs (xfId_);
+   END IF;
+END Get_Cell_Xf;
+
+FUNCTION Get_Cell_Xff (
+   sheet_ IN PLS_INTEGER,
+   col_   IN PLS_INTEGER,
+   row_   IN PLS_INTEGER ) RETURN tp_Xf_fmt
+IS
+   cell_XfId_ PLS_INTEGER := Get_Cell_XfId (sheet_, col_, row_);
+   col_Xf_    tp_Xf_fmt;
+   row_Xf_    tp_Xf_fmt;
+   Xf_        tp_Xf_fmt;
+BEGIN
+   -- If the Cell doesn't have its own style, then we also need to verify that
+   -- the cell's Row + Column don't have a "background" style
+   IF cell_XfId_ IS NOT null THEN
+
+      RETURN workbook.cellXfs (cell_xfId_);
+
+   ELSE
+
+      IF workbook.sheets(sheet_).col_fmts.exists(col_) THEN
+         col_Xf_ := workbook.sheets(sheet_).col_fmts(col_);
+      END IF;
+      IF workbook.sheets(sheet_).row_fmts.exists(row_) THEN
+         row_Xf_ := workbook.sheets(sheet_).row_fmts(row_);
+      END IF;
+
+      Xf_.numFmtId  := coalesce (col_Xf_.numFmtId, row_Xf_.numFmtId, workbook.sheets(sheet_).fontid, workbook.fontid);
+      Xf_.fontId    := coalesce (col_Xf_.fontId, row_Xf_.fontId, 0);
+      Xf_.fillId    := coalesce (col_Xf_.fillId, row_Xf_.fillId, 0);
+      Xf_.borderId  := coalesce (col_Xf_.borderId, row_Xf_.borderId, 0);
+      Xf_.alignment := Get_Alignment (
+         coalesce (col_Xf_.alignment.vertical, row_Xf_.alignment.vertical),
+         coalesce (col_Xf_.alignment.horizontal, row_Xf_.alignment.horizontal),
+         coalesce (col_Xf_.alignment.wrapText, row_Xf_.alignment.wrapText)
+      );
+      RETURN Xf_;
+
+   END IF;
+END Get_Cell_Xff;
+
+FUNCTION Get_Cell_Value_Num (
+   col_    IN PLS_INTEGER,
+   row_    IN PLS_INTEGER,
+   sheet_  IN PLS_INTEGER := null ) RETURN NUMBER
+IS
+   sh_ PLS_INTEGER  := nvl(sheet_, workbook.sheets.count());
+BEGIN
+   RETURN workbook.sheets(sh_).rows(row_)(col_).ora_value.num_val;
+END Get_Cell_Value_Num;
+
+FUNCTION Get_Cell_Value_Str (
+   col_    IN PLS_INTEGER,
+   row_    IN PLS_INTEGER,
+   sheet_  IN PLS_INTEGER := null ) RETURN VARCHAR2
 IS
    sh_ PLS_INTEGER := nvl(sheet_, workbook.sheets.count());
 BEGIN
-   workbook.sheets(sh_).rows(row_)(col_).value := value_;
-   workbook.sheets(sh_).rows(row_)(col_).style := null;
-   workbook.sheets(sh_).rows(row_)(col_).style := get_XfId (
+   RETURN workbook.sheets(sh_).rows(row_)(col_).ora_value.str_val;
+END Get_Cell_Value_Str;
+
+FUNCTION Get_Cell_Value_Date (
+   col_    IN PLS_INTEGER,
+   row_    IN PLS_INTEGER,
+   sheet_  IN PLS_INTEGER := null ) RETURN DATE
+IS
+   sh_ PLS_INTEGER := nvl(sheet_, workbook.sheets.count());
+BEGIN
+   RETURN workbook.sheets(sh_).rows(row_)(col_).ora_value.dt_val;
+END Get_Cell_Value_Date;
+
+FUNCTION Get_Cell_Value (
+   col_    IN PLS_INTEGER,
+   row_    IN PLS_INTEGER,
+   sheet_  IN PLS_INTEGER := null ) RETURN VARCHAR2
+IS
+   sh_ PLS_INTEGER := nvl(sheet_, workbook.sheets.count());
+BEGIN
+   IF workbook.sheets(sh_).rows(row_)(col_).datatype = 'string' THEN
+      RETURN Get_Cell_Value_Str (col_, row_, sheet_);
+   ELSIF workbook.sheets(sh_).rows(row_)(col_).datatype = 'number' THEN
+      RETURN to_char(Get_Cell_VAlue_Num (col_, row_, sheet_));
+   ELSIF workbook.sheets(sh_).rows(row_)(col_).datatype = 'date' THEN
+      RETURN to_char (Get_Cell_Value_Date (col_, row_, sheet_), 'YYYY-MM-DD-HH24:MI');
+   END IF;
+END Get_Cell_Value;
+
+
+PROCEDURE Cell ( -- num version
+   col_       IN PLS_INTEGER,
+   row_       IN PLS_INTEGER,
+   value_     IN NUMBER,
+   numFmtId_  IN PLS_INTEGER  := null,
+   fontId_    IN PLS_INTEGER  := null,
+   fillId_    IN PLS_INTEGER  := null,
+   borderId_  IN PLS_INTEGER  := null,
+   alignment_ IN tp_alignment := null,
+   sheet_     IN PLS_INTEGER  := null )
+IS
+   sh_ PLS_INTEGER := nvl(sheet_, workbook.sheets.count());
+BEGIN
+   workbook.sheets(sh_).rows(row_)(col_).datatype  := 'number';
+   workbook.sheets(sh_).rows(row_)(col_).ora_value := tp_cell_value (
+      str_val => '', num_val => value_, dt_val => null
+   );
+   workbook.sheets(sh_).rows(row_)(col_).value     := value_;
+   workbook.sheets(sh_).rows(row_)(col_).style     := get_XfId (
       sh_, col_, row_, numFmtId_, fontId_, fillId_, borderId_, alignment_
    );
 END Cell;
 
-FUNCTION Add_String (
-   string_ VARCHAR2 ) RETURN PLS_INTEGER
+PROCEDURE Cell ( -- num version overload
+   col_       IN PLS_INTEGER,
+   row_       IN PLS_INTEGER,
+   value_num_ IN NUMBER      := null,
+   formula_   IN VARCHAR2    := '',
+   numFmtId_  IN VARCHAR2    := null,
+   fontId_    IN VARCHAR2    := null,
+   fillId_    IN VARCHAR2    := null,
+   borderId_  IN VARCHAR2    := null,
+   alignment_ IN VARCHAR2    := null,
+   sheet_     IN PLS_INTEGER := null )
 IS
-   cnt_ PLS_INTEGER;
+   fm_ix_ PLS_INTEGER := workbook.formulas.count;
+   sh_    PLS_INTEGER := nvl (sheet_, workbook.sheets.count());
 BEGIN
-   IF workbook.strings.exists(nvl(string_, '')) THEN
-      cnt_ := workbook.strings(nvl(string_, ''));
+   Cell (
+      col_, row_, value_num_,
+      CASE WHEN numFmtId_  IS NOT null THEN numFmt_(numFmtId_) END,
+      CASE WHEN fontId_    IS NOT null THEN fonts_(fontId_) END,
+      CASE WHEN fillId_    IS NOT null THEN fills_(fillId_) END,
+      CASE WHEN borderId_  IS NOT null THEN bdrs_(borderId_) END,
+      CASE WHEN alignment_ IS NOT null THEN align_(alignment_) END,
+      sheet_
+   );
+   IF formula_ IS NOT null THEN
+      workbook.formulas(fm_ix_) := formula_;
+      workbook.sheets(sh_).rows(row_)(col_).formula_idx := fm_ix_;
+   END IF;
+END Cell;
+
+PROCEDURE CellN ( -- num version overload
+   col_       IN PLS_INTEGER,
+   row_       IN PLS_INTEGER,
+   value_num_ IN NUMBER      := null,
+   formula_   IN VARCHAR2    := '',
+   numFmtId_  IN VARCHAR2    := null,
+   fontId_    IN VARCHAR2    := null,
+   fillId_    IN VARCHAR2    := null,
+   borderId_  IN VARCHAR2    := null,
+   alignment_ IN VARCHAR2    := null,
+   sheet_     IN PLS_INTEGER := null )
+IS BEGIN
+   Cell (
+      col_ => col_, row_ => row_, value_num_ => value_num_, formula_ => formula_,
+      numFmtId_ => numFmtId_, fontId_ => fontId_, fillId_ => fillId_,
+      borderId_ => borderId_, alignment_ => alignment_, sheet_ => sheet_
+   );
+END CellN;
+
+FUNCTION Add_String (
+   string_ IN VARCHAR2 ) RETURN PLS_INTEGER
+IS
+   ix_ PLS_INTEGER;
+BEGIN
+   IF workbook.strings.exists(nvl(string_,'')) THEN
+      ix_ := workbook.strings(nvl(string_,''));
    ELSE
-      cnt_ := workbook.strings.count();
-      workbook.str_ind(cnt_) := string_;
-      workbook.strings(nvl(string_, '')) := cnt_;
+      ix_ := workbook.strings.count();
+      workbook.str_ind(ix_) := string_;
+      workbook.strings(nvl(string_,'')) := ix_;
    END IF;
    workbook.str_cnt := workbook.str_cnt + 1;
-   RETURN cnt_;
+   RETURN ix_;
 END Add_String;
 
-PROCEDURE Cell (
-   col_       PLS_INTEGER,
-   row_       PLS_INTEGER,
-   value_     VARCHAR2,
-   numFmtId_  PLS_INTEGER  := null,
-   fontId_    PLS_INTEGER  := null,
-   fillId_    PLS_INTEGER  := null,
-   borderId_  PLS_INTEGER  := null,
-   alignment_ tp_alignment := null,
-   sheet_     PLS_INTEGER  := null )
+PROCEDURE Cell ( -- string version
+   col_       IN PLS_INTEGER,
+   row_       IN PLS_INTEGER,
+   value_     IN VARCHAR2,
+   numFmtId_  IN PLS_INTEGER  := null,
+   fontId_    IN PLS_INTEGER  := null,
+   fillId_    IN PLS_INTEGER  := null,
+   borderId_  IN PLS_INTEGER  := null,
+   alignment_ IN tp_alignment := null,
+   sheet_     IN PLS_INTEGER  := null )
 IS
    sh_    PLS_INTEGER  := nvl(sheet_, workbook.sheets.count());
    align_ tp_alignment := alignment_;
 BEGIN
-   workbook.sheets(sh_).rows(row_)(col_).value := add_string(value_);
+   workbook.sheets(sh_).rows(row_)(col_).datatype  := 'string';
+   workbook.sheets(sh_).rows(row_)(col_).ora_value := tp_cell_value (
+      str_val => value_, num_val => null, dt_val => null
+   );
+   workbook.sheets(sh_).rows(row_)(col_).value     := Add_String(value_);
    IF align_.wrapText IS null AND instr(value_, chr(13)) > 0 THEN
       align_.wrapText := true;
    END IF;
@@ -1230,21 +1849,74 @@ BEGIN
    );
 END Cell;
 
-PROCEDURE Cell (
-   col_       PLS_INTEGER,
-   row_       PLS_INTEGER,
-   value_     DATE,
-   numFmtId_  PLS_INTEGER  := null,
-   fontId_    PLS_INTEGER  := null,
-   fillId_    PLS_INTEGER  := null,
-   borderId_  PLS_INTEGER  := null,
-   alignment_ tp_alignment := null,
-   sheet_     PLS_INTEGER  := null )
+PROCEDURE Cell ( -- string version overload
+   col_       IN PLS_INTEGER,
+   row_       IN PLS_INTEGER,
+   value_str_ IN VARCHAR2    := '',
+   formula_   IN VARCHAR2    := '',
+   numFmtId_  IN VARCHAR2    := null,
+   fontId_    IN VARCHAR2    := null,
+   fillId_    IN VARCHAR2    := null,
+   borderId_  IN VARCHAR2    := null,
+   alignment_ IN VARCHAR2    := null,
+   sheet_     IN PLS_INTEGER := null ) 
+IS
+   fm_ix_ PLS_INTEGER := workbook.formulas.count;
+   sh_    PLS_INTEGER := nvl (sheet_, workbook.sheets.count());
+BEGIN
+   Cell (
+      col_, row_, value_str_,
+      CASE WHEN numFmtId_  IS NOT null THEN numFmt_(numFmtId_) END,
+      CASE WHEN fontId_    IS NOT null THEN fonts_(fontId_) END,
+      CASE WHEN fillId_    IS NOT null THEN fills_(fillId_) END,
+      CASE WHEN borderId_  IS NOT null THEN bdrs_(borderId_) END,
+      CASE WHEN alignment_ IS NOT null THEN align_(alignment_) END,
+      sh_
+   );
+   IF formula_ IS NOT null THEN
+      workbook.formulas(fm_ix_) := formula_;
+      workbook.sheets(sh_).rows(row_)(col_).formula_idx := fm_ix_;
+   END IF;
+END Cell;
+
+PROCEDURE CellS ( -- string version overload
+   col_       IN PLS_INTEGER,
+   row_       IN PLS_INTEGER,
+   value_str_ IN VARCHAR2    := '',
+   formula_   IN VARCHAR2    := '',
+   numFmtId_  IN VARCHAR2    := null,
+   fontId_    IN VARCHAR2    := null,
+   fillId_    IN VARCHAR2    := null,
+   borderId_  IN VARCHAR2    := null,
+   alignment_ IN VARCHAR2    := null,
+   sheet_     IN PLS_INTEGER := null )
+IS BEGIN
+   Cell (
+      col_ => col_, row_ => row_, value_str_ => value_str_, formula_ => formula_,
+      numFmtId_ => numFmtId_, fontId_ => fontId_, fillId_ => fillId_,
+      borderId_ => borderId_, alignment_ => alignment_, sheet_ => sheet_
+   );
+END CellS;
+
+PROCEDURE Cell (  -- date version
+   col_       IN PLS_INTEGER,
+   row_       IN PLS_INTEGER,
+   value_     IN DATE,
+   numFmtId_  IN PLS_INTEGER  := null,
+   fontId_    IN PLS_INTEGER  := null,
+   fillId_    IN PLS_INTEGER  := null,
+   borderId_  IN PLS_INTEGER  := null,
+   alignment_ IN tp_alignment := null,
+   sheet_     IN PLS_INTEGER  := null )
 IS
    num_fmt_id_ PLS_INTEGER := numFmtId_;
    sh_         PLS_INTEGER := nvl(sheet_, workbook.sheets.count());
 BEGIN
-   workbook.sheets(sh_).rows(row_)(col_).value := (value_ - date '1900-03-01' ) + 61;
+   workbook.sheets(sh_).rows(row_)(col_).datatype  := 'date';
+   workbook.sheets(sh_).rows(row_)(col_).ora_value := tp_cell_value (
+      str_val => '', num_val => null, dt_val => value_
+   );
+   workbook.sheets(sh_).rows(row_)(col_).value     := (value_ - date '1900-03-01') + 61;
    IF num_fmt_id_ IS null
       AND not (    workbook.sheets(sh_).col_fmts.exists(col_)
                AND workbook.sheets(sh_).col_fmts(col_).numFmtId IS not null )
@@ -1258,25 +1930,140 @@ BEGIN
    );
 END Cell;
 
-PROCEDURE Query_Date_Cell (
-   col_   PLS_INTEGER,
-   row_   PLS_INTEGER,
-   value_ DATE,
-   sheet_ PLS_INTEGER := null,
-   XfId_  VARCHAR2 )
+PROCEDURE Cell ( -- date version overload
+   col_       IN PLS_INTEGER,
+   row_       IN PLS_INTEGER,
+   value_dt_  IN DATE,
+   formula_   IN VARCHAR2    := '',
+   numFmtId_  IN VARCHAR2    := null,
+   fontId_    IN VARCHAR2    := null,
+   fillId_    IN VARCHAR2    := null,
+   borderId_  IN VARCHAR2    := null,
+   alignment_ IN VARCHAR2    := null,
+   sheet_     IN PLS_INTEGER := null )
 IS
-   t_sheet PLS_INTEGER := nvl(sheet_, workbook.sheets.count());
+   fm_ix_ PLS_INTEGER := workbook.formulas.count;
+   sh_    PLS_INTEGER := nvl (sheet_, workbook.sheets.count());
+BEGIN
+   Cell (
+      col_, row_, value_dt_,
+      CASE WHEN numFmtId_  IS NOT null THEN numFmt_(numFmtId_) END,
+      CASE WHEN fontId_    IS NOT null THEN fonts_(fontId_) END,
+      CASE WHEN fillId_    IS NOT null THEN fills_(fillId_) END,
+      CASE WHEN borderId_  IS NOT null THEN bdrs_(borderId_) END,
+      CASE WHEN alignment_ IS NOT null THEN align_(alignment_) END,
+      sheet_
+   );
+   IF formula_ IS NOT null THEN
+      workbook.formulas(fm_ix_) := formula_;
+      workbook.sheets(sh_).rows(row_)(col_).formula_idx := fm_ix_;
+   END IF;
+END Cell;
+
+PROCEDURE CellD ( -- date version overload
+   col_       IN PLS_INTEGER,
+   row_       IN PLS_INTEGER,
+   value_dt_  IN DATE,
+   formula_   IN VARCHAR2    := '',
+   numFmtId_  IN VARCHAR2    := null,
+   fontId_    IN VARCHAR2    := null,
+   fillId_    IN VARCHAR2    := null,
+   borderId_  IN VARCHAR2    := null,
+   alignment_ IN VARCHAR2    := null,
+   sheet_     IN PLS_INTEGER := null )
+IS BEGIN
+   Cell (
+      col_ => col_, row_ => row_, value_dt_ => value_dt_, formula_ => formula_,
+      numFmtId_ => numFmtId_, fontId_ => fontId_, fillId_ => fillId_,
+      borderId_ => borderId_, alignment_ => alignment_, sheet_ => sheet_
+   );
+END CellD;
+
+-- Sometimes it's useful to be able to add an empty cell with formatting
+PROCEDURE CellB ( -- empty (b for blank)
+   col_       IN PLS_INTEGER,
+   row_       IN PLS_INTEGER,
+   numFmtId_  IN VARCHAR2    := null,
+   fontId_    IN VARCHAR2    := null,
+   fillId_    IN VARCHAR2    := null,
+   borderId_  IN VARCHAR2    := null,
+   alignment_ IN VARCHAR2    := null,
+   sheet_     IN PLS_INTEGER := null )
+IS BEGIN
+   Cell (
+      col_, row_, value_str_ => '',
+      numFmtId_ => numFmtId_, fontId_ => fontId_, fillId_ => fillId_,
+      borderId_ => borderId_, alignment_ => alignment_, sheet_ => sheet_
+   );
+END CellB;
+
+PROCEDURE Query_Date_Cell (
+   col_   IN PLS_INTEGER,
+   row_   IN PLS_INTEGER,
+   value_ IN DATE,
+   sheet_ IN PLS_INTEGER := null,
+   XfId_  IN VARCHAR2 )
+IS
+   sh_ PLS_INTEGER := nvl(sheet_, workbook.sheets.count());
 BEGIN
    Cell (col_, row_, value_, 0, sheet_ => sheet_);
-   workbook.sheets(t_sheet).rows(row_)(col_).style := XfId_;
+   workbook.sheets(sh_).rows(row_)(col_).style := XfId_;
 END Query_Date_Cell;
 
+PROCEDURE Condition_Color_Col (
+   col_   IN PLS_INTEGER,
+   sheet_ IN PLS_INTEGER := null )
+IS
+   sh_        PLS_INTEGER := nvl(sheet_, workbook.sheets.count());
+   first_row_ PLS_INTEGER := workbook.sheets(sh_).rows.FIRST;
+   last_row_  PLS_INTEGER := workbook.sheets(sh_).rows.LAST;
+   str_ix_    PLS_INTEGER;
+   str_val_   VARCHAR2(50);
+   XfId_      PLS_INTEGER;
+   num_fmt_   PLS_INTEGER;
+   font_id_   PLS_INTEGER;
+   border_id_ PLS_INTEGER;
+   align_     tp_alignment;
+
+BEGIN
+
+   FOR r_ IN first_row_ .. last_row_ LOOP
+
+      str_ix_  := workbook.sheets(sh_).rows(r_)(col_).value;
+      str_val_ := substr (workbook.str_ind(str_ix_), 1, 50);
+
+      IF fills_.exists(str_val_) THEN
+
+         XfId_ := Get_Cell_XfId (sh_, col_, r_);
+
+         IF XfId_ IS null THEN
+            workbook.sheets(sh_).rows(r_)(col_).style := 't="s" ' || get_XfId (
+               sh_, col_, r_, fillId_ => fills_(str_val_)
+            );
+         ELSE
+            num_fmt_          := workbook.cellXfs(XfId_).numFmtId;
+            font_id_          := workbook.cellXfs(XfId_).fontId;
+            border_id_        := workbook.cellXfs(XfId_).borderId;
+            align_.vertical   := workbook.cellXfs(XfId_).alignment.vertical;
+            align_.horizontal := workbook.cellXfs(XfId_).alignment.horizontal;
+            align_.wrapText   := workbook.cellXfs(XfId_).alignment.wrapText;
+            workbook.sheets(sh_).rows(r_)(col_).style := 't="s" ' || get_XfId (
+               sh_, col_, r_, num_fmt_, font_id_, fills_(str_val_), border_id_, align_
+            );
+         END IF;
+
+      END IF;
+
+   END LOOP;
+
+END Condition_Color_Col;
+
 PROCEDURE Hyperlink (
-   col_   PLS_INTEGER,
-   row_   PLS_INTEGER,
-   url_   VARCHAR2,
-   value_ VARCHAR2    := null,
-   sheet_ PLS_INTEGER := null )
+   col_   IN PLS_INTEGER,
+   row_   IN PLS_INTEGER,
+   url_   IN VARCHAR2,
+   value_ IN VARCHAR2    := null,
+   sheet_ IN PLS_INTEGER := null )
 IS
    ix_ PLS_INTEGER;
    sh_ PLS_INTEGER := nvl(sheet_, workbook.sheets.count());
@@ -1289,13 +2076,13 @@ BEGIN
 END Hyperlink;
 
 PROCEDURE Comment (
-   col_    PLS_INTEGER,
-   row_    PLS_INTEGER,
-   text_   VARCHAR2,
-   author_ VARCHAR2 := null,
-   width_  PLS_INTEGER := 150,
-   height_ PLS_INTEGER := 100,
-   sheet_  PLS_INTEGER := null )
+   col_    IN PLS_INTEGER,
+   row_    IN PLS_INTEGER,
+   text_   IN VARCHAR2,
+   author_ IN VARCHAR2 := null,
+   width_  IN PLS_INTEGER := 150,
+   height_ IN PLS_INTEGER := 100,
+   sheet_  IN PLS_INTEGER := null )
 IS
    ix_ PLS_INTEGER;
    sh_ PLS_INTEGER := nvl(sheet_, workbook.sheets.count());
@@ -1310,16 +2097,16 @@ BEGIN
 END Comment;
 
 PROCEDURE Num_Formula (
-   col_           PLS_INTEGER,
-   row_           PLS_INTEGER,
-   formula_       VARCHAR2,
-   default_value_ NUMBER       := null,
-   numFmtId_      PLS_INTEGER  := null,
-   fontId_        PLS_INTEGER  := null,
-   fillId_        PLS_INTEGER  := null,
-   borderId_      PLS_INTEGER  := null,
-   alignment_     tp_alignment := null,
-   sheet_         PLS_INTEGER  := null )
+   col_           IN PLS_INTEGER,
+   row_           IN PLS_INTEGER,
+   formula_       IN VARCHAR2,
+   default_value_ IN NUMBER       := null,
+   numFmtId_      IN PLS_INTEGER  := null,
+   fontId_        IN PLS_INTEGER  := null,
+   fillId_        IN PLS_INTEGER  := null,
+   borderId_      IN PLS_INTEGER  := null,
+   alignment_     IN tp_alignment := null,
+   sheet_         IN PLS_INTEGER  := null )
 IS
    ix_ PLS_INTEGER := workbook.formulas.count;
    sh_ PLS_INTEGER := nvl (sheet_, workbook.sheets.count());
@@ -1330,16 +2117,16 @@ BEGIN
 END Num_Formula;
 
 PROCEDURE Str_Formula (
-   col_           PLS_INTEGER,
-   row_           PLS_INTEGER,
-   formula_       VARCHAR2,
-   default_value_ VARCHAR2     := null,
-   numFmtId_      PLS_INTEGER  := null,
-   fontId_        PLS_INTEGER  := null,
-   fillId_        PLS_INTEGER  := null,
-   borderId_      PLS_INTEGER  := null,
-   alignment_     tp_alignment := null,
-   sheet_         PLS_INTEGER  := null )
+   col_           IN PLS_INTEGER,
+   row_           IN PLS_INTEGER,
+   formula_       IN VARCHAR2,
+   default_value_ IN VARCHAR2     := null,
+   numFmtId_      IN PLS_INTEGER  := null,
+   fontId_        IN PLS_INTEGER  := null,
+   fillId_        IN PLS_INTEGER  := null,
+   borderId_      IN PLS_INTEGER  := null,
+   alignment_     IN tp_alignment := null,
+   sheet_         IN PLS_INTEGER  := null )
 IS
    ix_ PLS_INTEGER := workbook.formulas.count;
    sh_ PLS_INTEGER := nvl(sheet_, workbook.sheets.count());
@@ -1348,6 +2135,52 @@ BEGIN
    Cell (col_, row_, default_value_, numFmtId_, fontId_, fillId_, borderId_, alignment_, sh_);
    workbook.sheets(sh_).rows(row_)(col_).formula_idx := ix_;
 END Str_Formula;
+
+PROCEDURE Formula (
+   col_           IN PLS_INTEGER,
+   row_           IN PLS_INTEGER,
+   formula_       IN VARCHAR2,
+   default_value_ IN NUMBER      := null,
+   numFmtId_      IN VARCHAR2    := null,
+   fontId_        IN VARCHAR2    := null,
+   fillId_        IN VARCHAR2    := null,
+   borderId_      IN VARCHAR2    := null,
+   alignment_     IN VARCHAR2    := null,
+   sheet_         IN PLS_INTEGER := null )
+IS BEGIN
+   Cell  (col_, row_, default_value_, formula_, numFmtId_, fontId_, fillId_, borderId_, alignment_, sheet_);
+END Formula;
+
+PROCEDURE Formula (
+   col_           IN PLS_INTEGER,
+   row_           IN PLS_INTEGER,
+   formula_       IN VARCHAR2,
+   default_value_ IN VARCHAR2    := null,
+   numFmtId_      IN VARCHAR2    := null,
+   fontId_        IN VARCHAR2    := null,
+   fillId_        IN VARCHAR2    := null,
+   borderId_      IN VARCHAR2    := null,
+   alignment_     IN VARCHAR2    := null,
+   sheet_         IN PLS_INTEGER := null )
+IS BEGIN
+   Cell  (col_, row_, default_value_, formula_, numFmtId_, fontId_, fillId_, borderId_, alignment_, sheet_);
+END Formula;
+
+PROCEDURE Formula (
+   col_           IN PLS_INTEGER,
+   row_           IN PLS_INTEGER,
+   formula_       IN VARCHAR2,
+   default_value_ IN DATE        := null,
+   numFmtId_      IN VARCHAR2    := null,
+   fontId_        IN VARCHAR2    := null,
+   fillId_        IN VARCHAR2    := null,
+   borderId_      IN VARCHAR2    := null,
+   alignment_     IN VARCHAR2    := null,
+   sheet_         IN PLS_INTEGER := null )
+IS BEGIN
+   Cell  (col_, row_, default_value_, formula_, numFmtId_, fontId_, fillId_, borderId_, alignment_, sheet_);
+END Formula;
+
 
 PROCEDURE Mergecells (
    tl_col_ IN PLS_INTEGER, -- top left
@@ -1447,7 +2280,180 @@ IS BEGIN
       sheet_       => sheet_
    );
 END List_Validation;
---
+
+PROCEDURE Add_Image (
+   col_         IN PLS_INTEGER,
+   row_         IN PLS_INTEGER,
+   img_blob_    IN BLOB,
+   name_        IN VARCHAR2    := '',
+   title_       IN VARCHAR2    := '',
+   description_ IN VARCHAR2    := '',
+   scale_       IN NUMBER      := null,
+   sheet_       IN PLS_INTEGER := null,
+   width_       IN PLS_INTEGER := null,
+   height_      IN PLS_INTEGER := null )
+IS
+   sh_         PLS_INTEGER := coalesce (sheet_, workbook.sheets.count);
+   img_ix_     PLS_INTEGER;
+   hash_       RAW(128) := Dbms_Crypto.Hash (img_blob_, dbms_crypto.hash_md5);
+   img_rec_    tp_image;
+   drawing_    tp_drawing;
+   offset_     NUMBER;
+   length_     NUMBER;
+   file_chunk_ RAW(14);
+   hex_        VARCHAR2(8);
+BEGIN
+
+   FOR i_ IN 1 .. workbook.images.count LOOP
+      IF workbook.images(i_).img_hash = hash_ THEN
+         img_ix_ := i_;
+         exit;
+      END IF;
+   END LOOP;
+
+   IF img_ix_ IS null THEN
+
+      img_ix_ := workbook.images.count + 1;
+      dbms_lob.createTemporary (img_rec_.img_blob, true);
+      
+      dbms_lob.copy (img_rec_.img_blob, img_blob_, dbms_lob.lobmaxsize, 1, 1);
+      img_rec_.img_hash := hash_;
+      file_chunk_ := dbms_lob.substr (img_blob_, 14, 1);
+
+      --
+      -- Different processing for different types of image...
+      --
+      IF utl_raw.substr (file_chunk_, 1, 8) = hextoraw('89504E470D0A1A0A') THEN -- png
+         Dbms_Output.Put_Line ('file is PNG');
+
+         offset_ := 9;
+         LOOP
+            length_ := to_number (dbms_lob.substr (img_blob_, 4, offset_), 'xxxxxxxx');
+            EXIT WHEN length_ IS null OR offset_ > dbms_lob.getlength (img_blob_);
+            CASE rawtohex (dbms_lob.substr (img_blob_, 4, offset_ + 4)) -- Chunk type
+               WHEN '49484452' /* IHDR */ THEN
+                  img_rec_.width  := to_number (dbms_lob.substr(img_blob_,4,offset_+8), 'xxxxxxxx');
+                  img_rec_.height := to_number (dbms_lob.substr(img_blob_,4,offset_+12), 'xxxxxxxx');
+                  exit;
+               WHEN '49454E44' /* IEND */ THEN
+                  exit;
+            END CASE;
+            offset_ := offset_ + 4 + 4 + length_ + 4;  -- Length + Chunk type + Chunk data + CRC
+         END LOOP;
+
+      ELSIF utl_raw.substr (file_chunk_, 1, 3) = hextoraw('474946') THEN -- gif
+         Dbms_Output.Put_Line ('file is GIF');
+
+         offset_ := 14;
+         file_chunk_ := utl_raw.substr (file_chunk_, 11, 1);
+         IF utl_raw.bit_and ('80', file_chunk_) = '80' THEN
+            length_ := to_number (utl_raw.bit_and('07', file_chunk_), 'XX');
+            offset_ := offset_ + 3 * power(2, length_+1);
+         END IF;
+         LOOP
+            CASE rawtohex (dbms_lob.substr (img_blob_, 1, offset_))
+               WHEN '21' /* extension */ THEN
+                  offset_ := offset_ + 2; -- skip sentinel + label
+                  LOOP
+                     length_ := to_number(dbms_lob.substr(img_blob_, 1, offset_), 'XX'); -- Block Size
+                     EXIT WHEN length_ = 0;
+                     offset_ := offset_ + 1 + length_; -- skip Block Size + Data Sub-block
+                  END LOOP;
+                  offset_ := offset_ + 1; -- skip last Block Size
+               WHEN  '2C' /* image */ THEN
+                  file_chunk_     := dbms_lob.substr (img_blob_, 4, offset_+5);
+                  img_rec_.width  := utl_raw.cast_to_binary_integer (utl_raw.substr(file_chunk_,1,2), utl_raw.little_endian);
+                  img_rec_.height := utl_raw.cast_to_binary_integer (utl_raw.substr(file_chunk_,3,2), utl_raw.little_endian);
+                  exit;
+               ELSE
+                  exit;
+            END CASE;
+         END LOOP;
+
+      ELSIF utl_raw.substr (file_chunk_,1,2) = hextoraw('FFD8') -- SOI Start of Image
+            AND rawtohex (utl_raw.substr(file_chunk_,3,2)) IN ('FFE0', 'FFE1') -- APP0 jpg; APP1 jpg
+      THEN -- jpg
+         Dbms_Output.Put_Line ('file is JPG');
+
+         offset_ := 5 + to_number(utl_raw.substr(file_chunk_,5,2), 'xxxx');
+         LOOP
+            file_chunk_ := dbms_lob.substr (img_blob_, 4, offset_);
+            hex_        := substr( rawtohex(file_chunk_),1,4);
+            EXIT WHEN hex_ IN ('FFDA', 'FFD9') -- SOS Start of Scan; EOI End Of Image
+                   OR substr (hex_, 1, 2) != 'FF';
+            IF hex_ IN ('FFD0', 'FFD1', 'FFD2', 'FFD3', 'FFD4', 'FFD5', 'FFD6', 'FFD7', /*RSTn*/ 'FF01' /*TEM*/) THEN
+               offset_ := offset_ + 2;
+            ELSE
+               IF hex_ = 'FFC0' /* SOF0 (Start Of Frame 0) marker*/ THEN
+                  hex_ := rawtohex (dbms_lob.substr (img_blob_, 4, offset_+5));
+                  img_rec_.width  := to_number (substr(hex_,5), 'xxxx');
+                  img_rec_.height := to_number (substr(hex_,1,4), 'xxxx');
+                  exit;
+               END IF;
+               offset_ := offset_ + 2 + to_number (utl_raw.substr(file_chunk_,3,2), 'xxxx');
+            END IF;
+         END LOOP;
+
+      ELSE -- unknown - use the values passed in
+         img_rec_.width  := nvl(width_, 0);
+         img_rec_.height := nvl(height_, 0);
+      END IF;
+
+      workbook.images(img_ix_) := img_rec_;
+
+   END IF;
+
+   drawing_.img_id      := img_ix_;
+   drawing_.row         := row_;
+   drawing_.col         := col_;
+   drawing_.scale       := scale_;
+   drawing_.name        := name_;
+   drawing_.title       := title_;
+   drawing_.description := description_;
+   workbook.sheets(sh_).drawings(workbook.sheets(sh_).drawings.count+1) := drawing_;
+
+END Add_Image;
+
+PROCEDURE Load_Image (
+   col_         IN PLS_INTEGER,
+   row_         IN PLS_INTEGER,
+   dir_         IN VARCHAR2,
+   filename_    IN VARCHAR2,
+   name_        IN VARCHAR2    := '',
+   title_       IN VARCHAR2    := '',
+   description_ IN VARCHAR2    := '',
+   scale_       IN NUMBER      := null,
+   sheet_       IN PLS_INTEGER := null,
+   width_       IN PLS_INTEGER := null,
+   height_      IN PLS_INTEGER := null )
+IS
+   img_blob_ BLOB  := empty_blob();
+   bfile_    BFILE := bFileName (dir_, filename_);
+BEGIN
+   Dbms_Lob.fileOpen (bfile_);
+   Dbms_Lob.createTemporary (img_blob_, true);
+   Dbms_Lob.loadFromFile (img_blob_, bfile_, dbms_lob.getLength(bfile_));
+   Dbms_Lob.fileClose (bfile_);
+   Add_Image (
+      col_         => col_,
+      row_         => row_,
+      img_blob_    => img_blob_,
+      name_        => name_,
+      title_       => title_,
+      description_ => description_,
+      scale_       => scale_,
+      sheet_       => sheet_,
+      width_       => width_,
+      height_      => height_
+   );
+EXCEPTION
+   WHEN others THEN
+      IF Dbms_Lob.fileIsOpen (bfile_) = 1 THEN
+         Dbms_Lob.fileClose (bfile_);
+      END IF;
+      raise;
+END Load_Image;
+
 PROCEDURE Defined_Name (
    tl_col_     PLS_INTEGER, -- top left
    tl_row_     PLS_INTEGER,
@@ -1457,7 +2463,7 @@ PROCEDURE Defined_Name (
    sheet_      PLS_INTEGER := null,
    localsheet_ PLS_INTEGER := null )
 IS
-   ix_   PLS_INTEGER;
+   ix_ PLS_INTEGER;
    sh_ PLS_INTEGER := nvl(sheet_, workbook.sheets.count());
 BEGIN
    ix_ := workbook.defined_names.count() + 1;
@@ -1567,6 +2573,10 @@ BEGIN
    Defined_Name (col_start_, row_start_, col_end_, row_end_, '_xlnm._FilterDatabase', sh_, sh_-1);
 END Set_Autofilter;
 
+
+-----------------------------------
+-- Finishing functions
+--
 PROCEDURE Add1Xml (
    excel_    IN OUT NOCOPY BLOB,
    filename_ VARCHAR2,
@@ -1586,22 +2596,138 @@ BEGIN
    Add1File (excel_, filename_, tmp_);
    Dbms_Lob.freetemporary(tmp_);
 END Add1Xml;
---
+
+FUNCTION Finish_Drawing (
+   drawing_ tp_drawing,
+   ix_      PLS_INTEGER,
+   sheet_   PLS_INTEGER ) RETURN VARCHAR2
+IS
+   rv_         VARCHAR2(32767);
+   col_        PLS_INTEGER;
+   row_        PLS_INTEGER;
+   width_      NUMBER;
+   height_     NUMBER;
+   col_offs_   NUMBER;
+   row_offs_   NUMBER;
+   col_width_  NUMBER;
+   row_height_ NUMBER;
+   widths_     tp_widths;
+   heights_    tp_row_fmts;
+BEGIN
+   width_  := workbook.images(drawing_.img_id).width;
+   height_ := workbook.images(drawing_.img_id).height;
+   IF drawing_.scale IS NOT null THEN
+      width_  := drawing_.scale * width_;
+      height_ := drawing_.scale * height_;
+   END IF;
+   IF workbook.sheets(sheet_).widths.count = 0 THEN
+      -- assume default column widths!
+      -- 64 px = 1 col = 609600
+      col_ := trunc (width_/64);
+      col_offs_ := (width_-col_*64)*9525;
+      col_ := drawing_.col - 1 + col_;
+   ELSE
+      widths_ := workbook.sheets(sheet_).widths;
+      col_ := drawing_.col;
+      LOOP
+         IF widths_.exists(col_) THEN
+            col_width_ := round(7*widths_(col_));
+         ELSE
+            col_width_ := 64;
+         END IF;
+         EXIT WHEN width_ < col_width_;
+         col_ := col_ + 1;
+         width_ := width_ - col_width_;
+      END LOOP;
+      col_ := col_ - 1;
+      col_offs_ := width_ * 9525;
+   END IF;
+   IF workbook.sheets(sheet_).row_fmts.count = 0 THEN
+      -- assume default row heigths!
+      -- 20 px = 1 row = 190500
+      row_ := trunc (height_/20);
+      row_offs_ := (height_- row_*20) * 9525;
+      row_ := drawing_.row - 1 + row_;
+   ELSE
+      heights_ := workbook.sheets(sheet_).row_fmts;
+      row_ := drawing_.row;
+      LOOP
+         IF heights_.exists(row_) AND heights_(row_).height IS NOT null THEN
+            row_height_ := heights_(row_).height;
+            row_height_ := round (4*row_height_/3);
+         ELSE
+            row_height_ := 20;
+         END IF;
+         EXIT WHEN height_ < row_height_;
+         row_ := row_ + 1;
+         height_ := height_ - row_height_;
+      END LOOP;
+      row_offs_ := height_ * 9525;
+      row_ := row_ - 1;
+   END IF;
+   rv_ := '<xdr:twoCellAnchor editAs="oneCell">
+<xdr:from><xdr:col>' || ( drawing_.col-1 ) || '</xdr:col>
+<xdr:colOff>0</xdr:colOff>
+<xdr:row>' || ( drawing_.row-1 ) || '</xdr:row>
+<xdr:rowOff>0</xdr:rowOff>
+</xdr:from>
+<xdr:to>
+<xdr:col>' || col_ || '</xdr:col>
+<xdr:colOff>' || col_offs_ || '</xdr:colOff>
+<xdr:row>' || row_ || '</xdr:row>
+<xdr:rowOff>' || row_offs_ || '</xdr:rowOff>
+</xdr:to>
+<xdr:pic>
+<xdr:nvPicPr>
+<xdr:cNvPr id="3" name="' || coalesce (drawing_.name, 'Picture '||ix_) || '"';
+   IF drawing_.title IS NOT null THEN
+      rv_ := rv_ || ' title="' || drawing_.title || '"';
+   END IF;
+   IF drawing_.description IS NOT null THEN
+      rv_ := rv_ || ' descr="' || drawing_.description || '"';
+   END IF;
+   rv_ := rv_ || '/>
+<xdr:cNvPicPr>
+<a:picLocks noChangeAspect="1"/>
+</xdr:cNvPicPr>
+</xdr:nvPicPr>
+<xdr:blipFill>
+<a:blip xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" r:embed="rId' || drawing_.img_id || '">
+<a:extLst>
+<a:ext uri="{28A0092B-C50C-407E-A947-70E740481C1C}">
+<a14:useLocalDpi xmlns:a14="http://schemas.microsoft.com/office/drawing/2010/main" val="0"/>
+</a:ext>
+</a:extLst>
+</a:blip>
+<a:stretch>
+<a:fillRect/>
+</a:stretch>
+</xdr:blipFill>
+<xdr:spPr>
+<a:prstGeom prst="rect">
+</a:prstGeom>
+</xdr:spPr>
+</xdr:pic>
+<xdr:clientData/>
+</xdr:twoCellAnchor>';
+   RETURN rv_;
+END Finish_Drawing;
+
 FUNCTION Finish RETURN BLOB
 IS
-   excel_   BLOB;
-   yyy_     BLOB;
-   xxx_     CLOB;
-   tmp_     VARCHAR2(32767 char);
-   c_       NUMBER;
-   h_       NUMBER;
-   w_       NUMBER;
-   cw_      NUMBER;
-   s        PLS_INTEGER;
-   row_ix_  PLS_INTEGER;
-   col_ix_  PLS_INTEGER;
-   col_min_ PLS_INTEGER;
-   col_max_ PLS_INTEGER;
+   excel_        BLOB;
+   yyy_          BLOB;
+   xxx_          CLOB;
+   formula_expr_ VARCHAR2(32767 char);
+   c_            NUMBER;
+   h_            NUMBER;
+   w_            NUMBER;
+   cw_           NUMBER;
+   s             PLS_INTEGER;
+   row_ix_       PLS_INTEGER;
+   col_ix_       PLS_INTEGER;
+   col_min_      PLS_INTEGER;
+   col_max_      PLS_INTEGER;
 
 BEGIN
   dbms_lob.createtemporary(excel_, true);
@@ -1625,12 +2751,19 @@ BEGIN
 <Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>';
   s := workbook.sheets.first;
   WHILE s IS not null LOOP
-    IF workbook.sheets( s ).comments.count() > 0 THEN
+    IF workbook.sheets(s).comments.count() > 0 THEN
       xxx_ := xxx_ || ( '
 <Override PartName="/xl/comments' || s || '.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.comments+xml"/>' );
     END IF;
-    s := workbook.sheets.next( s );
+    IF workbook.sheets(s).drawings.count > 0 THEN
+      xxx_ := xxx_ || '
+<Override ContentType="application/vnd.openxmlformats-officedocument.drawing+xml" PartName="/xl/drawings/drawing' || s || '.xml"/>';
+    END IF;
+    s := workbook.sheets.next(s);
   END LOOP;
+  IF workbook.images.count > 0 THEN
+     xxx_ := xxx_ || '<Default ContentType="image/png" Extension="png"/>';
+  END IF;
   xxx_ := xxx_ || '
 </Types>';
   add1xml (excel_, '[Content_Types].xml', xxx_);
@@ -1673,7 +2806,7 @@ BEGIN
 <HyperlinksChanged>false</HyperlinksChanged>
 <AppVersion>14.0300</AppVersion>
 </Properties>';
-  add1xml( excel_, 'docProps/app.xml', xxx_ );
+  add1xml (excel_, 'docProps/app.xml', xxx_);
   xxx_ := '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
 <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties" Target="docProps/app.xml"/>
@@ -1686,7 +2819,7 @@ BEGIN
   IF workbook.numFmts.count() > 0 THEN
     xxx_ := xxx_ || ( '<numFmts count="' || workbook.numFmts.count() || '">' );
     FOR n IN 1 .. workbook.numFmts.count() LOOP
-      xxx_ := xxx_ || ( '<numFmt numFmtId="' || workbook.numFmts( n ).numFmtId || '" formatCode="' || workbook.numFmts( n ).formatCode || '"/>' );
+      xxx_ := xxx_ || ( '<numFmt numFmtId="' || workbook.numFmts(n).numFmtId || '" formatCode="' || workbook.numFmts(n).formatCode || '"/>' );
     END LOOP;
     xxx_ := xxx_ || '</numFmts>';
   END IF;
@@ -1696,32 +2829,32 @@ BEGIN
       CASE WHEN workbook.fonts(f).bold THEN '<b/>' END ||
       CASE WHEN workbook.fonts(f).italic THEN '<i/>' END ||
       CASE WHEN workbook.fonts(f).underline THEN '<u/>' END ||
-'<sz val="' || to_char( workbook.fonts( f ).fontsize, 'TM9', 'NLS_NUMERIC_CHARACTERS=.,' )  || '"/>
-<color ' || CASE WHEN workbook.fonts( f ).rgb IS not null
+'<sz val="' || to_char( workbook.fonts(f).fontsize, 'TM9', 'NLS_NUMERIC_CHARACTERS=.,' )  || '"/>
+<color ' || CASE WHEN workbook.fonts(f).rgb IS not null
               THEN 'rgb="' || workbook.fonts( f ).rgb
-              ELSE 'theme="' || workbook.fonts( f ).theme
+              ELSE 'theme="' || workbook.fonts(f).theme
             END || '"/>
-<name val="' || workbook.fonts( f ).name || '"/>
-<family val="' || workbook.fonts( f ).family || '"/>
+<name val="' || workbook.fonts(f).name || '"/>
+<family val="' || workbook.fonts(f).family || '"/>
 <scheme val="none"/>
 </font>' );
   END LOOP;
   xxx_ := xxx_ || ( '</fonts>
 <fills count="' || workbook.fills.count() || '">' );
   FOR f IN 0 .. workbook.fills.count() - 1 LOOP
-    xxx_ := xxx_ || ( '<fill><patternFill patternType="' || workbook.fills( f ).patternType || '">' ||
-      CASE WHEN workbook.fills( f ).fgRGB IS not null THEN '<fgColor rgb="' || workbook.fills( f ).fgRGB || '"/>' END ||
-      CASE WHEN workbook.fills( f ).bgRGB IS not null THEN '<bgColor rgb="' || workbook.fills( f ).bgRGB || '"/>' END ||
+    xxx_ := xxx_ || ( '<fill><patternFill patternType="' || workbook.fills(f).patternType || '">' ||
+      CASE WHEN workbook.fills(f).fgRGB IS not null THEN '<fgColor rgb="' || workbook.fills(f).fgRGB || '"/>' END ||
+      CASE WHEN workbook.fills(f).bgRGB IS not null THEN '<bgColor rgb="' || workbook.fills(f).bgRGB || '"/>' END ||
           '</patternFill></fill>' );
   END LOOP;
   xxx_ := xxx_ || ( '</fills>
 <borders count="' || workbook.borders.count() || '">' );
   FOR b IN 0 .. workbook.borders.count() - 1 LOOP
     xxx_ := xxx_ || ('<border>' ||
-      CASE WHEN workbook.borders( b ).left   IS null THEN '<left/>'   ELSE '<left style="'   || workbook.borders( b ).left   || '"/>' END ||
-      CASE WHEN workbook.borders( b ).right  IS null THEN '<right/>'  ELSE '<right style="'  || workbook.borders( b ).right  || '"/>' END ||
-      CASE WHEN workbook.borders( b ).top    IS null THEN '<top/>'    ELSE '<top style="'    || workbook.borders( b ).top    || '"/>' END ||
-      CASE WHEN workbook.borders( b ).bottom IS null THEN '<bottom/>' ELSE '<bottom style="' || workbook.borders( b ).bottom || '"/>' END ||
+      CASE WHEN workbook.borders(b).left   IS null THEN '<left/>'   ELSE '<left style="'   || workbook.borders(b).left   || '"/>' END ||
+      CASE WHEN workbook.borders(b).right  IS null THEN '<right/>'  ELSE '<right style="'  || workbook.borders(b).right  || '"/>' END ||
+      CASE WHEN workbook.borders(b).top    IS null THEN '<top/>'    ELSE '<top style="'    || workbook.borders(b).top    || '"/>' END ||
+      CASE WHEN workbook.borders(b).bottom IS null THEN '<bottom/>' ELSE '<bottom style="' || workbook.borders(b).bottom || '"/>' END ||
       '</border>'
     );
   END LOOP;
@@ -1738,15 +2871,15 @@ BEGIN
          OR workbook.cellXfs(x).alignment.wrapText )
     THEN
       xxx_ := xxx_ || ( '<alignment' ||
-        CASE WHEN workbook.cellXfs(x).alignment.horizontal IS not null THEN ' horizontal="' || workbook.cellXfs( x ).alignment.horizontal || '"' END ||
-        CASE WHEN workbook.cellXfs(x).alignment.vertical IS not null THEN ' vertical="' || workbook.cellXfs( x ).alignment.vertical || '"' END ||
+        CASE WHEN workbook.cellXfs(x).alignment.horizontal IS not null THEN ' horizontal="' || workbook.cellXfs(x).alignment.horizontal || '"' END ||
+        CASE WHEN workbook.cellXfs(x).alignment.vertical IS not null THEN ' vertical="' || workbook.cellXfs(x).alignment.vertical || '"' END ||
         CASE WHEN workbook.cellXfs(x).alignment.wrapText THEN ' wrapText="true"' END || '/>' );
     END IF;
     xxx_ := xxx_ || '</xf>';
   END LOOP;
   xxx_ := xxx_ || ( '</cellXfs>
 <cellStyles count="1">
-<cellStyle name="Normal" xfId="0" builtinId="0"/>
+  <cellStyle name="Normal" xfId="0" builtinId="0"/>
 </cellStyles>
 <dxfs count="0"/>
 <tableStyles count="0" defaultTableStyle="TableStyleMedium2" defaultPivotStyle="PivotStyleLight16"/>
@@ -1926,27 +3059,27 @@ BEGIN
 <a:lin ang="16200000" scaled="1"/>
 </a:gradFill>
 <a:gradFill rotWithShape="1">
-<a:gsLst>
-<a:gs pos="0">
-<a:schemeClr val="phClr">
-<a:shade val="51000"/>
-<a:satMod val="130000"/>
-</a:schemeClr>
-</a:gs>
-<a:gs pos="80000">
-<a:schemeClr val="phClr">
-<a:shade val="93000"/>
-<a:satMod val="130000"/>
-</a:schemeClr>
-</a:gs>
-<a:gs pos="100000">
-<a:schemeClr val="phClr">
-<a:shade val="94000"/>
-<a:satMod val="135000"/>
-</a:schemeClr>
-</a:gs>
-</a:gsLst>
-<a:lin ang="16200000" scaled="0"/>
+  <a:gsLst>
+    <a:gs pos="0">
+      <a:schemeClr val="phClr">
+        <a:shade val="51000"/>
+        <a:satMod val="130000"/>
+      </a:schemeClr>
+    </a:gs>
+    <a:gs pos="80000">
+      <a:schemeClr val="phClr">
+        <a:shade val="93000"/>
+        <a:satMod val="130000"/>
+      </a:schemeClr>
+    </a:gs>
+    <a:gs pos="100000">
+      <a:schemeClr val="phClr">
+        <a:shade val="94000"/>
+        <a:satMod val="135000"/>
+      </a:schemeClr>
+    </a:gs>
+  </a:gsLst>
+  <a:lin ang="16200000" scaled="0"/>
 </a:gradFill>
 </a:fillStyleLst>
 <a:lnStyleLst>
@@ -2134,13 +3267,13 @@ CASE WHEN workbook.sheets(s).tabcolor IS not null THEN '<sheetPr><tabColor rgb="
       col_ix_ := workbook.sheets(s).rows(row_ix_).first();
       WHILE col_ix_ IS not null LOOP
         IF workbook.sheets(s).rows(row_ix_)(col_ix_).formula_idx IS null THEN
-          tmp_ := null;
+          formula_expr_ := null;
         ELSE
-          tmp_ := '<f>' || workbook.formulas(workbook.sheets(s).rows(row_ix_)(col_ix_).formula_idx) || '</f>';
+          formula_expr_ := '<f>' || workbook.formulas(workbook.sheets(s).rows(row_ix_)(col_ix_).formula_idx) || '</f>';
         END IF;
         addtxt2utf8blob ('<c r="' || alfan_col(col_ix_) || row_ix_ || '"'
           || ' ' || workbook.sheets(s).rows(row_ix_)(col_ix_).style
-          || '>' || tmp_ || '<v>'
+          || '>' || formula_expr_ || '<v>'
           || to_char(workbook.sheets(s).rows(row_ix_)(col_ix_).value, 'TM9', 'NLS_NUMERIC_CHARACTERS=.,' )
           || '</v></c>', yyy_
         );
@@ -2211,29 +3344,46 @@ CASE WHEN workbook.sheets(s).tabcolor IS not null THEN '<sheetPr><tabColor rgb="
     IF workbook.sheets(s).comments.count() > 0 THEN
       addtxt2utf8blob( '<legacyDrawing r:id="rId' || ( workbook.sheets(s).hyperlinks.count() + 1 ) || '"/>', yyy_ );
     END IF;
+    IF workbook.sheets(s).drawings.count > 0 THEN
+      addtxt2utf8blob( '<drawing r:id="rId' || (workbook.sheets(s).hyperlinks.count + sign(workbook.sheets(s).comments.count)+1) || '"/>', yyy_);
+    END IF;
 
     addtxt2utf8blob( '</worksheet>', yyy_ );
     addtxt2utf8blob_finish( yyy_ );
     add1file( excel_, 'xl/worksheets/sheet' || s || '.xml', yyy_ );
-    IF workbook.sheets(s).hyperlinks.count() > 0 OR workbook.sheets(s).comments.count() > 0 THEN
+    IF workbook.sheets(s).hyperlinks.count > 0 OR workbook.sheets(s).comments.count > 0 OR workbook.sheets(s).drawings.count > 0 THEN
       xxx_ := '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">';
       IF workbook.sheets(s).comments.count() > 0 THEN
         xxx_ := xxx_ || ( '<Relationship Id="rId' || ( workbook.sheets(s).hyperlinks.count() + 2 ) || '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments" Target="../comments' || s || '.xml"/>' );
         xxx_ := xxx_ || ( '<Relationship Id="rId' || ( workbook.sheets(s).hyperlinks.count() + 1 ) || '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/vmlDrawing" Target="../drawings/vmlDrawing' || s || '.vml"/>' );
       END IF;
-      FOR h IN 1 ..  workbook.sheets( s ).hyperlinks.count() LOOP
-        xxx_ := xxx_ || ( '<Relationship Id="rId' || h || '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="' || workbook.sheets( s ).hyperlinks( h ).url || '" TargetMode="External"/>' );
+      FOR h IN 1 ..  workbook.sheets(s).hyperlinks.count() LOOP
+        IF workbook.sheets(s).hyperlinks(h).url IS NOT null THEN
+          xxx_ := xxx_ || ( '<Relationship Id="rId' || h || '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="' || workbook.sheets( s ).hyperlinks( h ).url || '" TargetMode="External"/>' );
+        END IF;
       END LOOP;
+      IF workbook.sheets(s).drawings.count > 0 THEN
+        xxx_ := xxx_ || ( '<Relationship Id="rId' || ( workbook.sheets(s).hyperlinks.count + sign(workbook.sheets(s).comments.count)*2+1)|| '" Target="../drawings/drawing' || s || '.xml" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing"/>' );
+      END IF;
       xxx_ := xxx_ || '</Relationships>';
-      add1xml( excel_, 'xl/worksheets/_rels/sheet' || s || '.xml.rels', xxx_ );
+      add1xml (excel_, 'xl/worksheets/_rels/sheet' || s || '.xml.rels', xxx_);
+    END IF;
+
+    IF workbook.sheets(s).drawings.count > 0 THEN
+      xxx_ := '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">';
+      FOR i_ IN 1 .. workbook.sheets(s).drawings.count LOOP
+        xxx_ := xxx_ || Finish_Drawing (workbook.sheets(s).drawings(i_), i_, s);
+      END LOOP;
+      xxx_ := xxx_ || '</xdr:wsDr>';
+      add1xml (excel_, 'xl/drawings/drawing' || s || '.xml', xxx_);
     END IF;
 
     IF workbook.sheets(s).comments.count() > 0 THEN
       DECLARE
         cnt PLS_INTEGER;
         author_ind tp_author;
-        -- col_ix_ := workbook.sheets(s).widths.next(col_ix_);
       BEGIN
         authors.delete();
         FOR c IN 1 .. workbook.sheets(s).comments.count() LOOP
@@ -2316,9 +3466,20 @@ style="position:absolute;margin-left:35.25pt;margin-top:3pt;z-index:' || to_char
   END LOOP;
   xxx_ := xxx_ || '</Relationships>';
   add1xml (excel_, 'xl/_rels/workbook.xml.rels', xxx_);
+  IF workbook.images.count > 0 THEN
+    xxx_ := '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">';
+    FOR i_ IN 1 .. workbook.images.count LOOP
+       add1file (excel_, 'xl/media/image' || i_ || '.png', workbook.images(i_).img_blob );
+       xxx_ := xxx_ || ( '<Relationship Id="rId' || i_ || '" '
+                    ||   'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image' || i_ || '.png'
+                    ||   '"/>' );
+    END LOOP;
+    xxx_ := xxx_ || '</Relationships>';
+    add1xml (excel_, 'xl/drawings/_rels/drawing1.xml.rels', xxx_);
+  END IF;
   addtxt2utf8blob_init(yyy_);
-  addtxt2utf8blob (
-    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+  addtxt2utf8blob ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="' || workbook.str_cnt || '" uniqueCount="' || workbook.strings.count() || '">',
     yyy_
   );
@@ -2359,7 +3520,8 @@ PROCEDURE Query2Sheet (
    sheet_       IN PLS_INTEGER := null,
    useXf_       IN BOOLEAN     := false,
    hdr_font_    IN PLS_INTEGER := null,
-   hdr_fill_    IN PLS_INTEGER := null )
+   hdr_fill_    IN PLS_INTEGER := null,
+   col_fmts_    IN numFmt_cols := numFmt_cols() )
 IS
 
    TYPE tp_XfIds IS TABLE OF VARCHAR2(50) INDEX BY PLS_INTEGER;
@@ -2403,7 +3565,6 @@ BEGIN
          WHEN desc_tab_(col_).col_type IN (12, 178, 179, 180, 181, 231) THEN
             dbms_sql.define_array (cur_, col_, d_tab_, bulk_sz_, 1);
             XfIds_(col_) := get_XfId (sh_, col_, null, get_numFmt('dd/mm/yyyy'));
-            --XfIds_(col_) := get_XfId (sh_, col_, null, get_numFmt('yyyy/mm/dd'));
          -- Codes for CHAR + VARCHAR types
          WHEN desc_tab_(col_).col_type IN (1, 8, 9, 96, 112) THEN
             dbms_sql.define_array (cur_, col_, v_tab_, bulk_sz_, 1);
@@ -2428,7 +3589,13 @@ BEGIN
                   Dbms_Sql.Column_Value (cur_, col_, n_tab_);
                   FOR i_ IN 0 .. rows_fetched_ - 1 LOOP
                      IF n_tab_(i_+n_tab_.first()) IS NOT null THEN
-                        Cell (col_, offset_+i_, n_tab_(i_+n_tab_.first()), sheet_ => sh_);
+                        Cell (
+                           col_      => col_,
+                           row_      => offset_+i_,
+                           value_    => n_tab_(i_+n_tab_.first()),
+                           numFmtId_ => CASE WHEN col_fmts_.exists(col_) THEN col_fmts_(col_) END,
+                           sheet_    => sh_
+                        );
                      END IF;
                   END LOOP;
                   n_tab_.delete;
@@ -2438,7 +3605,7 @@ BEGIN
                   FOR i_ IN 0 .. rows_fetched_ - 1 LOOP
                      IF d_tab_(i_+d_tab_.first()) IS NOT null THEN
                         IF g_useXf_ THEN
-                           Cell (col_, offset_+i_, d_tab_(i_+d_tab_.first()), sheet_ => sh_);
+                           Cell (col_, offset_+i_, value_dt_ => d_tab_(i_+d_tab_.first()), sheet_ => sh_);
                         ELSE
                            Query_Date_Cell(col_, offset_+i_, d_tab_(i_+d_tab_.first()), sh_, XfIds_(col_));
                         END IF;
@@ -2451,7 +3618,7 @@ BEGIN
                   Dbms_Sql.Column_Value (cur_, col_, v_tab_);
                   FOR i_ IN 0 .. rows_fetched_-1 LOOP
                      IF v_tab_(i_+v_tab_.first()) IS NOT null THEN
-                        Cell (col_, offset_+i_, v_tab_(i_+v_tab_.first()), sheet_ => sh_);
+                        Cell (col_, offset_+i_, value_str_ => v_tab_(i_+v_tab_.first()), sheet_ => sh_);
                         data_len_ := length(v_tab_(i_+v_tab_.first()));
                         widths_(col_) := least (greatest(widths_(col_),data_len_), 60);
                      END IF;
@@ -2513,18 +3680,18 @@ PROCEDURE Query2Sheet (
    sheet_       IN PLS_INTEGER := null,
    useXf_       IN BOOLEAN     := false,
    hdr_font_    IN PLS_INTEGER := null,
-   hdr_fill_    IN PLS_INTEGER := null )
+   hdr_fill_    IN PLS_INTEGER := null,
+   col_fmts_    IN numFmt_cols := numFmt_cols() )
 IS
    cur_ INTEGER := Dbms_Sql.Open_Cursor;
    res_ INTEGER;
 BEGIN
    Dbms_Sql.Parse (cur_, sql_, dbms_sql.native);
    Do_Binding (cur_, binds_);
-   res_ := Dbms_Sql.Execute(cur_);
-   SELECT 1 INTO res_ FROM dual; --avoid compiler warning
+   res_ := Dbms_Sql.Execute(cur_); -- ignore
    Query2Sheet (
       col_count_, row_count_, cur_, col_headers_,
-      sheet_, UseXf_, hdr_font_, hdr_fill_
+      sheet_, UseXf_, hdr_font_, hdr_fill_, col_fmts_
    );
    IF directory_ IS NOT null AND filename_ IS NOT null THEN
       Save (directory_, filename_);
@@ -2542,14 +3709,15 @@ PROCEDURE Query2Sheet (
    sheet_       IN PLS_INTEGER := null,
    useXf_       IN BOOLEAN     := false,
    hdr_font_    IN PLS_INTEGER := null,
-   hdr_fill_    IN PLS_INTEGER := null )
+   hdr_fill_    IN PLS_INTEGER := null,
+   col_fmts_    IN numFmt_cols := numFmt_cols() )
 IS
    binds_ bind_arr := bind_arr();
 BEGIN
    Query2Sheet (
       col_count_, row_count_, sql_, binds_,
       col_headers_, directory_, filename_, sheet_,
-      useXf_, hdr_font_, hdr_fill_
+      useXf_, hdr_font_, hdr_fill_, col_fmts_
    );
 END Query2Sheet;
 
@@ -2564,13 +3732,14 @@ PROCEDURE Query2Sheet (
    sheet_       IN PLS_INTEGER := null,
    useXf_       IN BOOLEAN     := false,
    hdr_font_    IN PLS_INTEGER := null,
-   hdr_fill_    IN PLS_INTEGER := null )
+   hdr_fill_    IN PLS_INTEGER := null,
+   col_fmts_    IN numFmt_cols := numFmt_cols() )
 IS
    cur_ INTEGER := dbms_sql.to_cursor_number (rc_);
 BEGIN
    Query2Sheet (
       col_count_, row_count_, cur_, col_headers_,
-      sheet_, useXf_, hdr_font_, hdr_fill_
+      sheet_, useXf_, hdr_font_, hdr_fill_, col_fmts_
    );
    IF directory_ IS NOT null AND filename_ IS NOT null THEN
       Save (directory_, filename_);
@@ -2586,7 +3755,8 @@ PROCEDURE Query2SheetAndAutofilter ( -- with Binds
    sheet_       IN PLS_INTEGER := null,
    useXf_       IN BOOLEAN     := false,
    hdr_font_    IN PLS_INTEGER := null,
-   hdr_fill_    IN PLS_INTEGER := null )
+   hdr_fill_    IN PLS_INTEGER := null,
+   col_fmts_    IN numFmt_cols := numFmt_cols() )
 IS
    col_count_ NUMBER;
    row_count_ NUMBER;
@@ -2600,7 +3770,8 @@ BEGIN
       sheet_       => sheet_,
       useXf_       => useXf_,
       hdr_font_    => hdr_font_,
-      hdr_fill_    => hdr_fill_
+      hdr_fill_    => hdr_fill_,
+      col_fmts_    => col_fmts_
    );
    Set_Autofilter (1, col_count_, 1, row_count_, sheet_);
    IF directory_ IS NOT null AND filename_ IS NOT null THEN
@@ -2616,13 +3787,14 @@ PROCEDURE Query2SheetAndAutofilter ( -- no Binds
    sheet_       IN PLS_INTEGER := null,
    useXf_       IN BOOLEAN     := false,
    hdr_font_    IN PLS_INTEGER := null,
-   hdr_fill_    IN PLS_INTEGER := null )
+   hdr_fill_    IN PLS_INTEGER := null,
+   col_fmts_    IN numFmt_cols := numFmt_cols() )
 IS
    binds_ bind_arr := bind_arr();
 BEGIN
    Query2SheetAndAutofilter (
       sql_, binds_, col_headers_, directory_,
-      filename_, sheet_, useXf_, hdr_font_, hdr_fill_
+      filename_, sheet_, useXf_, hdr_font_, hdr_fill_, col_fmts_
    );
 END Query2SheetAndAutofilter;
 
@@ -2638,14 +3810,155 @@ END SetUseXf;
 -- This must include some font, fill and other initiators too
 --
 
-PROCEDURE Init_Fonts_And_Fills
+PROCEDURE Init_Workbook
+IS
+   --gbp_curr_fmt_ VARCHAR2(200) := '_-£* #,##0_-;-£* #,##0_-;_-£* &quot;-&quot;_-;_-@_-';
+   gbp_curr_fmt0_ VARCHAR2(200) := '_-&#163;* #,##0_-;-&#163;* #,##0_-;_-&#163;* &quot;-&quot;_-;_-@_-';
+   gbp_curr_fmt2_ VARCHAR2(200) := '_-&#163;* #,##0.00_-;-&#163;* #,##0.00_-;_-&#163;* &quot;-&quot;_-;_-@_-';
+BEGIN
+
+   Clear_Workbook;
+   New_Sheet ('Sheet 1');
+
+   fonts_('head1')       := Get_Font (rgb_ => 'FFDBE5F1', bold_ => true);
+   fonts_('bold')        := Get_Font (bold_ => true);
+   fonts_('italic')      := Get_Font (italic_ => true);
+   fonts_('bold_lg')     := Get_Font (bold_ => true, fontsize_ => 14);
+   fonts_('bld_wht')     := Get_Font (rgb_ => 'FFFFFFFF', bold_ => true);
+   fonts_('bld_dk_bl')   := Get_Font (rgb_ => 'FF244062', bold_ => true);
+   fonts_('bld_lt_bl')   := Get_Font (rgb_ => 'FFDCE6F1', bold_ => true);
+   fonts_('bld_ltbl_lg') := Get_Font (rgb_ => 'FFDCE6F1', bold_ => true, fontsize_ => 14);
+   fonts_('bld_lt_gr')   := Get_Font (rgb_ => 'FFEBF1DE', bold_ => true);
+   fonts_('dk_gr')       := Get_Font (rgb_ => 'FF4F6228');
+
+   fills_('dk_blue')     := Get_Fill ('solid', 'FF17375D');
+   fills_('md_dk_blue')  := Get_Fill ('solid', 'FF366092');
+   fills_('mid_blue')    := Get_Fill ('solid', 'FF95B3D7');
+   fills_('dk_red')      := Get_Fill ('solid', 'FF953735');
+   fills_('dk_green')    := Get_Fill ('solid', 'FF006400');
+   fills_('lt_green')    := Get_Fill ('solid', 'FFD8E4BC');
+   fills_('md_dk_gr')    := Get_Fill ('solid', 'FF76933C');
+   fills_('pale_blue')   := Get_Fill ('solid', 'FFDCE6F1');
+   fills_('dk_purple')   := Get_Fill ('solid', 'FF60497A');
+   fills_('lt_grey')     := Get_Fill ('solid', 'FFD9D9D9');
+   fills_('md_grey')     := Get_Fill ('solid', 'FFA6A6A6');
+   fills_('dk_grey')     := Get_Fill ('solid', 'FF595959');
+
+   bdrs_('none')         := Get_Border ('none', 'none', 'none', 'none');
+   bdrs_('dotted')       := Get_Border ('dotted', 'dotted', 'dotted', 'dotted');
+   bdrs_('t_dotted')     := Get_Border ('dotted', 'none', 'none', 'none'); -- top, bottom, left, right
+   bdrs_('tl_dotted')    := Get_Border ('dotted', 'none', 'dotted', 'none');
+   bdrs_('tbl_dotted')   := Get_Border ('dotted', 'dotted', 'dotted', 'none');
+   bdrs_('tr_dotted')    := Get_Border ('dotted', 'none', 'none', 'dotted');
+   bdrs_('tb_dotted')    := Get_Border ('dotted', 'dotted', 'none', 'none');
+   bdrs_('b_dotted')     := Get_Border ('none', 'dotted', 'none', 'none');
+   bdrs_('bl_dotted')    := Get_Border ('none', 'dotted', 'dotted', 'none');
+   bdrs_('l_dotted')     := Get_Border ('none', 'none', 'dotted', 'none');
+   bdrs_('br_dotted')    := Get_Border ('none', 'dotted', 'none', 'dotted');
+   bdrs_('r_dotted')     := Get_Border ('none', 'none', 'none', 'dotted');
+   bdrs_('tbr_dotted')   := Get_Border ('dotted', 'dotted', 'none', 'dotted');
+   bdrs_('thin')         := Get_Border ('thin', 'thin', 'thin', 'thin');
+   bdrs_('t_thin')       := Get_Border ('thin', 'none', 'none', 'none'); -- top, bottom, left, right
+   bdrs_('tl_thin')      := Get_Border ('thin', 'none', 'thin', 'none');
+   bdrs_('tbl_thin')     := Get_Border ('thin', 'thin', 'thin', 'none');
+   bdrs_('tr_thin')      := Get_Border ('thin', 'none', 'none', 'thin');
+   bdrs_('tb_thin')      := Get_Border ('thin', 'thin', 'none', 'none');
+   bdrs_('b_thin')       := Get_Border ('none', 'thin', 'none', 'none');
+   bdrs_('bl_thin')      := Get_Border ('none', 'thin', 'thin', 'none');
+   bdrs_('l_thin')       := Get_Border ('none', 'none', 'thin', 'none');
+   bdrs_('br_thin')      := Get_Border ('none', 'thin', 'none', 'thin');
+   bdrs_('r_thin')       := Get_Border ('none', 'none', 'none', 'thin');
+   bdrs_('tbr_thin')     := Get_Border ('thin', 'thin', 'none', 'thin');
+   bdrs_('medium')       := Get_Border ('medium', 'medium', 'medium', 'medium');
+   bdrs_('t_medium')     := Get_Border ('medium', 'none', 'none', 'none'); -- top, bottom, left, right
+   bdrs_('tl_medium')    := Get_Border ('medium', 'none', 'medium', 'none');
+   bdrs_('tbl_medium')   := Get_Border ('medium', 'medium', 'medium', 'none');
+   bdrs_('tr_medium')    := Get_Border ('medium', 'none', 'none', 'medium');
+   bdrs_('tb_medium')    := Get_Border ('medium', 'medium', 'none', 'none');
+   bdrs_('b_medium')     := Get_Border ('none', 'medium', 'none', 'none');
+   bdrs_('bl_medium')    := Get_Border ('none', 'medium', 'medium', 'none');
+   bdrs_('l_medium')     := Get_Border ('none', 'none', 'medium', 'none');
+   bdrs_('br_medium')    := Get_Border ('none', 'medium', 'none', 'medium');
+   bdrs_('r_medium')     := Get_Border ('none', 'none', 'none', 'medium');
+   bdrs_('tbr_medium')   := Get_Border ('medium', 'medium', 'none', 'medium');
+   bdrs_('thick')        := Get_Border ('thick', 'thick', 'thick', 'thick');
+   bdrs_('t_thick')      := Get_Border ('thick', 'none', 'none', 'none'); -- top, bottom, left, right
+   bdrs_('tl_thick')     := Get_Border ('thick', 'none', 'thick', 'none');
+   bdrs_('tr_thick')     := Get_Border ('thick', 'none', 'none', 'thick');
+   bdrs_('tb_thick')     := Get_Border ('thick', 'thick', 'none', 'none');
+   bdrs_('b_thick')      := Get_Border ('none', 'thick', 'none', 'none');
+   bdrs_('bl_thick')     := Get_Border ('none', 'thick', 'thick', 'none');
+   bdrs_('br_thick')     := Get_Border ('none', 'thick', 'none', 'thick');
+
+   numFmt_('gbp_curr0')  := Get_NumFmt (gbp_curr_fmt0_);
+   numFmt_('gbp_curr2')  := Get_NumFmt (gbp_curr_fmt2_);
+   numFmt_('0dp')        := Get_NumFmt ('#,##0');
+   numFmt_('2dp')        := Get_NumFmt ('#,##0.00');
+   numFmt_('dt_mid')     := Get_NumFmt ('dd mmm yyyy');
+   numFmt_('dt_long')    := Get_NumFmt ('dd mmmm yyyy');
+   numFmt_('Mmm yyyy')   := Get_NumFmt ('Mmm yyyy');
+
+   align_('left')        := Get_Alignment (vertical_ => 'center', horizontal_ => 'left',   wrapText_ => false);
+   align_('leftw')       := Get_Alignment (vertical_ => 'center', horizontal_ => 'left',   wrapText_ => true);
+   align_('right')       := Get_Alignment (vertical_ => 'center', horizontal_ => 'right',  wrapText_ => false);
+   align_('center')      := Get_Alignment (vertical_ => 'center', horizontal_ => 'center', wrapText_ => false);
+   align_('wrap')        := Get_Alignment (vertical_ => 'top',    horizontal_ => 'left',   wrapText_ => true);
+   align_('wrap_r')      := Get_Alignment (vertical_ => 'top',    horizontal_ => 'right',  wrapText_ => true);
+
+END Init_Workbook;
+
+PROCEDURE Set_Param (
+   params_ IN OUT params_arr,
+   ix_     IN NUMBER,
+   name_   IN VARCHAR2,
+   val_    IN VARCHAR2,
+   extra_  IN VARCHAR2 := '' )
 IS BEGIN
-   fonts_('head1')   := As_Xlsx.Get_Font (rgb_ => 'FFDBE5F1', bold_ => true);
-   fonts_('bold')    := As_Xlsx.Get_Font (bold_ => true);
-   fonts_('bld_wht') := As_Xlsx.Get_Font (rgb_ => 'FFFFFFFF', bold_ => true);
-   fills_('dk_blue') := As_Xlsx.Get_Fill ('solid', 'FF17375D');
-   fills_('dk_red')  := As_Xlsx.Get_Fill ('solid', 'FF953735');
-END Init_Fonts_And_Fills;
+   params_(ix_) := param_rec (
+      param_name      => name_,
+      param_value     => val_,
+      additional_info => extra_
+   );
+END Set_Param;
+
+PROCEDURE Bind_Value (
+   binds_   IN OUT bind_arr,
+   bind_id_ IN VARCHAR2,
+   val_     IN VARCHAR2 )
+IS BEGIN
+   binds_(bind_id_) := data_binder (
+      datatype => 'STRING',
+      s_val    => val_,
+      n_val    => null,
+      d_val    => null
+   );
+END Bind_Value;
+
+PROCEDURE Bind_Value (
+   binds_   IN OUT bind_arr,
+   bind_id_ IN VARCHAR2,
+   val_     IN NUMBER )
+IS BEGIN
+   binds_(bind_id_) := data_binder (
+      datatype => 'NUMBER',
+      s_val    => '',
+      n_val    => val_,
+      d_val    => null
+   );
+END Bind_Value;
+
+PROCEDURE Bind_Value (
+   binds_   IN OUT bind_arr,
+   bind_id_ IN VARCHAR2,
+   val_     IN DATE )
+IS BEGIN
+   binds_(bind_id_) := data_binder (
+      datatype => 'DATE',
+      s_val    => '',
+      n_val    => null,
+      d_val    => val_
+   );
+END Bind_Value;
 
 PROCEDURE Create_Params_Sheet (
    report_name_ IN VARCHAR2,
@@ -2663,14 +3976,14 @@ BEGIN
    Cell (3, row_, '', fillId_ => fills_('dk_blue'), sheet_ => sh_);
    row_ := row_ + 1;
    Cell (2, row_, 'Report Name', fontId_ => fonts_('bold'), sheet_ => sh_);
-   Cell (3, row_, report_name_);
+   Cell (3, row_, value_str_ => report_name_);
    row_ := row_ + 1;
    Cell (2, row_, 'Executed at', fontId_ => fonts_('bold'), sheet_ => sh_);
-   Cell (3, row_, to_char(sysdate, 'YYYY-MM-DD HH24:MI:SS'), sheet_ => sh_);
+   Cell (3, row_, value_str_ => to_char(sysdate, 'YYYY-MM-DD HH24:MI:SS'), sheet_ => sh_);
    row_ := row_ + 1;
    IF show_user_ THEN
       Cell (2, row_, 'Executed by', fontId_ => fonts_('bold'), sheet_ => sh_);
-      Cell (3, row_, Fnd_User_API.Get_Description(Fnd_Session_API.Get_Fnd_User), sheet_ => sh_);
+      Cell (3, row_, value_str_ => Fnd_User_API.Get_Description(Fnd_Session_API.Get_Fnd_User), sheet_ => sh_);
       row_ := row_ + 1;
    END IF;
 
@@ -2682,21 +3995,16 @@ BEGIN
    row_ := row_ + 1;
    FOR i_ IN params_.FIRST .. params_.LAST LOOP
       Cell (2, row_, params_(i_).param_name, fontId_ => fonts_('bold'), sheet_ => sh_);
-      Cell (3, row_, params_(i_).param_value, sheet_ => sh_);
-      Cell (4, row_, params_(i_).additional_info, sheet_ => sh_);
+      Cell (3, row_, value_str_ => params_(i_).param_value, sheet_ => sh_);
+      Cell (4, row_, value_str_ => params_(i_).additional_info, sheet_ => sh_);
       row_ := row_ + 1;
    END LOOP;
 
-   Set_Column_Width (2, 25, 1);
-   Set_Column_Width (3, 40, 1);
-   Set_Column_Width (4, 40, 1);
+   Set_Column_Width (2, 25, sh_);
+   Set_Column_Width (3, 40, sh_);
+   Set_Column_Width (4, 40, sh_);
 
 END Create_Params_Sheet;
 
-
-BEGIN
-   Clear_Workbook;
-   New_Sheet ('Sheet 1');
-   Init_Fonts_And_Fills;
 END AS_XLSX;
 /
