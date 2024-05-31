@@ -675,8 +675,13 @@ TYPE tp_validation IS RECORD (
 );
 TYPE tp_validations IS TABLE OF tp_validation INDEX BY PLS_INTEGER;
 
+TYPE tp_pivot_info IS RECORD (
+   on_page  PLS_INTEGER
+   --osian
+);
+TYPE tp_pivots_dir IS TABLE OF tp_pivot_info index by PLS_INTEGER;
 TYPE tp_pivot IS RECORD (
-   pivot_name VARCHAR2(2000)
+   pivot_name VARCHAR2(200)
 );
 TYPE tp_pivots IS TABLE OF tp_pivot index by PLS_INTEGER;
 
@@ -772,7 +777,7 @@ TYPE tp_book IS RECORD (
    defined_names tp_defined_names,
    formulas      tp_formulas,
    fontid        PLS_INTEGER,
-   pivots        tp_pivots,
+   pivots_list   tp_pivots_dir,
    images        tp_images
 );
 
@@ -884,8 +889,13 @@ FUNCTION Make_Node (
    tag_name_ IN VARCHAR2,
    ns_       IN VARCHAR2      := '',
    attrs_    IN xml_attrs_arr := xml_attrs_arr() ) RETURN dbms_XmlDom.DomNode
-IS BEGIN
-   RETURN Dbms_XmlDom.makeNode (Make_Tag (doc_, tag_name_, ns_, attrs_));
+IS
+   nd_ dbms_XmlDom.DomNode := Dbms_XmlDom.makeNode (Make_Tag (doc_, tag_name_, ns_, attrs_));
+BEGIN
+   IF ns_ IS NOT null THEN
+      Dbms_XmlDom.setPrefix (nd_, ns_);
+   END IF;
+   RETURN nd_;
 END Make_Node;
 
 PROCEDURE Make_Node (
@@ -903,7 +913,7 @@ FUNCTION Xml_Node (
    doc_       IN OUT NOCOPY dbms_XmlDom.DomDocument,
    append_to_ IN dbms_XmlDom.DomNode,
    tag_name_  IN VARCHAR2,
-   ns_        IN VARCHAR2      := '',
+   ns_        IN VARCHAR2,
    attrs_     IN xml_attrs_arr := xml_attrs_arr() ) RETURN dbms_XmlDom.DomNode
 IS BEGIN
    RETURN Dbms_XmlDom.appendChild (append_to_, Make_Node(doc_,tag_name_,ns_,attrs_));
@@ -922,7 +932,7 @@ PROCEDURE Xml_Node (
    doc_       IN OUT NOCOPY dbms_XmlDom.DomDocument,
    append_to_ IN dbms_XmlDom.DomNode,
    tag_name_  IN VARCHAR2,
-   ns_        IN VARCHAR2      := '',
+   ns_        IN VARCHAR2,
    attrs_     IN xml_attrs_arr := xml_attrs_arr() )
 IS
    throw_nd_ dbms_XmlDom.DomNode;
@@ -944,7 +954,7 @@ PROCEDURE Xml_Text_Node (
    append_to_    IN dbms_XmlDom.DomNode,
    tag_name_     IN VARCHAR2,
    text_content_ IN VARCHAR2,
-   ns_           IN VARCHAR2      := '',
+   ns_           IN VARCHAR2,
    attrs_        IN xml_attrs_arr := xml_attrs_arr() )
 IS
    throw_nd_ dbms_XmlDom.DomNode;
@@ -953,6 +963,16 @@ BEGIN
       Dbms_XmlDom.appendChild (append_to_, Make_Node(doc_,tag_name_,ns_,attrs_)),
       Dbms_XmlDom.makeNode (Dbms_XmlDom.createTextNode (doc_, text_content_))
    );
+END Xml_Text_Node;
+
+PROCEDURE Xml_Text_Node (
+   doc_          IN OUT NOCOPY dbms_XmlDom.DomDocument,
+   append_to_    IN dbms_XmlDom.DomNode,
+   tag_name_     IN VARCHAR2,
+   text_content_ IN VARCHAR2,
+   attrs_        IN xml_attrs_arr := xml_attrs_arr() )
+IS BEGIN
+   Xml_Text_Node (doc_, append_to_, tag_name_, text_content_, '', attrs_);
 END Xml_Text_Node;
 
 PROCEDURE Xml_Text_Node (
@@ -2841,12 +2861,23 @@ BEGIN
    attrs_('ContentType') := 'application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml';
    Xml_Node (doc_, nd_types_, 'Override', attrs_);
 
-   p_ := workbook.pivots.first;
+   p_ := workbook.pivots_list.first;
    WHILE p_ IS NOT null LOOP
+
+      attrs_('PartName')    := rep('/xl/pivotCache/pivotCacheDefinition:P1.xml', p_);
+      attrs_('ContentType') := 'application/vnd.openxmlformats-officedocument.spreadsheetml.pivotCacheDefinition+xml';
+      Xml_Node (doc_, nd_types_, 'Override', attrs_);
+
+      attrs_('PartName')    := rep('/xl/pivotCache/pivotCacheRecords:P1.xml', p_);
+      attrs_('ContentType') := 'application/vnd.openxmlformats-officedocument.spreadsheetml.pivotCacheRecords+xml';
+      Xml_Node (doc_, nd_types_, 'Override', attrs_);
+
       attrs_('PartName')    := rep('xl/pivotTables/pivotTable:P1.xml', p_);
       attrs_('ContentType') := 'application/vnd.openxmlformats-officedocument.spreadsheetml.pivotTable+xml';
       Xml_Node (doc_, nd_types_, 'Override', attrs_);
-      p_ := workbook.pivots.next(p_);
+
+      p_ := workbook.pivots_list.next(p_);
+
    END LOOP;
 
    attrs_('PartName')    := '/docProps/core.xml';
@@ -2883,6 +2914,219 @@ BEGIN
    Add1Xml (excel_, '[Content_Types].xml', xml_type_.getClobVal);
 
 END Finish_Content_Types;
+
+PROCEDURE Finish_Rels (
+   excel_ IN OUT NOCOPY BLOB )
+IS
+   doc_      dbms_XmlDom.DomDocument := Dbms_XmlDom.newDomDocument;
+   nd_rels_  dbms_XmlDom.DomNode;
+   attrs_    xml_attrs_arr;
+BEGIN
+
+   Dbms_XmlDom.setVersion (doc_, '1.0" encoding="UTF-8" standalone="yes');
+   attrs_('xmlns') := 'http://schemas.openxmlformats.org/package/2006/relationships';
+   nd_rels_ := Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'Relationships', attrs_);
+
+   attrs_.delete;
+   attrs_('Id')     := 'rId1';
+   attrs_('Type')   := 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument';
+   attrs_('Target') := 'xl/workbook.xml';
+   Xml_Node (doc_, nd_rels_, 'Relationship', attrs_);
+   attrs_('Id')     := 'rId2';
+   attrs_('Type')   := 'http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties';
+   attrs_('Target') := 'docProps/core.xml';
+   Xml_Node (doc_, nd_rels_, 'Relationship', attrs_);
+   attrs_('Id')     := 'rId3';
+   attrs_('Type')   := 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties';
+   attrs_('Target') := 'docProps/app.xml';
+   Xml_Node (doc_, nd_rels_, 'Relationship', attrs_);
+
+   Add1Xml (excel_, '_rels/.rels', Dbms_XmlDom.getXmlType(doc_).getClobVal);
+   Dbms_XmlDom.freeDocument (doc_);
+
+END Finish_Rels;
+
+PROCEDURE Finish_docProps (
+   excel_ IN OUT NOCOPY BLOB )
+IS
+   s_        PLS_INTEGER;
+   doc_      dbms_XmlDom.DomDocument := Dbms_XmlDom.newDomDocument;
+   nd_cprop_ dbms_XmlDom.DomNode;
+   nd_prop_  dbms_XmlDom.DomNode;
+   nd_hd_    dbms_XmlDom.DomNode;
+   nd_vec_   dbms_XmlDom.DomNode;
+   nd_var_   dbms_XmlDom.DomNode;
+   nd_top_   dbms_XmlDom.DomNode;
+   attrs_    xml_attrs_arr;
+BEGIN
+
+   -- docProps/core.xml
+   Dbms_XmlDom.setVersion (doc_, '1.0" encoding="UTF-8" standalone="yes');
+   attrs_('xmlns:cp')       := 'http://schemas.openxmlformats.org/package/2006/metadata/core-properties';
+   attrs_('xmlns:dc')       := 'http://purl.org/dc/elements/1.1/';
+   attrs_('xmlns:dcterms')  := 'http://purl.org/dc/terms/';
+   attrs_('xmlns:dcmitype') := 'http://purl.org/dc/dcmitype/';
+   attrs_('xmlns:xsi')      := 'http://www.w3.org/2001/XMLSchema-instance';
+   nd_cprop_ := Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'coreProperties', 'cp', attrs_);
+
+   Xml_Text_Node (doc_, nd_cprop_, 'creator',        sys_context('userenv','os_user'), 'dc');
+   Xml_Text_Node (doc_, nd_cprop_, 'description',    rep('Build by version: :P1', VERSION_), 'dc');
+   Xml_Text_Node (doc_, nd_cprop_, 'lastModifiedBy', sys_context('userenv','os_user'), 'cp');
+
+   attrs_.delete;
+   attrs_('xsi:type') := 'dcterms:W3CDTF';
+   Xml_Text_Node (doc_, nd_cprop_, 'created',  to_char(current_timestamp,'yyyy-mm-dd"T"hh24:mi:ssTZH:TZM'), 'dcterms', attrs_);
+   Xml_Text_Node (doc_, nd_cprop_, 'modified', to_char(current_timestamp,'yyyy-mm-dd"T"hh24:mi:ssTZH:TZM'), 'dcterms', attrs_);
+
+   Add1Xml (excel_, 'docProps/core.xml', Dbms_XmlDom.getXmlType(doc_).getClobVal);
+   Dbms_XmlDom.freeDocument (doc_);
+
+
+   -- docProps/app.xml
+   doc_ := Dbms_XmlDom.newDomDocument;
+   Dbms_XmlDom.setVersion (doc_, '1.0" encoding="UTF-8" standalone="yes');
+
+   attrs_.delete;
+   attrs_('xmlns')    := 'http://schemas.openxmlformats.org/officeDocument/2006/extended-properties';
+   attrs_('xmlns:vt') := 'http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes';
+   nd_prop_ := Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'Properties', attrs_);
+
+   Xml_Text_Node (doc_, nd_prop_, 'Application', 'Microsoft Excel');
+   Xml_Text_Node (doc_, nd_prop_, 'DocSecurity', '0');
+   Xml_Text_Node (doc_, nd_prop_, 'ScaleCrop', 'false');
+   nd_hd_  := Xml_Node (doc_, nd_prop_, 'HeadingPairs');
+   attrs_.delete;
+   attrs_('size')     := '2';
+   attrs_('baseType') := 'variant';
+   nd_vec_ := Xml_Node (doc_, nd_hd_, 'vector', 'vt', attrs_);
+   nd_var_ := Xml_Node (doc_, nd_vec_, 'variant', 'vt');
+   Xml_Text_Node (doc_, nd_var_, 'lpstr', 'Worksheets', 'vt');
+   nd_var_ := Xml_Node (doc_, nd_vec_, 'variant', 'vt');
+   Xml_Text_Node (doc_, nd_var_, 'i4', to_char(workbook.sheets.count), 'vt');
+
+   nd_top_ := Xml_Node (doc_, nd_prop_, 'TitlesOfParts');
+   attrs_.delete;
+   attrs_('size')     := workbook.sheets.count;
+   attrs_('baseType') := 'lpstr';
+   nd_vec_ := Xml_Node (doc_, nd_top_, 'vector', 'vt', attrs_);
+   s_ := workbook.sheets.first;
+   WHILE s_ IS NOT null LOOP
+      Xml_Text_Node (doc_, nd_vec_, 'lpstr', workbook.sheets(s_).name, 'vt');
+      s_ := workbook.sheets.next(s_);
+   END LOOP;
+   Xml_Text_Node (doc_, nd_prop_, 'LinksUpToDate', 'false');
+   Xml_Text_Node (doc_, nd_prop_, 'SharedDoc', 'false');
+   Xml_Text_Node (doc_, nd_prop_, 'HyperlinksChanged', 'false');
+   Xml_Text_Node (doc_, nd_prop_, 'AppVersion', '14.0300');
+
+   Add1Xml (excel_, 'docProps/app.xml', Dbms_XmlDom.getXmlType(doc_).getClobVal);
+   Dbms_XmlDom.freeDocument (doc_);
+
+END Finish_docProps;
+
+PROCEDURE Finish_Styles (
+   excel_ IN OUT NOCOPY BLOB )
+IS
+   s_        PLS_INTEGER;
+   doc_      dbms_XmlDom.DomDocument := Dbms_XmlDom.newDomDocument;
+   nd_cprop_ dbms_XmlDom.DomNode;
+   nd_prop_  dbms_XmlDom.DomNode;
+   nd_hd_    dbms_XmlDom.DomNode;
+   nd_vec_   dbms_XmlDom.DomNode;
+   nd_var_   dbms_XmlDom.DomNode;
+   nd_top_   dbms_XmlDom.DomNode;
+   xml_type_ XmlType;
+   attrs_    xml_attrs_arr;
+BEGIN
+   -- xl/styles.xml
+   Dbms_XmlDom.setVersion (doc_, '1.0" encoding="UTF-8" standalone="yes');
+   attrs_('xmlns:cp')       := 'http://schemas.openxmlformats.org/package/2006/metadata/core-properties';
+   attrs_('xmlns:dc')       := 'http://purl.org/dc/elements/1.1/';
+   attrs_('xmlns:dcterms')  := 'http://purl.org/dc/terms/';
+   attrs_('xmlns:dcmitype') := 'http://purl.org/dc/dcmitype/';
+   attrs_('xmlns:xsi')      := 'http://www.w3.org/2001/XMLSchema-instance';
+   nd_cprop_ := Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'coreProperties', 'cp', attrs_);
+/*
+  xxx_ := '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" mc:Ignorable="x14ac" xmlns:x14ac="http://schemas.microsoft.com/office/spreadsheetml/2009/9/ac">';
+  IF workbook.numFmts.count() > 0 THEN
+    xxx_ := xxx_ || ( '<numFmts count="' || workbook.numFmts.count() || '">' );
+    FOR n IN 1 .. workbook.numFmts.count() LOOP
+      xxx_ := xxx_ || ( '<numFmt numFmtId="' || workbook.numFmts(n).numFmtId || '" formatCode="' || workbook.numFmts(n).formatCode || '"/>' );
+    END LOOP;
+    xxx_ := xxx_ || '</numFmts>';
+  END IF;
+  xxx_ := xxx_ || ( '<fonts count="' || workbook.fonts.count() || '" x14ac:knownFonts="1">' );
+  FOR f IN 0 .. workbook.fonts.count() - 1 LOOP
+    xxx_ := xxx_ || ( '<font>' ||
+      CASE WHEN workbook.fonts(f).bold THEN '<b/>' END ||
+      CASE WHEN workbook.fonts(f).italic THEN '<i/>' END ||
+      CASE WHEN workbook.fonts(f).underline THEN '<u/>' END ||
+'<sz val="' || to_char( workbook.fonts(f).fontsize, 'TM9', 'NLS_NUMERIC_CHARACTERS=.,' )  || '"/>
+<color ' || CASE WHEN workbook.fonts(f).rgb IS not null
+              THEN 'rgb="' || workbook.fonts( f ).rgb
+              ELSE 'theme="' || workbook.fonts(f).theme
+            END || '"/>
+<name val="' || workbook.fonts(f).name || '"/>
+<family val="' || workbook.fonts(f).family || '"/>
+<scheme val="none"/>
+</font>' );
+  END LOOP;
+  xxx_ := xxx_ || ( '</fonts>
+<fills count="' || workbook.fills.count() || '">' );
+  FOR f IN 0 .. workbook.fills.count() - 1 LOOP
+    xxx_ := xxx_ || ( '<fill><patternFill patternType="' || workbook.fills(f).patternType || '">' ||
+      CASE WHEN workbook.fills(f).fgRGB IS not null THEN '<fgColor rgb="' || workbook.fills(f).fgRGB || '"/>' END ||
+      CASE WHEN workbook.fills(f).bgRGB IS not null THEN '<bgColor rgb="' || workbook.fills(f).bgRGB || '"/>' END ||
+          '</patternFill></fill>' );
+  END LOOP;
+  xxx_ := xxx_ || ( '</fills>
+<borders count="' || workbook.borders.count() || '">' );
+  FOR b IN 0 .. workbook.borders.count() - 1 LOOP
+    xxx_ := xxx_ || ('<border>' ||
+      CASE WHEN workbook.borders(b).left   IS null THEN '<left/>'   ELSE '<left style="'   || workbook.borders(b).left   || '"/>' END ||
+      CASE WHEN workbook.borders(b).right  IS null THEN '<right/>'  ELSE '<right style="'  || workbook.borders(b).right  || '"/>' END ||
+      CASE WHEN workbook.borders(b).top    IS null THEN '<top/>'    ELSE '<top style="'    || workbook.borders(b).top    || '"/>' END ||
+      CASE WHEN workbook.borders(b).bottom IS null THEN '<bottom/>' ELSE '<bottom style="' || workbook.borders(b).bottom || '"/>' END ||
+      '</border>'
+    );
+  END LOOP;
+  xxx_ := xxx_ || ( '</borders>
+<cellStyleXfs count="1">
+<xf numFmtId="0" fontId="0" fillId="0" borderId="0"/>
+</cellStyleXfs>
+<cellXfs count="' || ( workbook.cellXfs.count() + 1 ) || '">
+<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>' );
+  FOR x IN 1 .. workbook.cellXfs.count() LOOP
+    xxx_ := xxx_ || ( '<xf numFmtId="' || workbook.cellXfs(x).numFmtId || '" fontId="' || workbook.cellXfs(x).fontId || '" fillId="' || workbook.cellXfs(x).fillId || '" borderId="' || workbook.cellXfs(x).borderId || '">' );
+    IF (    workbook.cellXfs(x).alignment.horizontal IS not null
+         OR workbook.cellXfs(x).alignment.vertical IS not null
+         OR workbook.cellXfs(x).alignment.wrapText )
+    THEN
+      xxx_ := xxx_ || ( '<alignment' ||
+        CASE WHEN workbook.cellXfs(x).alignment.horizontal IS not null THEN ' horizontal="' || workbook.cellXfs(x).alignment.horizontal || '"' END ||
+        CASE WHEN workbook.cellXfs(x).alignment.vertical IS not null THEN ' vertical="' || workbook.cellXfs(x).alignment.vertical || '"' END ||
+        CASE WHEN workbook.cellXfs(x).alignment.wrapText THEN ' wrapText="true"' END || '/>' );
+    END IF;
+    xxx_ := xxx_ || '</xf>';
+  END LOOP;
+  xxx_ := xxx_ || '</cellXfs>
+<cellStyles count="1">
+  <cellStyle name="Normal" xfId="0" builtinId="0"/>
+</cellStyles>
+<dxfs count="0"/>
+<tableStyles count="0" defaultTableStyle="TableStyleMedium2" defaultPivotStyle="PivotStyleLight16"/>
+<extLst>
+<ext uri="{EB79DEF2-80B8-43e5-95BD-54CBDDF9020C}" xmlns:x14="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main">
+<x14:slicerStyles defaultSlicerStyle="SlicerStyleLight1"/>
+</ext>
+</extLst>
+</styleSheet>';
+*/
+
+   Add1Xml (excel_, 'xl/styles.xml', Dbms_XmlDom.getXmlType(doc_).getClobVal);
+   Dbms_XmlDom.freeDocument (doc_);
+END Finish_Styles;
 
 FUNCTION Finish_Drawing (
    drawing_ tp_drawing,
@@ -3086,54 +3330,11 @@ BEGIN
    Dbms_Lob.createTemporary (excel_, true);
 
    Finish_Content_Types (excel_);
+   Finish_docProps (excel_);
+   Finish_Rels (excel_);
+   --Finish_Styles (excel_);
 
-  xxx_ := '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:dcmitype="http://purl.org/dc/dcmitype/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
-<dc:creator>' || sys_context( 'userenv', 'os_user' ) || '</dc:creator>
-<dc:description>Build by version:' || VERSION_ || '</dc:description>
-<cp:lastModifiedBy>' || sys_context( 'userenv', 'os_user' ) || '</cp:lastModifiedBy>
-<dcterms:created xsi:type="dcterms:W3CDTF">' || to_char( current_timestamp, 'yyyy-mm-dd"T"hh24:mi:ssTZH:TZM' ) || '</dcterms:created>
-<dcterms:modified xsi:type="dcterms:W3CDTF">' || to_char( current_timestamp, 'yyyy-mm-dd"T"hh24:mi:ssTZH:TZM' ) || '</dcterms:modified>
-</cp:coreProperties>';
-  add1xml (excel_, 'docProps/core.xml', xxx_);
-  xxx_ := '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes">
-<Application>Microsoft Excel</Application>
-<DocSecurity>0</DocSecurity>
-<ScaleCrop>false</ScaleCrop>
-<HeadingPairs>
-<vt:vector size="2" baseType="variant">
-<vt:variant>
-<vt:lpstr>Worksheets</vt:lpstr>
-</vt:variant>
-<vt:variant>
-<vt:i4>' || workbook.sheets.count() || '</vt:i4>
-</vt:variant>
-</vt:vector>
-</HeadingPairs>
-<TitlesOfParts>
-<vt:vector size="' || workbook.sheets.count() || '" baseType="lpstr">';
-  s_ := workbook.sheets.first;
-  WHILE s_ IS not null LOOP
-    xxx_ := xxx_ || ( '
-<vt:lpstr>' || workbook.sheets(s_).name || '</vt:lpstr>' );
-    s_ := workbook.sheets.next(s_);
-  END LOOP;
-  xxx_ := xxx_ || '</vt:vector>
-</TitlesOfParts>
-<LinksUpToDate>false</LinksUpToDate>
-<SharedDoc>false</SharedDoc>
-<HyperlinksChanged>false</HyperlinksChanged>
-<AppVersion>14.0300</AppVersion>
-</Properties>';
-  add1xml (excel_, 'docProps/app.xml', xxx_);
-  xxx_ := '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-<Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties" Target="docProps/app.xml"/>
-<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/>
-<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
-</Relationships>';
-  add1xml (excel_, '_rels/.rels', xxx_);
+  -- xl/styles.xml
   xxx_ := '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" mc:Ignorable="x14ac" xmlns:x14ac="http://schemas.microsoft.com/office/spreadsheetml/2009/9/ac">';
   IF workbook.numFmts.count() > 0 THEN
@@ -3197,7 +3398,7 @@ BEGIN
     END IF;
     xxx_ := xxx_ || '</xf>';
   END LOOP;
-  xxx_ := xxx_ || ( '</cellXfs>
+  xxx_ := xxx_ || '</cellXfs>
 <cellStyles count="1">
   <cellStyle name="Normal" xfId="0" builtinId="0"/>
 </cellStyles>
@@ -3208,8 +3409,9 @@ BEGIN
 <x14:slicerStyles defaultSlicerStyle="SlicerStyleLight1"/>
 </ext>
 </extLst>
-</styleSheet>' );
+</styleSheet>';
   add1xml (excel_, 'xl/styles.xml', xxx_);
+
   xxx_ := '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
 <fileVersion appName="xl" lastEdited="5" lowestEdited="5" rupBuild="9302"/>
@@ -3237,6 +3439,7 @@ BEGIN
   END IF;
   xxx_ := xxx_ || '<calcPr calcId="144525"/></workbook>';
   add1xml (excel_, 'xl/workbook.xml', xxx_);
+
   xxx_ := '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" name="Office Theme">
   <a:themeElements>
@@ -3467,6 +3670,7 @@ BEGIN
   <a:extraClrSchemeLst/>
 </a:theme>';
   add1xml (excel_, 'xl/theme/theme1.xml', xxx_);
+
   s_ := workbook.sheets.first;
   WHILE s_ IS not null LOOP
     col_min_ := 16384;
@@ -3477,6 +3681,7 @@ BEGIN
       col_max_ := greatest(col_max_, workbook.sheets(s_).rows(row_ix_).last());
       row_ix_ := workbook.sheets(s_).rows.next(row_ix_);
     END LOOP;
+
     addtxt2utf8blob_init(yyy_);
     addtxt2utf8blob ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" xmlns:x14="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" mc:Ignorable="x14ac" xmlns:x14ac="http://schemas.microsoft.com/office/spreadsheetml/2009/9/ac">' ||
@@ -3616,11 +3821,9 @@ CASE WHEN workbook.sheets(s_).tabcolor IS not null THEN '<sheetPr><tabColor rgb=
 
     addtxt2utf8blob( '</worksheet>', yyy_);
     addtxt2utf8blob_finish(yyy_);
-    add1file (excel_, 'xl/worksheets/sheet' || s_ || '.xml', yyy_);
+    add1file (excel_, rep('xl/worksheets/sheet:P1.xml',s_), yyy_);
 
-    -- create worksheet rel START
     Finish_Ws_Relationships (excel_, s_);
-    -- create worksheet rel END
 
     IF workbook.sheets(s_).drawings.count > 0 THEN
       xxx_ := '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -3668,6 +3871,7 @@ CASE WHEN workbook.sheets(s_).tabcolor IS not null THEN '<sheetPr><tabColor rgb=
       END LOOP;
       xxx_ := xxx_ || '</commentList></comments>';
       add1xml (excel_, 'xl/comments' || s_ || '.xml', xxx_);
+
       xxx_ := '<xml xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel">
 <o:shapelayout v:ext="edit"><o:idmap v:ext="edit" data="2"/></o:shapelayout>
 <v:shapetype id="_x0000_t202" coordsize="21600,21600" o:spt="202" path="m,l,21600r21600,l21600,xe"><v:stroke joinstyle="miter"/><v:path gradientshapeok="t" o:connecttype="rect"/></v:shapetype>';
@@ -3705,6 +3909,7 @@ style="position:absolute;margin-left:35.25pt;margin-top:3pt;z-index:' || to_char
 --
     s_ := workbook.sheets.next(s_);
   END LOOP;
+
   xxx_ := '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
 <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/>
@@ -3718,6 +3923,7 @@ style="position:absolute;margin-left:35.25pt;margin-top:3pt;z-index:' || to_char
   END LOOP;
   xxx_ := xxx_ || '</Relationships>';
   add1xml (excel_, 'xl/_rels/workbook.xml.rels', xxx_);
+
   IF workbook.images.count > 0 THEN
     xxx_ := '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">';
@@ -3730,6 +3936,7 @@ style="position:absolute;margin-left:35.25pt;margin-top:3pt;z-index:' || to_char
     xxx_ := xxx_ || '</Relationships>';
     add1xml (excel_, 'xl/drawings/_rels/drawing1.xml.rels', xxx_);
   END IF;
+
   addtxt2utf8blob_init(yyy_);
   addtxt2utf8blob ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="' || workbook.str_cnt || '" uniqueCount="' || workbook.strings.count() || '">',
@@ -3741,10 +3948,10 @@ style="position:absolute;margin-left:35.25pt;margin-top:3pt;z-index:' || to_char
        dbms_xmlgen.convert(substr(workbook.str_ind(i), 1, 32000)) || '</t></si>', yyy_
     );
   END LOOP;
-  addtxt2utf8blob( '</sst>', yyy_);
+  addtxt2utf8blob ('</sst>', yyy_);
   addtxt2utf8blob_finish(yyy_);
-  add1file(excel_, 'xl/sharedStrings.xml', yyy_);
-  finish_zip(excel_);
+  add1file (excel_, 'xl/sharedStrings.xml', yyy_);
+  finish_zip (excel_);
   Clear_Workbook;
   RETURN excel_;
 END Finish;
