@@ -2792,6 +2792,98 @@ END Set_Autofilter;
 -- The Excel file's XML creators
 --
 --
+PROCEDURE Finish_Content_Types (
+   excel_ IN OUT NOCOPY BLOB )
+IS
+   s_        PLS_INTEGER;
+   p_        PLS_INTEGER;
+   doc_      dbms_XmlDom.DomDocument := Dbms_XmlDom.newDomDocument;
+   nd_types_ dbms_XmlDom.DomNode;
+   xml_type_ XmlType;
+   attrs_    xml_attrs_arr;
+BEGIN
+
+   Dbms_XmlDom.setVersion (doc_, '1.0" encoding="UTF-8" standalone="yes');
+   attrs_('xmlns') := 'http://schemas.openxmlformats.org/package/2006/content-types';
+   nd_types_ := Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'Types', attrs_);
+
+   attrs_.delete;
+   attrs_('ContentType') := 'application/vnd.openxmlformats-package.relationships+xml';
+   attrs_('Extension')   := 'rels';
+   Xml_Node (doc_, nd_types_, 'Default', attrs_);
+   attrs_('ContentType') := 'application/xml';
+   attrs_('Extension')   := 'xml';
+   Xml_Node (doc_, nd_types_, 'Default', attrs_);
+   attrs_('ContentType') := 'application/vnd.openxmlformats-officedocument.vmlDrawing';
+   attrs_('Extension')   := 'vml';
+   Xml_Node (doc_, nd_types_, 'Default', attrs_);
+
+   attrs_.delete;
+   attrs_('PartName')    := '/xl/workbook.xml';
+   attrs_('ContentType') := 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml';
+   Xml_Node (doc_, nd_types_, 'Override', attrs_);
+
+   s_ := workbook.sheets.first;
+   WHILE s_ IS NOT null LOOP
+      attrs_('PartName')    := rep('/xl/worksheets/sheet:P1.xml', s_);
+      attrs_('ContentType') := 'application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml';
+      Xml_Node (doc_, nd_types_, 'Override', attrs_);
+      s_ := workbook.sheets.next(s_);
+   END LOOP;
+
+   attrs_('PartName')    := '/xl/theme/theme1.xml';
+   attrs_('ContentType') := 'application/vnd.openxmlformats-officedocument.theme+xml';
+   Xml_Node (doc_, nd_types_, 'Override', attrs_);
+   attrs_('PartName')    := '/xl/styles.xml';
+   attrs_('ContentType') := 'application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml';
+   Xml_Node (doc_, nd_types_, 'Override', attrs_);
+   attrs_('PartName')    := '/xl/sharedStrings.xml';
+   attrs_('ContentType') := 'application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml';
+   Xml_Node (doc_, nd_types_, 'Override', attrs_);
+
+   p_ := workbook.pivots.first;
+   WHILE p_ IS NOT null LOOP
+      attrs_('PartName')    := rep('xl/pivotTables/pivotTable:P1.xml', p_);
+      attrs_('ContentType') := 'application/vnd.openxmlformats-officedocument.spreadsheetml.pivotTable+xml';
+      Xml_Node (doc_, nd_types_, 'Override', attrs_);
+      p_ := workbook.pivots.next(p_);
+   END LOOP;
+
+   attrs_('PartName')    := '/docProps/core.xml';
+   attrs_('ContentType') := 'application/vnd.openxmlformats-package.core-properties+xml';
+   Xml_Node (doc_, nd_types_, 'Override', attrs_);
+   attrs_('PartName')    := '/docProps/app.xml';
+   attrs_('ContentType') := 'application/vnd.openxmlformats-officedocument.extended-properties+xml';
+   Xml_Node (doc_, nd_types_, 'Override', attrs_);
+
+   s_ := workbook.sheets.first;
+   WHILE s_ IS NOT null LOOP
+      IF workbook.sheets(s_).comments.count > 0 THEN
+         attrs_('PartName')    := rep('/xl/comments:P1.xml', s_);
+         attrs_('ContentType') := 'application/vnd.openxmlformats-officedocument.spreadsheetml.comments+xml';
+         Xml_Node (doc_, nd_types_, 'Override', attrs_);
+      END IF;
+      IF workbook.sheets(s_).drawings.count > 0 THEN
+         attrs_('PartName')    := rep('/xl/drawings/drawing:P1.xml', s_);
+         attrs_('ContentType') := 'application/vnd.openxmlformats-officedocument.drawing+xml';
+         Xml_Node (doc_, nd_types_, 'Override', attrs_);
+      END IF;
+      s_ := workbook.sheets.next(s_);
+   END LOOP;
+
+   IF workbook.images.count > 0 THEN
+      attrs_.delete;
+      attrs_('ContentType') := 'image/png';
+      attrs_('Extension')   := 'png';
+      Xml_Node (doc_, nd_types_, 'Default', attrs_);
+   END IF;
+
+   xml_type_ := Dbms_XmlDom.getXmlType (doc_);
+   Dbms_XmlDom.freeDocument (doc_);
+   Add1Xml (excel_, '[Content_Types].xml', xml_type_.getClobVal);
+
+END Finish_Content_Types;
+
 FUNCTION Finish_Drawing (
    drawing_ tp_drawing,
    ix_      PLS_INTEGER,
@@ -2984,7 +3076,6 @@ IS
    h_            NUMBER;
    w_            NUMBER;
    cw_           NUMBER;
-   p_            PLS_INTEGER;
    s_            PLS_INTEGER;
    row_ix_       PLS_INTEGER;
    col_ix_       PLS_INTEGER;
@@ -2992,50 +3083,10 @@ IS
    col_max_      PLS_INTEGER;
 
 BEGIN
-  dbms_lob.createtemporary(excel_, true);
-  xxx_ := '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
-<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
-<Default Extension="xml" ContentType="application/xml"/>
-<Default Extension="vml" ContentType="application/vnd.openxmlformats-officedocument.vmlDrawing"/>
-<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>';
-  s_ := workbook.sheets.first;
-  WHILE s_ IS not null LOOP
-    xxx_ := xxx_ || '
-<Override PartName="/xl/worksheets/sheet' || s_ || '.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>';
-    s_ := workbook.sheets.next(s_);
-  END LOOP;
-  xxx_ := xxx_ || '
-<Override PartName="/xl/theme/theme1.xml" ContentType="application/vnd.openxmlformats-officedocument.theme+xml"/>
-<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
-<Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/>';
-  p_ := workbook.pivots.first; -- osian
-  WHILE p_ IS NOT null LOOP
-     xxx_ := xxx_ || '
-<Override PartName="xl/pivotTables/pivotTable' || p_ || '.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.pivotTable+xml"/>';
-     p_ := workbook.pivots.next(p_);
-  END LOOP;
-  xxx_ := xxx_ || '
-<Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>
-<Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>';
-  s_ := workbook.sheets.first;
-  WHILE s_ IS not null LOOP
-    IF workbook.sheets(s_).comments.count() > 0 THEN
-      xxx_ := xxx_ || ( '
-<Override PartName="/xl/comments' || s_ || '.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.comments+xml"/>' );
-    END IF;
-    IF workbook.sheets(s_).drawings.count > 0 THEN
-      xxx_ := xxx_ || '
-<Override ContentType="application/vnd.openxmlformats-officedocument.drawing+xml" PartName="/xl/drawings/drawing' || s_ || '.xml"/>';
-    END IF;
-    s_ := workbook.sheets.next(s_);
-  END LOOP;
-  IF workbook.images.count > 0 THEN
-     xxx_ := xxx_ || '<Default ContentType="image/png" Extension="png"/>';
-  END IF;
-  xxx_ := xxx_ || '
-</Types>';
-  add1xml (excel_, '[Content_Types].xml', xxx_);
+   Dbms_Lob.createTemporary (excel_, true);
+
+   Finish_Content_Types (excel_);
+
   xxx_ := '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:dcmitype="http://purl.org/dc/dcmitype/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
 <dc:creator>' || sys_context( 'userenv', 'os_user' ) || '</dc:creator>
