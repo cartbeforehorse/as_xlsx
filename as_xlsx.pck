@@ -3027,102 +3027,164 @@ END Finish_docProps;
 PROCEDURE Finish_Styles (
    excel_ IN OUT NOCOPY BLOB )
 IS
-   s_        PLS_INTEGER;
    doc_      dbms_XmlDom.DomDocument := Dbms_XmlDom.newDomDocument;
-   nd_cprop_ dbms_XmlDom.DomNode;
-   nd_prop_  dbms_XmlDom.DomNode;
-   nd_hd_    dbms_XmlDom.DomNode;
-   nd_vec_   dbms_XmlDom.DomNode;
-   nd_var_   dbms_XmlDom.DomNode;
-   nd_top_   dbms_XmlDom.DomNode;
-   xml_type_ XmlType;
+   nd_stl_   dbms_XmlDom.DomNode;
+   nd_numf_  dbms_XmlDom.DomNode;
+   nd_fnts_  dbms_XmlDom.DomNode;
+   nd_fnt_   dbms_XmlDom.DomNode;
+   nd_fills_ dbms_XmlDom.DomNode;
+   nd_fill_  dbms_XmlDom.DomNode;
+   nd_bdrs_  dbms_XmlDom.DomNode;
+   nd_bdr_   dbms_XmlDom.DomNode;
+   nd_pf_    dbms_XmlDom.DomNode;
+   nd_xfs_   dbms_XmlDom.DomNode;
+   nd_xf_    dbms_XmlDom.DomNode;
    attrs_    xml_attrs_arr;
 BEGIN
+
    -- xl/styles.xml
    Dbms_XmlDom.setVersion (doc_, '1.0" encoding="UTF-8" standalone="yes');
-   attrs_('xmlns:cp')       := 'http://schemas.openxmlformats.org/package/2006/metadata/core-properties';
-   attrs_('xmlns:dc')       := 'http://purl.org/dc/elements/1.1/';
-   attrs_('xmlns:dcterms')  := 'http://purl.org/dc/terms/';
-   attrs_('xmlns:dcmitype') := 'http://purl.org/dc/dcmitype/';
-   attrs_('xmlns:xsi')      := 'http://www.w3.org/2001/XMLSchema-instance';
-   nd_cprop_ := Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'coreProperties', 'cp', attrs_);
-/*
-  xxx_ := '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" mc:Ignorable="x14ac" xmlns:x14ac="http://schemas.microsoft.com/office/spreadsheetml/2009/9/ac">';
-  IF workbook.numFmts.count() > 0 THEN
-    xxx_ := xxx_ || ( '<numFmts count="' || workbook.numFmts.count() || '">' );
-    FOR n IN 1 .. workbook.numFmts.count() LOOP
-      xxx_ := xxx_ || ( '<numFmt numFmtId="' || workbook.numFmts(n).numFmtId || '" formatCode="' || workbook.numFmts(n).formatCode || '"/>' );
-    END LOOP;
-    xxx_ := xxx_ || '</numFmts>';
-  END IF;
-  xxx_ := xxx_ || ( '<fonts count="' || workbook.fonts.count() || '" x14ac:knownFonts="1">' );
-  FOR f IN 0 .. workbook.fonts.count() - 1 LOOP
-    xxx_ := xxx_ || ( '<font>' ||
-      CASE WHEN workbook.fonts(f).bold THEN '<b/>' END ||
-      CASE WHEN workbook.fonts(f).italic THEN '<i/>' END ||
-      CASE WHEN workbook.fonts(f).underline THEN '<u/>' END ||
-'<sz val="' || to_char( workbook.fonts(f).fontsize, 'TM9', 'NLS_NUMERIC_CHARACTERS=.,' )  || '"/>
-<color ' || CASE WHEN workbook.fonts(f).rgb IS not null
-              THEN 'rgb="' || workbook.fonts( f ).rgb
-              ELSE 'theme="' || workbook.fonts(f).theme
-            END || '"/>
-<name val="' || workbook.fonts(f).name || '"/>
-<family val="' || workbook.fonts(f).family || '"/>
-<scheme val="none"/>
-</font>' );
-  END LOOP;
-  xxx_ := xxx_ || ( '</fonts>
-<fills count="' || workbook.fills.count() || '">' );
-  FOR f IN 0 .. workbook.fills.count() - 1 LOOP
-    xxx_ := xxx_ || ( '<fill><patternFill patternType="' || workbook.fills(f).patternType || '">' ||
-      CASE WHEN workbook.fills(f).fgRGB IS not null THEN '<fgColor rgb="' || workbook.fills(f).fgRGB || '"/>' END ||
-      CASE WHEN workbook.fills(f).bgRGB IS not null THEN '<bgColor rgb="' || workbook.fills(f).bgRGB || '"/>' END ||
-          '</patternFill></fill>' );
-  END LOOP;
-  xxx_ := xxx_ || ( '</fills>
-<borders count="' || workbook.borders.count() || '">' );
-  FOR b IN 0 .. workbook.borders.count() - 1 LOOP
-    xxx_ := xxx_ || ('<border>' ||
-      CASE WHEN workbook.borders(b).left   IS null THEN '<left/>'   ELSE '<left style="'   || workbook.borders(b).left   || '"/>' END ||
-      CASE WHEN workbook.borders(b).right  IS null THEN '<right/>'  ELSE '<right style="'  || workbook.borders(b).right  || '"/>' END ||
-      CASE WHEN workbook.borders(b).top    IS null THEN '<top/>'    ELSE '<top style="'    || workbook.borders(b).top    || '"/>' END ||
-      CASE WHEN workbook.borders(b).bottom IS null THEN '<bottom/>' ELSE '<bottom style="' || workbook.borders(b).bottom || '"/>' END ||
-      '</border>'
-    );
-  END LOOP;
-  xxx_ := xxx_ || ( '</borders>
-<cellStyleXfs count="1">
-<xf numFmtId="0" fontId="0" fillId="0" borderId="0"/>
-</cellStyleXfs>
-<cellXfs count="' || ( workbook.cellXfs.count() + 1 ) || '">
-<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>' );
-  FOR x IN 1 .. workbook.cellXfs.count() LOOP
-    xxx_ := xxx_ || ( '<xf numFmtId="' || workbook.cellXfs(x).numFmtId || '" fontId="' || workbook.cellXfs(x).fontId || '" fillId="' || workbook.cellXfs(x).fillId || '" borderId="' || workbook.cellXfs(x).borderId || '">' );
-    IF (    workbook.cellXfs(x).alignment.horizontal IS not null
-         OR workbook.cellXfs(x).alignment.vertical IS not null
-         OR workbook.cellXfs(x).alignment.wrapText )
-    THEN
-      xxx_ := xxx_ || ( '<alignment' ||
-        CASE WHEN workbook.cellXfs(x).alignment.horizontal IS not null THEN ' horizontal="' || workbook.cellXfs(x).alignment.horizontal || '"' END ||
-        CASE WHEN workbook.cellXfs(x).alignment.vertical IS not null THEN ' vertical="' || workbook.cellXfs(x).alignment.vertical || '"' END ||
-        CASE WHEN workbook.cellXfs(x).alignment.wrapText THEN ' wrapText="true"' END || '/>' );
-    END IF;
-    xxx_ := xxx_ || '</xf>';
-  END LOOP;
-  xxx_ := xxx_ || '</cellXfs>
-<cellStyles count="1">
-  <cellStyle name="Normal" xfId="0" builtinId="0"/>
-</cellStyles>
-<dxfs count="0"/>
-<tableStyles count="0" defaultTableStyle="TableStyleMedium2" defaultPivotStyle="PivotStyleLight16"/>
-<extLst>
-<ext uri="{EB79DEF2-80B8-43e5-95BD-54CBDDF9020C}" xmlns:x14="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main">
-<x14:slicerStyles defaultSlicerStyle="SlicerStyleLight1"/>
-</ext>
-</extLst>
-</styleSheet>';
-*/
+   attrs_('xmlns')        := 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
+   attrs_('xmlns:mc')     := 'http://schemas.openxmlformats.org/markup-compatibility/2006';
+   attrs_('mc:Ignorable') := 'x14ac';
+   attrs_('xmlns:x14ac')  := 'http://schemas.microsoft.com/office/spreadsheetml/2009/9/ac';
+   nd_stl_ := Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'styleSheet', attrs_);
+
+   IF workbook.numFmts.count > 0 THEN
+      attrs_.delete;
+      attrs_('count') := to_char(workbook.numFmts.count);
+      nd_numf_ := Xml_Node (doc_, nd_stl_, 'numFmts', attrs_);
+      attrs_.delete;
+      FOR nf_ IN 1 .. workbook.numFmts.count LOOP
+         attrs_('numFmtId')   := workbook.numFmts(nf_).numFmtId;
+         attrs_('formatCode') := workbook.numFmts(nf_).formatCode;
+         Xml_Node (doc_, nd_numf_, 'numFmt', attrs_);
+      END LOOP;
+   END IF;
+
+   attrs_.delete;
+   attrs_('count')            := workbook.fonts.count;
+   attrs_('x14ac:knownFonts') := '1';
+   nd_fnts_ := Xml_Node (doc_, nd_stl_, 'fonts', attrs_);
+   FOR f_ IN 0 .. workbook.fonts.count-1 LOOP
+      nd_fnt_ := Xml_Node (doc_, nd_fnts_, 'font');
+      IF workbook.fonts(f_).bold     THEN Xml_Node (doc_, nd_fnt_, 'b'); END IF;
+      IF workbook.fonts(f_).italic   THEN Xml_Node (doc_, nd_fnt_, 'i'); END IF;
+      IF workbook.fonts(f_).underline THEN Xml_Node (doc_, nd_fnt_, 'u'); END IF;
+      attrs_.delete;
+      attrs_('val') := to_char(workbook.fonts(f_).fontsize, 'TM9', 'NLS_NUMERIC_CHARACTERS=.,');
+      Xml_Node (doc_, nd_fnt_, 'sz', attrs_);
+      attrs_.delete;
+      IF workbook.fonts(f_).rgb IS NOT null THEN
+         attrs_('rgb')   := workbook.fonts(f_).rgb;
+      ELSE
+         attrs_('theme') := workbook.fonts(f_).theme;
+      END IF;
+      Xml_Node (doc_, nd_fnt_, 'color', attrs_);
+      attrs_.delete;
+      attrs_('val') := workbook.fonts(f_).name;
+      Xml_Node (doc_, nd_fnt_, 'name', attrs_);
+      attrs_('val') := workbook.fonts(f_).family;
+      Xml_Node (doc_, nd_fnt_, 'family', attrs_);
+      attrs_.delete;
+      attrs_('val') := 'none';
+      Xml_Node (doc_, nd_fnt_, 'scheme', attrs_);
+   END LOOP;
+
+   attrs_.delete;
+   attrs_('count') := workbook.fills.count;
+   nd_fills_ := Xml_Node (doc_, nd_stl_, 'fills', attrs_);
+   FOR f_ IN 0 .. workbook.fills.count-1 LOOP
+      nd_fill_ := Xml_Node (doc_, nd_fills_, 'fill');
+      attrs_.delete;
+      attrs_('patternType') := workbook.fills(f_).patternType;
+      nd_pf_ := Xml_Node (doc_, nd_fill_, 'patternFill', attrs_);
+      attrs_.delete;
+      IF workbook.fills(f_).fgRGB IS NOT null THEN
+         attrs_('rgb') := workbook.fills(f_).fgRGB;
+         Xml_Node (doc_, nd_pf_, 'fgColor', attrs_);
+      END IF;
+      IF workbook.fills(f_).bgRGB IS NOT null THEN
+         attrs_('rgb') := workbook.fills(f_).bgRGB;
+         Xml_Node (doc_, nd_pf_, 'bgColor', attrs_);
+      END IF;
+   END LOOP;
+
+   attrs_.delete;
+   attrs_('count') := workbook.borders.count;
+   nd_bdrs_ := Xml_Node (doc_, nd_stl_, 'borders', attrs_);
+   FOR b_ IN 0 .. workbook.borders.count-1 LOOP
+      nd_bdr_ := Xml_Node (doc_, nd_bdrs_, 'border');
+      attrs_.delete;
+      IF workbook.borders(b_).left   IS null THEN attrs_.delete; ELSE attrs_('style') := workbook.borders(b_).left; END IF;
+      Xml_Node (doc_, nd_bdr_, 'left', attrs_);
+      IF workbook.borders(b_).right  IS null THEN attrs_.delete; ELSE attrs_('style') := workbook.borders(b_).right; END IF;
+      Xml_Node (doc_, nd_bdr_, 'right', attrs_);
+      IF workbook.borders(b_).top    IS null THEN attrs_.delete; ELSE attrs_('style') := workbook.borders(b_).top; END IF;
+      Xml_Node (doc_, nd_bdr_, 'top', attrs_);
+      IF workbook.borders(b_).bottom IS null THEN attrs_.delete; ELSE attrs_('style') := workbook.borders(b_).bottom; END IF;
+      Xml_Node (doc_, nd_bdr_, 'bottom', attrs_);
+   END LOOP;
+
+   attrs_.delete;
+   attrs_('count') := '1';
+   nd_xfs_ := Xml_Node (doc_, nd_stl_, 'cellStyleXfs', attrs_);
+   attrs_.delete;
+   attrs_('numFmtId') := '0';
+   attrs_('fontId')   := '0';
+   attrs_('fillId')   := '0';
+   attrs_('borderId') := '0';
+   Xml_Node (doc_, nd_xfs_, 'xf', attrs_);
+
+   attrs_.delete;
+   attrs_('count') := workbook.cellXfs.count+1;
+   nd_xfs_ := Xml_Node (doc_, nd_stl_, 'cellXfs', attrs_);
+   attrs_.delete;
+   attrs_('numFmtId') := '0';
+   attrs_('fontId')   := '0';
+   attrs_('fillId')   := '0';
+   attrs_('borderId') := '0';
+   attrs_('xfId')     := '0';
+   Xml_Node (doc_, nd_xfs_, 'xf', attrs_);
+   FOR x_ IN 1 .. workbook.cellXfs.count LOOP
+      attrs_.delete;
+      attrs_('numFmtId') := workbook.cellXfs(x_).numFmtId;
+      attrs_('fontId')   := workbook.cellXfs(x_).fontId;
+      attrs_('fillId')   := workbook.cellXfs(x_).fillId;
+      attrs_('borderId') := workbook.cellXfs(x_).borderId;
+      nd_xf_ := Xml_Node (doc_, nd_xfs_, 'xf', attrs_);
+      IF workbook.cellXfs(x_).alignment.horizontal IS NOT null OR workbook.cellXfs(x_).alignment.vertical IS NOT null OR workbook.cellXfs(x_).alignment.wrapText IS NOT null THEN
+         attrs_.delete;
+         IF workbook.cellXfs(x_).alignment.horizontal IS NOT null THEN attrs_('horizontal') := workbook.cellXfs(x_).alignment.horizontal; END IF;
+         IF workbook.cellXfs(x_).alignment.vertical    IS NOT null THEN attrs_('vertical')   := workbook.cellXfs(x_).alignment.vertical;   END IF;
+         IF workbook.cellXfs(x_).alignment.wrapText THEN attrs_('wrapText') := 'true'; END IF;
+         Xml_Node (doc_, nd_xf_, 'alignment', attrs_);
+      END IF;
+   END LOOP;
+
+   attrs_.delete;
+   attrs_('count') := '1';
+   nd_xfs_ := Xml_Node (doc_, nd_stl_, 'cellStyles', attrs_);
+   attrs_.delete;
+   attrs_('name')      := 'Normal';
+   attrs_('xfId')      := '0';
+   attrs_('builtinId') := '0';
+   Xml_Node (doc_, nd_xfs_, 'cellStyle', attrs_);
+   attrs_.delete;
+   attrs_('count') := '0';
+   Xml_Node (doc_, nd_stl_, 'dxfs', attrs_);
+   attrs_('defaultTableStyle') := 'TableStyleMedium2';
+   attrs_('defaultPivotStyle') := 'PivotStyleLight16';
+   Xml_Node (doc_, nd_stl_, 'tableStyles', attrs_);
+
+   nd_xfs_ := Xml_Node (doc_, nd_stl_, 'extLst');
+   attrs_.delete;
+   attrs_('uri')       := '{EB79DEF2-80B8-43e5-95BD-54CBDDF9020C}';
+   attrs_('xmlns:x14') := 'http://schemas.microsoft.com/office/spreadsheetml/2009/9/main';
+   nd_xf_ := Xml_Node (doc_, nd_xfs_, 'ext', attrs_);
+   attrs_.delete;
+   attrs_('defaultSlicerStyle') := 'SlicerStyleLight1';
+   Xml_Node (doc_, nd_xf_, 'slicerStyles', 'x14', attrs_);
 
    Add1Xml (excel_, 'xl/styles.xml', Dbms_XmlDom.getXmlType(doc_).getClobVal);
    Dbms_XmlDom.freeDocument (doc_);
@@ -3332,86 +3394,11 @@ BEGIN
    Finish_Content_Types (excel_);
    Finish_docProps (excel_);
    Finish_Rels (excel_);
-   --Finish_Styles (excel_);
 
-  -- xl/styles.xml
-  xxx_ := '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" mc:Ignorable="x14ac" xmlns:x14ac="http://schemas.microsoft.com/office/spreadsheetml/2009/9/ac">';
-  IF workbook.numFmts.count() > 0 THEN
-    xxx_ := xxx_ || ( '<numFmts count="' || workbook.numFmts.count() || '">' );
-    FOR n IN 1 .. workbook.numFmts.count() LOOP
-      xxx_ := xxx_ || ( '<numFmt numFmtId="' || workbook.numFmts(n).numFmtId || '" formatCode="' || workbook.numFmts(n).formatCode || '"/>' );
-    END LOOP;
-    xxx_ := xxx_ || '</numFmts>';
-  END IF;
-  xxx_ := xxx_ || ( '<fonts count="' || workbook.fonts.count() || '" x14ac:knownFonts="1">' );
-  FOR f IN 0 .. workbook.fonts.count() - 1 LOOP
-    xxx_ := xxx_ || ( '<font>' ||
-      CASE WHEN workbook.fonts(f).bold THEN '<b/>' END ||
-      CASE WHEN workbook.fonts(f).italic THEN '<i/>' END ||
-      CASE WHEN workbook.fonts(f).underline THEN '<u/>' END ||
-'<sz val="' || to_char( workbook.fonts(f).fontsize, 'TM9', 'NLS_NUMERIC_CHARACTERS=.,' )  || '"/>
-<color ' || CASE WHEN workbook.fonts(f).rgb IS not null
-              THEN 'rgb="' || workbook.fonts( f ).rgb
-              ELSE 'theme="' || workbook.fonts(f).theme
-            END || '"/>
-<name val="' || workbook.fonts(f).name || '"/>
-<family val="' || workbook.fonts(f).family || '"/>
-<scheme val="none"/>
-</font>' );
-  END LOOP;
-  xxx_ := xxx_ || ( '</fonts>
-<fills count="' || workbook.fills.count() || '">' );
-  FOR f IN 0 .. workbook.fills.count() - 1 LOOP
-    xxx_ := xxx_ || ( '<fill><patternFill patternType="' || workbook.fills(f).patternType || '">' ||
-      CASE WHEN workbook.fills(f).fgRGB IS not null THEN '<fgColor rgb="' || workbook.fills(f).fgRGB || '"/>' END ||
-      CASE WHEN workbook.fills(f).bgRGB IS not null THEN '<bgColor rgb="' || workbook.fills(f).bgRGB || '"/>' END ||
-          '</patternFill></fill>' );
-  END LOOP;
-  xxx_ := xxx_ || ( '</fills>
-<borders count="' || workbook.borders.count() || '">' );
-  FOR b IN 0 .. workbook.borders.count() - 1 LOOP
-    xxx_ := xxx_ || ('<border>' ||
-      CASE WHEN workbook.borders(b).left   IS null THEN '<left/>'   ELSE '<left style="'   || workbook.borders(b).left   || '"/>' END ||
-      CASE WHEN workbook.borders(b).right  IS null THEN '<right/>'  ELSE '<right style="'  || workbook.borders(b).right  || '"/>' END ||
-      CASE WHEN workbook.borders(b).top    IS null THEN '<top/>'    ELSE '<top style="'    || workbook.borders(b).top    || '"/>' END ||
-      CASE WHEN workbook.borders(b).bottom IS null THEN '<bottom/>' ELSE '<bottom style="' || workbook.borders(b).bottom || '"/>' END ||
-      '</border>'
-    );
-  END LOOP;
-  xxx_ := xxx_ || ( '</borders>
-<cellStyleXfs count="1">
-<xf numFmtId="0" fontId="0" fillId="0" borderId="0"/>
-</cellStyleXfs>
-<cellXfs count="' || ( workbook.cellXfs.count() + 1 ) || '">
-<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>' );
-  FOR x IN 1 .. workbook.cellXfs.count() LOOP
-    xxx_ := xxx_ || ( '<xf numFmtId="' || workbook.cellXfs(x).numFmtId || '" fontId="' || workbook.cellXfs(x).fontId || '" fillId="' || workbook.cellXfs(x).fillId || '" borderId="' || workbook.cellXfs(x).borderId || '">' );
-    IF (    workbook.cellXfs(x).alignment.horizontal IS not null
-         OR workbook.cellXfs(x).alignment.vertical IS not null
-         OR workbook.cellXfs(x).alignment.wrapText )
-    THEN
-      xxx_ := xxx_ || ( '<alignment' ||
-        CASE WHEN workbook.cellXfs(x).alignment.horizontal IS not null THEN ' horizontal="' || workbook.cellXfs(x).alignment.horizontal || '"' END ||
-        CASE WHEN workbook.cellXfs(x).alignment.vertical IS not null THEN ' vertical="' || workbook.cellXfs(x).alignment.vertical || '"' END ||
-        CASE WHEN workbook.cellXfs(x).alignment.wrapText THEN ' wrapText="true"' END || '/>' );
-    END IF;
-    xxx_ := xxx_ || '</xf>';
-  END LOOP;
-  xxx_ := xxx_ || '</cellXfs>
-<cellStyles count="1">
-  <cellStyle name="Normal" xfId="0" builtinId="0"/>
-</cellStyles>
-<dxfs count="0"/>
-<tableStyles count="0" defaultTableStyle="TableStyleMedium2" defaultPivotStyle="PivotStyleLight16"/>
-<extLst>
-<ext uri="{EB79DEF2-80B8-43e5-95BD-54CBDDF9020C}" xmlns:x14="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main">
-<x14:slicerStyles defaultSlicerStyle="SlicerStyleLight1"/>
-</ext>
-</extLst>
-</styleSheet>';
-  add1xml (excel_, 'xl/styles.xml', xxx_);
+   Finish_Styles (excel_);
+   --Finish_Workbook (excel_);
 
+  -- xl/workbook.xml
   xxx_ := '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
 <fileVersion appName="xl" lastEdited="5" lowestEdited="5" rupBuild="9302"/>
@@ -3439,6 +3426,7 @@ BEGIN
   END IF;
   xxx_ := xxx_ || '<calcPr calcId="144525"/></workbook>';
   add1xml (excel_, 'xl/workbook.xml', xxx_);
+  -- end xl/workbook.xml
 
   xxx_ := '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" name="Office Theme">
@@ -4272,8 +4260,8 @@ END SetUseXf;
 PROCEDURE Init_Workbook
 IS
    --gbp_curr_fmt_ VARCHAR2(200) := '_-£* #,##0_-;-£* #,##0_-;_-£* &quot;-&quot;_-;_-@_-';
-   gbp_curr_fmt0_ VARCHAR2(200) := '_-&#163;* #,##0_-;-&#163;* #,##0_-;_-&#163;* &quot;-&quot;_-;_-@_-';
-   gbp_curr_fmt2_ VARCHAR2(200) := '_-&#163;* #,##0.00_-;-&#163;* #,##0.00_-;_-&#163;* &quot;-&quot;_-;_-@_-';
+   gbp_curr_fmt0_ VARCHAR2(200) := '_-"£"* #,##0_-;-"£"* #,##0_-;_-"£"* "-"_-;_-@_-';
+   gbp_curr_fmt2_ VARCHAR2(200) := '_-"£"* #,##0.00_-;-"£"* #,##0.00_-;_-"£"* "-"_-;_-@_-';
 BEGIN
 
    Clear_Workbook;

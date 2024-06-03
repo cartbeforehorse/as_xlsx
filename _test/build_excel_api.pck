@@ -29,6 +29,8 @@ BEGIN
 
    As_Xlsx.Comment (3, 3, 'This is a silly dingle dongle', 'Bob the Builder', 300, 200, 1);
 
+   As_Xlsx.CellN (2, 12, 123.456, numFmtId_ => 'gbp_curr2');
+
    -- Save the file to disk and send by mail
    xl_ := As_Xlsx.Finish;
    Dbms_Output.Put_Line ('File created: ' || filename_);
