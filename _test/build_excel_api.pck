@@ -23,13 +23,25 @@ BEGIN
    ----
    -- Initiate the Excel sheet
    As_Xlsx.Set_Sheet_Name (1, 'Parameters');
-   --Init_Fonts_And_Fills;
-   --Create_Params_Sheet (customer_id_, date_from_, date_to_);
+
    As_Xlsx.Create_Params_Sheet ('My Report Parameters', report_params_);
 
    As_Xlsx.Comment (3, 3, 'This is a silly dingle dongle', 'Bob the Builder', 300, 200, 1);
 
    As_Xlsx.CellN (2, 12, 123.456, numFmtId_ => 'gbp_curr2');
+
+   -- test images
+   As_Xlsx.Load_Image (
+      col_         => 12,
+      row_         => 7,
+      dir_         => 'EXCEL_OUT',
+      filename_    => 'excel.png',
+      name_        => 'Excel Image',
+      title_       => 'Excel Logo',
+      description_ => 'Logo for Excel',
+      scale_       => 0.1,
+      sheet_       => 1
+   );
 
    -- Save the file to disk and send by mail
    xl_ := As_Xlsx.Finish;

@@ -2316,10 +2316,9 @@ PROCEDURE Comment (
    height_ IN PLS_INTEGER := 100,
    sheet_  IN PLS_INTEGER := null )
 IS
-   ix_ PLS_INTEGER;
    sh_ PLS_INTEGER := nvl(sheet_, workbook.sheets.count());
+   ix_ PLS_INTEGER := workbook.sheets(sh_).comments.count + 1;
 BEGIN
-   ix_ := workbook.sheets(sh_).comments.count() + 1;
    workbook.sheets(sh_).comments(ix_).row    := row_;
    workbook.sheets(sh_).comments(ix_).column := col_;
    workbook.sheets(sh_).comments(ix_).text   := dbms_xmlgen.convert(text_);
@@ -2819,7 +2818,6 @@ IS
    p_        PLS_INTEGER;
    doc_      dbms_XmlDom.DomDocument := Dbms_XmlDom.newDomDocument;
    nd_types_ dbms_XmlDom.DomNode;
-   xml_type_ XmlType;
    attrs_    xml_attrs_arr;
 BEGIN
 
@@ -2909,9 +2907,8 @@ BEGIN
       Xml_Node (doc_, nd_types_, 'Default', attrs_);
    END IF;
 
-   xml_type_ := Dbms_XmlDom.getXmlType (doc_);
+   Add1Xml (excel_, '[Content_Types].xml', Dbms_XmlDom.getXmlType(doc_).getClobVal);
    Dbms_XmlDom.freeDocument (doc_);
-   Add1Xml (excel_, '[Content_Types].xml', xml_type_.getClobVal);
 
 END Finish_Content_Types;
 
@@ -3188,6 +3185,7 @@ BEGIN
 
    Add1Xml (excel_, 'xl/styles.xml', Dbms_XmlDom.getXmlType(doc_).getClobVal);
    Dbms_XmlDom.freeDocument (doc_);
+
 END Finish_Styles;
 
 PROCEDURE Finish_Workbook (
@@ -3255,6 +3253,7 @@ BEGIN
 
    Add1Xml (excel_, 'xl/workbook.xml', Dbms_XmlDom.getXmlType(doc_).getClobVal);
    Dbms_XmlDom.freeDocument (doc_);
+
 END Finish_Workbook;
 
 PROCEDURE Finish_Theme (
@@ -3493,123 +3492,6 @@ IS BEGIN
 END Finish_Theme;
 
 
-FUNCTION Finish_Drawing (
-   drawing_ tp_drawing,
-   ix_      PLS_INTEGER,
-   sheet_   PLS_INTEGER ) RETURN VARCHAR2
-IS
-   rv_         VARCHAR2(32767);
-   col_        PLS_INTEGER;
-   row_        PLS_INTEGER;
-   width_      NUMBER;
-   height_     NUMBER;
-   col_offs_   NUMBER;
-   row_offs_   NUMBER;
-   col_width_  NUMBER;
-   row_height_ NUMBER;
-   widths_     tp_widths;
-   heights_    tp_row_fmts;
-BEGIN
-   width_  := workbook.images(drawing_.img_id).width;
-   height_ := workbook.images(drawing_.img_id).height;
-   IF drawing_.scale IS NOT null THEN
-      width_  := drawing_.scale * width_;
-      height_ := drawing_.scale * height_;
-   END IF;
-   IF workbook.sheets(sheet_).widths.count = 0 THEN
-      -- assume default column widths!
-      -- 64 px = 1 col = 609600
-      col_ := trunc (width_/64);
-      col_offs_ := (width_-col_*64)*9525;
-      col_ := drawing_.col - 1 + col_;
-   ELSE
-      widths_ := workbook.sheets(sheet_).widths;
-      col_ := drawing_.col;
-      LOOP
-         IF widths_.exists(col_) THEN
-            col_width_ := round(7*widths_(col_));
-         ELSE
-            col_width_ := 64;
-         END IF;
-         EXIT WHEN width_ < col_width_;
-         col_ := col_ + 1;
-         width_ := width_ - col_width_;
-      END LOOP;
-      col_ := col_ - 1;
-      col_offs_ := width_ * 9525;
-   END IF;
-   IF workbook.sheets(sheet_).row_fmts.count = 0 THEN
-      -- assume default row heigths!
-      -- 20 px = 1 row = 190500
-      row_ := trunc (height_/20);
-      row_offs_ := (height_- row_*20) * 9525;
-      row_ := drawing_.row - 1 + row_;
-   ELSE
-      heights_ := workbook.sheets(sheet_).row_fmts;
-      row_ := drawing_.row;
-      LOOP
-         IF heights_.exists(row_) AND heights_(row_).height IS NOT null THEN
-            row_height_ := heights_(row_).height;
-            row_height_ := round (4*row_height_/3);
-         ELSE
-            row_height_ := 20;
-         END IF;
-         EXIT WHEN height_ < row_height_;
-         row_ := row_ + 1;
-         height_ := height_ - row_height_;
-      END LOOP;
-      row_offs_ := height_ * 9525;
-      row_ := row_ - 1;
-   END IF;
-   rv_ := '<xdr:twoCellAnchor editAs="oneCell">
-<xdr:from><xdr:col>' || ( drawing_.col-1 ) || '</xdr:col>
-<xdr:colOff>0</xdr:colOff>
-<xdr:row>' || ( drawing_.row-1 ) || '</xdr:row>
-<xdr:rowOff>0</xdr:rowOff>
-</xdr:from>
-<xdr:to>
-<xdr:col>' || col_ || '</xdr:col>
-<xdr:colOff>' || col_offs_ || '</xdr:colOff>
-<xdr:row>' || row_ || '</xdr:row>
-<xdr:rowOff>' || row_offs_ || '</xdr:rowOff>
-</xdr:to>
-<xdr:pic>
-<xdr:nvPicPr>
-<xdr:cNvPr id="3" name="' || coalesce (drawing_.name, 'Picture '||ix_) || '"';
-   IF drawing_.title IS NOT null THEN
-      rv_ := rv_ || ' title="' || drawing_.title || '"';
-   END IF;
-   IF drawing_.description IS NOT null THEN
-      rv_ := rv_ || ' descr="' || drawing_.description || '"';
-   END IF;
-   rv_ := rv_ || '/>
-<xdr:cNvPicPr>
-<a:picLocks noChangeAspect="1"/>
-</xdr:cNvPicPr>
-</xdr:nvPicPr>
-<xdr:blipFill>
-<a:blip xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" r:embed="rId' || drawing_.img_id || '">
-<a:extLst>
-<a:ext uri="{28A0092B-C50C-407E-A947-70E740481C1C}">
-<a14:useLocalDpi xmlns:a14="http://schemas.microsoft.com/office/drawing/2010/main" val="0"/>
-</a:ext>
-</a:extLst>
-</a:blip>
-<a:stretch>
-<a:fillRect/>
-</a:stretch>
-</xdr:blipFill>
-<xdr:spPr>
-<a:prstGeom prst="rect">
-</a:prstGeom>
-</xdr:spPr>
-</xdr:pic>
-<xdr:clientData/>
-</xdr:twoCellAnchor>';
-   RETURN rv_;
-END Finish_Drawing;
-
-
 PROCEDURE Finish_Ws_Relationships (
    excel_ IN OUT NOCOPY BLOB,
    s_     IN            PLS_INTEGER )
@@ -3620,59 +3502,224 @@ IS
    nr_pivots_     PLS_INTEGER := workbook.sheets(s_).pivots.count;
    nr_drawings_   PLS_INTEGER := workbook.sheets(s_).drawings.count;
    doc_           dbms_XmlDom.DomDocument := Dbms_XmlDom.newDomDocument;
-   xml_type_      XmlType;
    attrs_         xml_attrs_arr;
    nd_rels_       dbms_XmlDom.DomNode;
 BEGIN
-   IF nr_hyperlinks_ > 0 OR nr_comments_ > 0 OR nr_pivots_ > 0 OR nr_drawings_ > 0 THEN
 
-      Dbms_XmlDom.setVersion (doc_, '1.0" encoding="UTF-8" standalone="yes');
-      attrs_('xmlns') := 'http://schemas.openxmlformats.org/package/2006/relationships';
-      nd_rels_ := Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'Relationships', attrs_);
+   IF nr_hyperlinks_ = 0 AND nr_comments_ = 0 AND nr_pivots_ = 0 AND nr_drawings_ = 0 THEN
+      goto skip_relationships;
+   END IF;
 
-      IF nr_comments_ > 0 THEN
-         attrs_.delete;
-         attrs_('Id')     := rep('rId:P1', nr_hyperlinks_+2);
-         attrs_('Type')   := 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments';
-         attrs_('Target') := rep ('../comments:P1.xml', s_);
-         Xml_Node (doc_, nd_rels_, 'Relationship', attrs_);
-         attrs_('Id')     := rep ('rId:P1', nr_hyperlinks_+1);
-         attrs_('Type')   := 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/vmlDrawing';
-         attrs_('Target') := rep ('../drawings/vmlDrawing:P1.vml', s_);
-         Xml_Node (doc_, nd_rels_, 'Relationship', attrs_);
-         id_ := id_ + 2;
-      END IF;
-      FOR h_ IN 1 .. nr_hyperlinks_ LOOP
-         IF workbook.sheets(s_).hyperlinks(h_).url IS NOT null THEN
-            attrs_('Id')         := rep ('rId:P1', h_);
-            attrs_('Type')       := 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink';
-            attrs_('Target')     := workbook.sheets(s_).hyperlinks(h_).url;
-            attrs_('TargetMode') := 'External';
-            Xml_Node (doc_, nd_rels_, 'Relationship', attrs_);
-            id_ := id_ + 1;
-         END IF;
-      END LOOP;
-      IF nr_drawings_ > 0 THEN
-         attrs_.delete;
-         attrs_('Id')     := rep ('rId:P1', id_);
-         attrs_('Type')   := 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing';
-         attrs_('Target') := rep ('../drawings/drawing:P1.xml', s_);
-         Xml_Node (doc_, nd_rels_, 'Relationship', attrs_);
-      END IF;
-      FOR p_ IN 1 .. nr_pivots_ LOOP
-         attrs_.delete;
-         attrs_('Id')     := rep ('rId:P1', id_);
-         attrs_('Type')   := 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotCacheDefinition';
-         attrs_('Target') := rep ('../pivotCache/pivotCacheDefinition:P1.xml',1);
+   Dbms_XmlDom.setVersion (doc_, '1.0" encoding="UTF-8" standalone="yes');
+   attrs_('xmlns') := 'http://schemas.openxmlformats.org/package/2006/relationships';
+   nd_rels_ := Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'Relationships', attrs_);
+
+   IF nr_comments_ > 0 THEN
+      attrs_.delete;
+      attrs_('Id')     := rep('rId:P1', nr_hyperlinks_+2);
+      attrs_('Type')   := 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments';
+      attrs_('Target') := rep ('../comments:P1.xml', s_);
+      Xml_Node (doc_, nd_rels_, 'Relationship', attrs_);
+      attrs_('Id')     := rep ('rId:P1', nr_hyperlinks_+1);
+      attrs_('Type')   := 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/vmlDrawing';
+      attrs_('Target') := rep ('../drawings/vmlDrawing:P1.vml', s_);
+      Xml_Node (doc_, nd_rels_, 'Relationship', attrs_);
+      id_ := id_ + 2;
+   END IF;
+   FOR h_ IN 1 .. nr_hyperlinks_ LOOP
+      IF workbook.sheets(s_).hyperlinks(h_).url IS NOT null THEN
+         attrs_('Id')         := rep ('rId:P1', h_);
+         attrs_('Type')       := 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink';
+         attrs_('Target')     := workbook.sheets(s_).hyperlinks(h_).url;
+         attrs_('TargetMode') := 'External';
          Xml_Node (doc_, nd_rels_, 'Relationship', attrs_);
          id_ := id_ + 1;
-      END LOOP;
-
-      xml_type_ := Dbms_XmlDom.getXmlType (doc_);
-      Dbms_XmlDom.freeDocument (doc_);
-      Add1Xml (excel_, rep('xl/worksheets/_rels/sheet:P1.xml.rels',s_), xml_type_.getClobVal);
+      END IF;
+   END LOOP;
+   IF nr_drawings_ > 0 THEN
+      attrs_.delete;
+      attrs_('Id')     := rep ('rId:P1', id_);
+      attrs_('Type')   := 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing';
+      attrs_('Target') := rep ('../drawings/drawing:P1.xml', s_);
+      Xml_Node (doc_, nd_rels_, 'Relationship', attrs_);
    END IF;
+   FOR p_ IN 1 .. nr_pivots_ LOOP
+      attrs_.delete;
+      attrs_('Id')     := rep ('rId:P1', id_);
+      attrs_('Type')   := 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotCacheDefinition';
+      attrs_('Target') := rep ('../pivotCache/pivotCacheDefinition:P1.xml',1);
+      Xml_Node (doc_, nd_rels_, 'Relationship', attrs_);
+      id_ := id_ + 1;
+   END LOOP;
+
+   Add1Xml (excel_, rep('xl/worksheets/_rels/sheet:P1.xml.rels',s_), Dbms_XmlDom.getXmlType(doc_).getClobVal);
+   Dbms_XmlDom.freeDocument (doc_);
+
+   <<skip_relationships>>
+   null;
+
 END Finish_Ws_Relationships;
+
+
+PROCEDURE Calc_Image_Col_And_Row (
+   col_      IN OUT NOCOPY PLS_INTEGER,
+   row_      IN OUT NOCOPY PLS_INTEGER,
+   col_offs_ IN OUT NOCOPY NUMBER,
+   row_offs_ IN OUT NOCOPY NUMBER,
+   drawing_  IN            tp_drawing,
+   s_        IN            PLS_INTEGER )
+IS
+   scale_          NUMBER := nvl (drawing_.scale, 1);
+   img_width_      NUMBER := workbook.images(drawing_.img_id).width  * scale_;
+   img_height_     NUMBER := workbook.images(drawing_.img_id).height * scale_;
+   img_width_rem_  NUMBER := img_width_;
+   img_height_rem_ NUMBER := img_height_;
+   img_colspan_    PLS_INTEGER;
+   img_rowspan_    PLS_INTEGER;
+   col_width_      NUMBER;
+   row_height_     NUMBER;
+BEGIN
+   IF workbook.sheets(s_).widths.count = 0 THEN
+      -- If no widths have been set, we can assume that all columns are set to
+      -- the default widths => 64 px = 1 col = 609600
+      img_colspan_ := trunc (img_width_/64);
+      col_         := drawing_.col - 1 + img_colspan_;
+      col_offs_    := (img_width_-img_colspan_*64)*9525;
+   ELSE
+      col_ := drawing_.col;
+      LOOP
+         col_width_ := CASE
+            WHEN not workbook.sheets(s_).widths.exists(col_) THEN 64
+            ELSE round(7*workbook.sheets(s_).widths(col_))
+         END;
+         EXIT WHEN img_width_rem_ < col_width_;
+         img_width_rem_ := img_width_rem_ - col_width_;
+         col_ := col_ + 1;
+      END LOOP;
+      col_ := col_ - 1;
+      col_offs_ := img_width_rem_ * 9525;
+   END IF;
+   IF workbook.sheets(s_).row_fmts.count = 0 THEN
+      -- If no heights have been set then we assume the default row heights of
+      -- => 20 px = 1 row = 190500
+      img_rowspan_ := trunc (img_height_/20);
+      row_         := drawing_.row - 1 + img_rowspan_;
+      row_offs_    := (img_height_- img_rowspan_*20) * 9525;
+   ELSE
+      row_ := drawing_.row;
+      LOOP
+         row_height_ := CASE
+            WHEN workbook.sheets(s_).row_fmts.exists(row_) AND workbook.sheets(s_).row_fmts(row_).height IS NOT null THEN
+               round (4 * workbook.sheets(s_).row_fmts(row_).height / 3)
+            ELSE 20
+         END;
+         EXIT WHEN img_height_rem_ < row_height_;
+         img_height_rem_ := img_height_rem_ - row_height_;
+         row_ := row_ + 1;
+      END LOOP;
+      row_offs_ := img_height_rem_ * 9525;
+      row_ := row_ - 1;
+   END IF;
+END Calc_Image_Col_And_Row;
+
+PROCEDURE Finish_Ws_Drawings (
+   excel_ IN OUT NOCOPY BLOB,
+   s_     IN            PLS_INTEGER )
+IS
+   doc_        dbms_XmlDom.DomDocument := Dbms_XmlDom.newDomDocument;
+   nd_ws_      dbms_XmlDom.DomNode;
+   nd_tc_      dbms_XmlDom.DomNode;
+   nd_fr_      dbms_XmlDom.DomNode;
+   nd_to_      dbms_XmlDom.DomNode;
+   nd_pi_      dbms_XmlDom.DomNode;
+   nd_nv_      dbms_XmlDom.DomNode;
+   nd_cn_      dbms_XmlDom.DomNode;
+   nd_bf_      dbms_XmlDom.DomNode;
+   nd_bl_      dbms_XmlDom.DomNode;
+   nd_el_      dbms_XmlDom.DomNode;
+   nd_et_      dbms_XmlDom.DomNode;
+   attrs_      xml_attrs_arr;
+   drawing_    tp_drawing;
+   col_        PLS_INTEGER;
+   row_        PLS_INTEGER;
+   col_offs_   NUMBER;
+   row_offs_   NUMBER;
+BEGIN
+
+   IF workbook.sheets(s_).drawings.count = 0 THEN
+      goto skip_drawings;
+   END IF;
+
+   -- xl/drawings/drawing:P1.xml
+   Dbms_XmlDom.setVersion (doc_, '1.0" encoding="UTF-8" standalone="yes');
+   attrs_('xmlns:xdr') := 'http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing';
+   attrs_('xmlns:a')   := 'http://schemas.openxmlformats.org/drawingml/2006/main';
+   nd_ws_ := Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'wsDr', 'xdr', attrs_);
+
+   FOR img_ IN 1 .. workbook.sheets(s_).drawings.count LOOP
+
+      drawing_ := workbook.sheets(s_).drawings(img_);
+      Calc_Image_Col_And_Row (col_, row_, col_offs_, row_offs_, drawing_, s_);
+
+      attrs_.delete;
+      attrs_('editAs') := 'oneCell';
+      nd_tc_ := Xml_Node (doc_, nd_ws_, 'twoCellAnchor', 'xdr', attrs_);
+
+      nd_fr_ := Xml_Node (doc_, nd_tc_, 'from', 'xdr');
+      Xml_Text_Node (doc_, nd_fr_, 'col', to_char(drawing_.col-1), 'xdr');
+      Xml_Text_Node (doc_, nd_fr_, 'colOff', '0', 'xdr');
+      Xml_Text_Node (doc_, nd_fr_, 'row', to_char(drawing_.row-1), 'xdr');
+      Xml_Text_Node (doc_, nd_fr_, 'rowOff', '0', 'xdr');
+
+      nd_to_ := Xml_Node (doc_, nd_tc_, 'to', 'xdr');
+      Xml_Text_Node (doc_, nd_to_, 'col', to_char(col_), 'xdr');
+      Xml_Text_Node (doc_, nd_to_, 'colOff', to_char(col_offs_), 'xdr');
+      Xml_Text_Node (doc_, nd_to_, 'row', to_char(row_), 'xdr');
+      Xml_Text_Node (doc_, nd_to_, 'rowOff', to_char(row_offs_), 'xdr');
+
+      nd_pi_ := Xml_Node (doc_, nd_tc_, 'pic', 'xdr');
+      nd_nv_ := Xml_Node (doc_, nd_pi_, 'nvPicPr', 'xdr');
+      attrs_.delete;
+      attrs_('id')   := '3';
+      attrs_('name') := coalesce (drawing_.name, 'Picture '||img_);
+      IF drawing_.title       IS NOT null THEN attrs_('title') := drawing_.title;       END IF;
+      IF drawing_.description IS NOT null THEN attrs_('descr') := drawing_.description; END IF;
+      Xml_Node (doc_, nd_nv_, 'cNvPr', 'xdr', attrs_);
+      nd_cn_ := Xml_Node (doc_, nd_nv_, 'cNvPicPr', 'xdr');
+      attrs_.delete;
+      attrs_('noChangeAspect') := '1';
+      Xml_Node (doc_, nd_cn_, 'picLocks', 'a', attrs_);
+
+      nd_bf_ := Xml_Node (doc_, nd_pi_, 'blipFill', 'xdr');
+      attrs_.delete;
+      attrs_('xmlns:r') := 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
+      attrs_('r:embed') := rep ('rId:P1', to_char(drawing_.img_id));
+      nd_bl_ := Xml_Node (doc_, nd_bf_, 'blip', 'a', attrs_);
+      nd_et_ := Xml_Node (doc_, nd_bl_, 'extLst', 'a');
+      attrs_.delete;
+      attrs_('uri') := '{28A0092B-C50C-407E-A947-70E740481C1C}';
+      nd_el_ := Xml_Node (doc_, nd_et_, 'ext', 'a', attrs_);
+      attrs_.delete;
+      attrs_('xmlns:a14') := 'http://schemas.microsoft.com/office/drawing/2010/main';
+      attrs_('val')       := '0';
+      Xml_Node (doc_, nd_el_, 'useLocalDpi', 'a14', attrs_);
+      Xml_Node (
+         doc_, Xml_Node(doc_,nd_bf_,'stretch','a'), 'fillRect', 'a'
+      );
+      attrs_.delete;
+      attrs_('prst') := 'rect';
+      Xml_Node (doc_, Xml_Node(doc_,nd_pi_,'spPr','xdr'), 'prstGeom', 'a', attrs_);
+      Xml_Node (doc_, nd_tc_, 'clientData', 'xdr');
+
+   END LOOP;
+
+   Add1Xml (excel_, rep('xl/drawings/drawing:P1.xml',s_), Dbms_XmlDom.getXmlType(doc_).getClobVal);
+   Dbms_XmlDom.freeDocument (doc_);
+
+   << skip_drawings >>
+   null;
+
+END Finish_Ws_Drawings;
 
 
 FUNCTION Finish RETURN BLOB
@@ -3701,19 +3748,20 @@ BEGIN
    Finish_Workbook (excel_);
    Finish_Theme (excel_);
 
-  s_ := workbook.sheets.first;
-  WHILE s_ IS not null LOOP
-    col_min_ := 16384;
-    col_max_ := 1;
-    row_ix_ := workbook.sheets(s_).rows.first();
-    WHILE row_ix_ IS not null LOOP
-      col_min_ := least(col_min_, workbook.sheets(s_).rows(row_ix_).first());
-      col_max_ := greatest(col_max_, workbook.sheets(s_).rows(row_ix_).last());
-      row_ix_ := workbook.sheets(s_).rows.next(row_ix_);
-    END LOOP;
+   -- Loop for each worksheet
+   s_ := workbook.sheets.first;
+   WHILE s_ IS not null LOOP
+      col_min_ := 16384;
+      col_max_ := 1;
+      row_ix_ := workbook.sheets(s_).rows.first();
+      WHILE row_ix_ IS not null LOOP
+         col_min_ := least(col_min_, workbook.sheets(s_).rows(row_ix_).first());
+         col_max_ := greatest(col_max_, workbook.sheets(s_).rows(row_ix_).last());
+         row_ix_ := workbook.sheets(s_).rows.next(row_ix_);
+      END LOOP;
 
-    addtxt2utf8blob_init(yyy_);
-    addtxt2utf8blob ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+      addtxt2utf8blob_init(yyy_);
+      addtxt2utf8blob ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" xmlns:x14="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" mc:Ignorable="x14ac" xmlns:x14ac="http://schemas.microsoft.com/office/spreadsheetml/2009/9/ac">' ||
 CASE WHEN workbook.sheets(s_).tabcolor IS not null THEN '<sheetPr><tabColor rgb="' || workbook.sheets(s_).tabcolor || '"/></sheetPr>' end ||
 '<dimension ref="' || alfan_col(col_min_) || workbook.sheets(s_).rows.first() || ':' || alfan_col(col_max_) || workbook.sheets(s_).rows.last() || '"/>
@@ -3854,16 +3902,7 @@ CASE WHEN workbook.sheets(s_).tabcolor IS not null THEN '<sheetPr><tabColor rgb=
     add1file (excel_, rep('xl/worksheets/sheet:P1.xml',s_), yyy_);
 
     Finish_Ws_Relationships (excel_, s_);
-
-    IF workbook.sheets(s_).drawings.count > 0 THEN
-      xxx_ := '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">';
-      FOR i_ IN 1 .. workbook.sheets(s_).drawings.count LOOP
-        xxx_ := xxx_ || Finish_Drawing (workbook.sheets(s_).drawings(i_), i_, s_);
-      END LOOP;
-      xxx_ := xxx_ || '</xdr:wsDr>';
-      add1xml (excel_, 'xl/drawings/drawing' || s_ || '.xml', xxx_);
-    END IF;
+    Finish_Ws_Drawings (excel_, s_);
 
     IF workbook.sheets(s_).comments.count() > 0 THEN
       DECLARE
