@@ -643,7 +643,6 @@ TYPE tp_hyperlinks is table of tp_hyperlink index by PLS_INTEGER;
 
 SUBTYPE tp_author is VARCHAR2(32767 char);
 TYPE tp_authors is table of PLS_INTEGER index by tp_author;
-authors tp_authors;
 
 TYPE tp_formulas is table of VARCHAR2(32767) index by PLS_INTEGER;
 
@@ -3721,6 +3720,203 @@ BEGIN
 
 END Finish_Ws_Drawings;
 
+PROCEDURE Finish_Ws_Comments (
+   excel_ IN OUT NOCOPY BLOB,
+   s_     IN            PLS_INTEGER )
+IS
+   au_count_      PLS_INTEGER := 0;
+   ws_authors_    tp_authors;
+   author_        tp_author;
+   doc_           dbms_XmlDom.DomDocument := Dbms_XmlDom.newDomDocument;
+   nd_cms_        dbms_XmlDom.DomNode;
+   nd_cml_        dbms_XmlDom.DomNode;
+   nd_cm_         dbms_XmlDom.DomNode;
+   nd_aus_        dbms_XmlDom.DomNode;
+   nd_tx_         dbms_XmlDom.DomNode;
+   nd_r_          dbms_XmlDom.DomNode;
+   nd_pr_         dbms_XmlDom.DomNode;
+   nd_xml_        dbms_XmlDom.DomNode;
+   nd_sl_         dbms_XmlDom.DomNode;
+   nd_st_         dbms_XmlDom.DomNode;
+   nd_sh_         dbms_XmlDom.DomNode;
+   nd_tb_         dbms_XmlDom.DomNode;
+   nd_cd_         dbms_XmlDom.DomNode;
+   attrs_         xml_attrs_arr;
+   nl_            VARCHAR2(2);
+   comment_w_rem_ NUMBER;
+   comment_h_     NUMBER;
+   col_w_         NUMBER;
+   colspan_       NUMBER;
+BEGIN
+
+   IF workbook.sheets(s_).comments.count = 0 THEN
+      goto skiop_comments;
+   END IF;
+
+   FOR c_ IN 1 .. workbook.sheets(s_).comments.count LOOP
+      ws_authors_(workbook.sheets(s_).comments(c_).author) := 0;
+   END LOOP;
+
+   -- xl/comments:P1.xml
+   Dbms_XmlDom.setVersion (doc_, '1.0" encoding="UTF-8" standalone="yes');
+
+   attrs_('xmlns') := 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
+   nd_cms_ := Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'comments', attrs_);
+   nd_aus_ := Xml_Node (doc_, nd_cms_, 'authors');
+   author_ := ws_authors_.first;
+   WHILE author_ IS NOT null OR ws_authors_.next(author_) IS NOT null LOOP
+      ws_authors_(author_) := au_count_;
+      Xml_Text_Node (doc_, nd_aus_, 'author', author_);
+      au_count_  := au_count_ + 1;
+      author_ := ws_authors_.next(author_);
+   END LOOP;
+
+   nd_cml_ := Xml_Node (doc_, nd_cms_, 'commentList');
+   FOR cm_ IN 1 .. workbook.sheets(s_).comments.count LOOP
+      attrs_.delete;
+      attrs_('ref') := Alfan_Cell (workbook.sheets(s_).comments(cm_).column, workbook.sheets(s_).comments(cm_).row);
+      attrs_('authorId') := ws_authors_(workbook.sheets(s_).comments(cm_).author);
+      nd_cm_ := Xml_Node (doc_, nd_cml_, 'comment', attrs_);
+      nd_tx_ := Xml_Node (doc_, nd_cm_, 'text');
+      IF workbook.sheets(s_).comments(cm_).author IS NOT null THEN
+         nd_r_  := Xml_Node (doc_, nd_tx_, 'r');
+         nd_pr_ := Xml_Node (doc_, nd_r_, 'rPr');
+         Xml_Node (doc_, nd_pr_, 'b');
+         attrs_.delete;
+         attrs_('val') := '9';
+         Xml_Node (doc_, nd_pr_, 'sz', attrs_);
+         attrs_.delete;
+         attrs_('indexed') := '81';
+         Xml_Node (doc_, nd_pr_, 'color', attrs_);
+         attrs_.delete;
+         attrs_('val') := 'Tahoma';
+         Xml_Node (doc_, nd_pr_, 'rFont', attrs_);
+         attrs_('val') := '1';
+         Xml_Node (doc_, nd_pr_, 'charset', attrs_);
+         attrs_.delete;
+         attrs_('xml:space') := 'preserve';
+         Xml_Text_Node (doc_, nd_r_, 't', workbook.sheets(s_).comments(cm_).author, attrs_);
+      END IF;
+      nd_r_  := Xml_Node (doc_, nd_tx_, 'r');
+      nd_pr_ := Xml_Node (doc_, nd_r_, 'rPr');
+      attrs_.delete;
+      attrs_('val') := '9';
+      Xml_Node (doc_, nd_pr_, 'sz', attrs_);
+      attrs_.delete;
+      attrs_('indexed') := '81';
+      Xml_Node (doc_, nd_pr_, 'color', attrs_);
+      attrs_.delete;
+      attrs_('val') := 'Tahoma';
+      Xml_Node (doc_, nd_pr_, 'rFont', attrs_);
+      attrs_('val') := '1';
+      Xml_Node (doc_, nd_pr_, 'charset', attrs_);
+      attrs_.delete;
+      attrs_('xml:space') := 'preserve';
+      nl_ := CASE WHEN workbook.sheets(s_).comments(cm_).author IS NOT null THEN chr(13) || chr(10) END;
+      Xml_Text_Node (doc_, nd_r_, 't', nl_ || workbook.sheets(s_).comments(cm_).text, attrs_);
+   END LOOP;
+
+   Add1Xml (excel_, rep('xl/comments:P1.xml',s_), Dbms_XmlDom.getXmlType(doc_).getClobVal);
+   Dbms_XmlDom.freeDocument (doc_);
+
+
+   -- xl/drawings/vmlDrawing:P1.vml
+   doc_ := Dbms_XmlDom.newDomDocument;
+
+   attrs_.delete;
+   attrs_('xmlns:v') := 'urn:schemas-microsoft-com:vml';
+   attrs_('xmlns:o') := 'urn:schemas-microsoft-com:office:office';
+   attrs_('xmlns:x') := 'urn:schemas-microsoft-com:office:excel';
+   nd_xml_ := Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'xml', attrs_);
+   attrs_.delete;
+   attrs_('v:ext') := 'edit';
+   nd_sl_ := Xml_Node (doc_, nd_xml_, 'shapelayout', 'o', attrs_);
+   attrs_('data') := '2';
+   Xml_Node (doc_, nd_sl_, 'idmap', 'o', attrs_);
+   attrs_.delete;
+   attrs_('id')        := '_x0000_t202';
+   attrs_('coordsize') := '21600,21600';
+   attrs_('o:spt')     := '202';
+   attrs_('path')      := 'm,l,21600r21600,l21600,xe';
+   nd_st_ := Xml_Node (doc_, nd_xml_, 'shapetype', 'v', attrs_);
+   attrs_.delete;
+   attrs_('joinstyle') := 'miter';
+   Xml_Node (doc_, nd_st_, 'stroke', 'v', attrs_);
+   attrs_.delete;
+   attrs_('gradientshapeok') := 't';
+   attrs_('o:connecttype')   := 'rect';
+   Xml_Node (doc_, nd_st_, 'path', 'v', attrs_);
+
+   FOR cm_ IN 1 .. workbook.sheets(s_).comments.count LOOP
+      attrs_.delete;
+      attrs_('id')          := rep('_x0000_s:P1', to_char(cm_));
+      attrs_('type')        := '#_x0000_t202';
+      attrs_('style')       := rep ('position:absolute;margin-left:35.25pt;margin-top:3pt;z-index::P1;visibility:hidden;', to_char(cm_));
+      attrs_('fillcolor')   := '#ffffe1';
+      attrs_('o:insetmode') := 'auto';
+      nd_sh_ := Xml_Node (doc_, nd_xml_, 'shape', 'v', attrs_);
+      attrs_.delete;
+      attrs_('color2') := '#ffffe1';
+      Xml_Node (doc_, nd_sh_, 'fill', 'v', attrs_);
+      attrs_.delete;
+      attrs_('n')        := 't';
+      attrs_('color')    := 'black';
+      attrs_('obscured') := 't';
+      Xml_Node (doc_, nd_sh_, 'shadow', 'v', attrs_);
+      attrs_.delete;
+      attrs_('o:connecttype') := 'none';
+      Xml_Node (doc_, nd_sh_, 'path', 'v', attrs_);
+      attrs_.delete;
+      attrs_('style') := 'mso-direction-alt:auto';
+      nd_tb_ := Xml_Node (doc_, nd_sh_, 'textbox', 'v', attrs_);
+      attrs_('style') := 'text-align:left';
+      Xml_Text_Node (doc_, nd_tb_, 'div', '', attrs_);
+
+      attrs_.delete;
+      attrs_('ObjectType') := 'Note';
+      nd_cd_ := Xml_Node (doc_, nd_sh_, 'ClientData', 'x', attrs_);
+      Xml_Node (doc_, nd_cd_, 'MoveWithCells', 'x');
+      Xml_Node (doc_, nd_cd_, 'SizeWithCells', 'x');
+
+      comment_w_rem_ := workbook.sheets(s_).comments(cm_).width;
+      comment_h_     := workbook.sheets(s_).comments(cm_).height;
+      colspan_       := 1;
+      LOOP
+         IF workbook.sheets(s_).widths.exists(workbook.sheets(s_).comments(cm_).column+colspan_) THEN
+            col_w_ := 256 * workbook.sheets(s_).widths(workbook.sheets(s_).comments(cm_).column+colspan_);
+            col_w_ := trunc((col_w_+18)/256*7); -- assume default 11 point Calibri
+         ELSE
+            col_w_ := 64;
+         END IF;
+         EXIT WHEN comment_w_rem_ < col_w_;
+         colspan_       := colspan_ + 1;
+         comment_w_rem_ := comment_w_rem_ - col_w_;
+      END LOOP;
+      Xml_Text_Node (
+         doc_, nd_cd_, 'Anchor',
+         rep (
+            ':P1,15,:P2,30,:P3,:P4,:P5,:P6',
+            to_char(workbook.sheets(s_).comments(cm_).column),
+            to_char(workbook.sheets(s_).comments(cm_).row),
+            to_char(workbook.sheets(s_).comments(cm_).column+colspan_-1),
+            to_char(round(comment_w_rem_)),
+            to_char(workbook.sheets(s_).comments(cm_).row+1+trunc(comment_h_/20)),
+            to_char(mod(comment_h_, 20))
+         ), 'x'
+      );
+      Xml_Text_Node (doc_, nd_cd_, 'AutoFill', 'False', 'x');
+      Xml_Text_Node (doc_, nd_cd_, 'Row', to_char(workbook.sheets(s_).comments(cm_).row-1), 'x');
+      Xml_Text_Node (doc_, nd_cd_, 'Column', to_char(workbook.sheets(s_).comments(cm_).column-1), 'x');
+   END LOOP;
+
+   Add1Xml (excel_, rep('xl/drawings/vmlDrawing:P1.vml',s_), Dbms_XmlDom.getXmlType(doc_).getClobVal);
+   Dbms_XmlDom.freeDocument (doc_);
+
+
+   << skiop_comments >>
+   null;
+
+end Finish_Ws_Comments;
 
 FUNCTION Finish RETURN BLOB
 IS
@@ -3728,10 +3924,6 @@ IS
    yyy_          BLOB;
    xxx_          CLOB;
    formula_expr_ VARCHAR2(32767 char);
-   c_            NUMBER;
-   h_            NUMBER;
-   w_            NUMBER;
-   cw_           NUMBER;
    s_            PLS_INTEGER;
    row_ix_       PLS_INTEGER;
    col_ix_       PLS_INTEGER;
@@ -3882,102 +4074,32 @@ CASE WHEN workbook.sheets(s_).tabcolor IS not null THEN '<sheetPr><tabColor rgb=
       addtxt2utf8blob ('</dataValidations>', yyy_);
     END IF;
 
-    IF workbook.sheets(s_).hyperlinks.count() > 0 THEN
-      addtxt2utf8blob ('<hyperlinks>', yyy_);
-      FOR h IN 1 ..  workbook.sheets(s_).hyperlinks.count() LOOP
-        addtxt2utf8blob ('<hyperlink ref="' || workbook.sheets(s_).hyperlinks(h).cell || '" r:id="rId' || h || '"/>', yyy_);
-      END LOOP;
-      addtxt2utf8blob ('</hyperlinks>', yyy_);
-    END IF;
-    addtxt2utf8blob( '<pageMargins left="0.7" right="0.7" top="0.75" bottom="0.75" header="0.3" footer="0.3"/>', yyy_);
-    IF workbook.sheets(s_).comments.count() > 0 THEN
-      addtxt2utf8blob( '<legacyDrawing r:id="rId' || ( workbook.sheets(s_).hyperlinks.count() + 1 ) || '"/>', yyy_);
-    END IF;
-    IF workbook.sheets(s_).drawings.count > 0 THEN
-      addtxt2utf8blob( '<drawing r:id="rId' || (workbook.sheets(s_).hyperlinks.count + sign(workbook.sheets(s_).comments.count)+1) || '"/>', yyy_);
-    END IF;
+      IF workbook.sheets(s_).hyperlinks.count() > 0 THEN
+         addtxt2utf8blob ('<hyperlinks>', yyy_);
+         FOR h IN 1 ..  workbook.sheets(s_).hyperlinks.count() LOOP
+            addtxt2utf8blob ('<hyperlink ref="' || workbook.sheets(s_).hyperlinks(h).cell || '" r:id="rId' || h || '"/>', yyy_);
+         END LOOP;
+         addtxt2utf8blob ('</hyperlinks>', yyy_);
+      END IF;
+      addtxt2utf8blob( '<pageMargins left="0.7" right="0.7" top="0.75" bottom="0.75" header="0.3" footer="0.3"/>', yyy_);
+      IF workbook.sheets(s_).comments.count() > 0 THEN
+         addtxt2utf8blob( '<legacyDrawing r:id="rId' || ( workbook.sheets(s_).hyperlinks.count() + 1 ) || '"/>', yyy_);
+      END IF;
+      IF workbook.sheets(s_).drawings.count > 0 THEN
+         addtxt2utf8blob( '<drawing r:id="rId' || (workbook.sheets(s_).hyperlinks.count + sign(workbook.sheets(s_).comments.count)+1) || '"/>', yyy_);
+      END IF;
 
-    addtxt2utf8blob( '</worksheet>', yyy_);
-    addtxt2utf8blob_finish(yyy_);
-    add1file (excel_, rep('xl/worksheets/sheet:P1.xml',s_), yyy_);
+      addtxt2utf8blob( '</worksheet>', yyy_);
+      addtxt2utf8blob_finish(yyy_);
+      add1file (excel_, rep('xl/worksheets/sheet:P1.xml',s_), yyy_);
 
-    Finish_Ws_Relationships (excel_, s_);
-    Finish_Ws_Drawings (excel_, s_);
+      Finish_Ws_Relationships (excel_, s_);
+      Finish_Ws_Drawings (excel_, s_);
+      Finish_Ws_Comments (excel_, s_);
 
-    IF workbook.sheets(s_).comments.count() > 0 THEN
-      DECLARE
-        cnt PLS_INTEGER;
-        author_ind tp_author;
-      BEGIN
-        authors.delete();
-        FOR c IN 1 .. workbook.sheets(s_).comments.count() LOOP
-          authors(workbook.sheets(s_).comments(c).author) := 0;
-        END LOOP;
-        xxx_ := '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<comments xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
-<authors>';
-        cnt := 0;
-        author_ind := authors.first();
-        WHILE author_ind IS not null OR authors.next(author_ind) IS not null LOOP
-          authors( author_ind ) := cnt;
-          xxx_ := xxx_ || ( '<author>' || author_ind || '</author>' );
-          cnt := cnt + 1;
-          author_ind := authors.next(author_ind);
-        END LOOP;
-      END;
-      xxx_ := xxx_ || '</authors><commentList>';
-      FOR c IN 1 .. workbook.sheets(s_).comments.count() LOOP
-        xxx_ := xxx_ || ( '<comment ref="' || alfan_col( workbook.sheets(s_).comments(c).column ) ||
-           to_char (workbook.sheets(s_).comments(c).row || '" authorId="' || authors(workbook.sheets(s_).comments(c).author ) ) || '">
-<text>');
-        IF workbook.sheets(s_).comments(c).author IS not null THEN
-          xxx_ := xxx_ || ( '<r><rPr><b/><sz val="9"/><color indexed="81"/><rFont val="Tahoma"/><charset val="1"/></rPr><t xml:space="preserve">' ||
-             workbook.sheets(s_).comments(c).author || ':</t></r>' );
-        END IF;
-        xxx_ := xxx_ || ( '<r><rPr><sz val="9"/><color indexed="81"/><rFont val="Tahoma"/><charset val="1"/></rPr><t xml:space="preserve">' ||
-             CASE WHEN workbook.sheets(s_).comments(c).author IS not null THEN '
-' END || workbook.sheets(s_).comments(c).text || '</t></r></text></comment>' );
-      END LOOP;
-      xxx_ := xxx_ || '</commentList></comments>';
-      add1xml (excel_, 'xl/comments' || s_ || '.xml', xxx_);
+      s_ := workbook.sheets.next(s_);
 
-      xxx_ := '<xml xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel">
-<o:shapelayout v:ext="edit"><o:idmap v:ext="edit" data="2"/></o:shapelayout>
-<v:shapetype id="_x0000_t202" coordsize="21600,21600" o:spt="202" path="m,l,21600r21600,l21600,xe"><v:stroke joinstyle="miter"/><v:path gradientshapeok="t" o:connecttype="rect"/></v:shapetype>';
-      FOR c IN 1 .. workbook.sheets(s_).comments.count() LOOP
-        xxx_ := xxx_ || ( '<v:shape id="_x0000_s' || to_char(c) || '" type="#_x0000_t202"
-style="position:absolute;margin-left:35.25pt;margin-top:3pt;z-index:' || to_char( c ) || ';visibility:hidden;" fillcolor="#ffffe1" o:insetmode="auto">
-<v:fill color2="#ffffe1"/><v:shadow on="t" color="black" obscured="t"/><v:path o:connecttype="none"/>
-<v:textbox style="mso-direction-alt:auto"><div style="text-align:left"></div></v:textbox>
-<x:ClientData ObjectType="Note"><x:MoveWithCells/><x:SizeWithCells/>' );
-        w_ := workbook.sheets(s_).comments(c).width;
-        c_ := 1;
-        LOOP
-          IF workbook.sheets(s_).widths.exists(workbook.sheets(s_).comments(c).column+c_) THEN
-            cw_ := 256 * workbook.sheets(s_).widths(workbook.sheets(s_).comments(c).column+c_);
-            cw_ := trunc((cw_+18)/256*7); -- assume default 11 point Calibri
-          ELSE
-            cw_ := 64;
-          END IF;
-          EXIT WHEN w_ < cw_;
-          c_ := c_ + 1;
-          w_ := w_ - cw_;
-        END LOOP;
-        h_ := workbook.sheets(s_).comments(c).height;
-        xxx_ := xxx_ || ( '<x:Anchor>' || workbook.sheets(s_).comments(c).column || ',15,' ||
-            workbook.sheets(s_).comments(c).row || ',30,' ||
-            (workbook.sheets(s_).comments(c).column+c_-1) || ',' || round(w_) || ',' ||
-            (workbook.sheets(s_).comments(c).row + 1 + trunc(h_/20)) || ',' || mod(h_, 20) || '</x:Anchor>' );
-        xxx_ := xxx_ || ( '<x:AutoFill>False</x:AutoFill><x:Row>' ||
-            (workbook.sheets(s_).comments(c).row-1) || '</x:Row><x:Column>' ||
-            (workbook.sheets(s_).comments(c).column-1) || '</x:Column></x:ClientData></v:shape>' );
-      END LOOP;
-      xxx_ := xxx_ || '</xml>';
-      add1xml (excel_, 'xl/drawings/vmlDrawing' || s_ || '.vml', xxx_);
-    END IF;
---
-    s_ := workbook.sheets.next(s_);
-  END LOOP;
+   END LOOP;
 
   xxx_ := '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
@@ -3998,9 +4120,9 @@ style="position:absolute;margin-left:35.25pt;margin-top:3pt;z-index:' || to_char
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">';
     FOR i_ IN 1 .. workbook.images.count LOOP
        add1file (excel_, 'xl/media/image' || i_ || '.png', workbook.images(i_).img_blob );
-       xxx_ := xxx_ || ( '<Relationship Id="rId' || i_ || '" '
-                    ||   'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image' || i_ || '.png'
-                    ||   '"/>' );
+       xxx_ := xxx_ || '<Relationship Id="rId' || i_ || '" '
+                    || 'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image' || i_ || '.png'
+                    || '"/>';
     END LOOP;
     xxx_ := xxx_ || '</Relationships>';
     add1xml (excel_, 'xl/drawings/_rels/drawing1.xml.rels', xxx_);
