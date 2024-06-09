@@ -1080,7 +1080,7 @@ END Blob2Num;
 
 PROCEDURE Add1File (
    zipped_blob_ IN OUT BLOB,
-   name_        IN VARCHAR2,
+   filename_    IN VARCHAR2,
    content_     IN BLOB )
 IS
    now_        DATE := sysdate;
@@ -1105,13 +1105,13 @@ BEGIN
    IF zipped_blob_ IS null THEN
       dbms_lob.createtemporary (zipped_blob_, true);
    END IF;
-   name_raw_ := Utl_i18n.String_To_Raw (name_, 'AL32UTF8');
+   name_raw_ := Utl_i18n.String_To_Raw (filename_, 'AL32UTF8');
    Dbms_Lob.Append (
       zipped_blob_,
       Utl_Raw.Concat(
          LOCAL_FILE_HEADER_, -- Local file header signature
          hextoraw('1400'),   -- version 2.0
-         CASE WHEN name_raw_ = Utl_i18n.String_To_Raw (name_, 'US8PC437')
+         CASE WHEN name_raw_ = Utl_i18n.String_To_Raw (filename_, 'US8PC437')
             THEN hextoraw('0000') -- no General purpose bits
             ELSE hextoraw('0008') -- set Language encoding flag (EFS)
          END, CASE WHEN compressed_
@@ -3033,6 +3033,36 @@ BEGIN
 
 END Finish_docProps;
 
+PROCEDURE Finish_Shared_Strings (
+   excel_ IN OUT NOCOPY BLOB )
+IS
+   doc_    dbms_XmlDom.DomDocument := Dbms_XmlDom.newDomDocument;
+   nd_sst_ dbms_XmlDom.DomNode;
+   attrs_  xml_attrs_arr;
+BEGIN
+
+   -- xl/sharedStrings.xml
+   Dbms_XmlDom.setVersion (doc_, '1.0" encoding="UTF-8" standalone="yes');
+   attrs_('xmlns')       := 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
+   attrs_('count')       := to_char(workbook.str_cnt);
+   attrs_('uniqueCount') := workbook.strings.count;
+   nd_sst_ := Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'sst', attrs_);
+
+   attrs_.delete;
+   attrs_('xml:space') := 'preserve';
+   FOR str_ix_ IN 0 .. workbook.str_ind.count - 1 LOOP
+      Xml_Text_Node (
+         doc_ => doc_, append_to_ => Xml_Node(doc_,nd_sst_,'si'), tag_name_ => 't',
+         text_content_ => Dbms_XmlGen.Convert (substr(workbook.str_ind(str_ix_), 1, 32000)),
+         attrs_ => attrs_
+      );
+   END LOOP;
+
+   Add1Xml (excel_, 'xl/sharedStrings.xml', Dbms_XmlDom.getXmlType(doc_).getClobVal);
+   Dbms_XmlDom.freeDocument (doc_);
+
+END Finish_Shared_Strings;
+
 PROCEDURE Finish_Styles (
    excel_ IN OUT NOCOPY BLOB )
 IS
@@ -3199,119 +3229,6 @@ BEGIN
    Dbms_XmlDom.freeDocument (doc_);
 
 END Finish_Styles;
-
-PROCEDURE Finish_Workbook (
-   excel_ IN OUT NOCOPY BLOB )
-IS
-   doc_    dbms_XmlDom.DomDocument := Dbms_XmlDom.newDomDocument;
-   nd_wb_  dbms_XmlDom.DomNode;
-   nd_bks_ dbms_XmlDom.DomNode;
-   nd_shs_ dbms_XmlDom.DomNode;
-   nd_dnm_ dbms_XmlDom.DomNode;
-   attrs_  xml_attrs_arr;
-   s_      PLS_INTEGER;
-BEGIN
-
-   -- xl/workbook.xml
-   Dbms_XmlDom.setVersion (doc_, '1.0" encoding="UTF-8" standalone="yes');
-   attrs_('xmlns')   := 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
-   attrs_('xmlns:r') := 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
-   nd_wb_ := Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'workbook', attrs_);
-
-   attrs_.delete;
-   attrs_('appName')      := 'xl';
-   attrs_('lastEdited')   := '5';
-   attrs_('lowestEdited') := '5';
-   attrs_('rupBuild')     := '9302';
-   Xml_Node (doc_, nd_wb_, 'fileVersion', attrs_);
-   attrs_.delete;
-   attrs_('date1904')            := 'false';
-   attrs_('defaultThemeVersion') := '124226';
-   Xml_Node (doc_, nd_wb_, 'workbookPr', attrs_);
-
-   nd_bks_ := Xml_Node (doc_, nd_wb_, 'bookViews');
-   attrs_.delete;
-   attrs_('xWindow')      := '120';
-   attrs_('yWindow')      := '45';
-   attrs_('windowWidth')  := '19155';
-   attrs_('windowHeight') := '4935';
-   Xml_Node (doc_, nd_bks_, 'workbookView', attrs_);
-
-   attrs_.delete;
-   nd_shs_ := Xml_Node (doc_, nd_wb_, 'sheets');
-   s_ := workbook.sheets.first;
-   WHILE s_ IS NOT null LOOP
-      attrs_('name')    := workbook.sheets(s_).name;
-      attrs_('sheetId') := to_char(s_);
-      attrs_('r:id')    := rep ('rId:P1', to_char (9 + s_));
-      Xml_Node (doc_, nd_shs_, 'sheet', attrs_);
-      s_ := workbook.sheets.next(s_);
-   END LOOP;
-
-   IF workbook.defined_names.count > 0 THEN
-      nd_dnm_ := Xml_Node (doc_, nd_wb_, 'definedNames');
-      FOR s_ IN 1 .. workbook.defined_names.count LOOP
-         attrs_.delete;
-         attrs_('name') := workbook.defined_names(s_).name;
-         IF workbook.defined_names(s_).sheet IS NOT null THEN
-            attrs_('localSheetId') := to_char(workbook.defined_names(s_).sheet);
-         END IF;
-         Xml_Node (doc_, nd_dnm_, 'definedName', attrs_);
-      END LOOP;
-   END IF;
-   attrs_.delete;
-   attrs_('calcId') := '144525';
-   Xml_Node (doc_, nd_wb_, 'calcPr', attrs_);
-
-   Add1Xml (excel_, 'xl/workbook.xml', Dbms_XmlDom.getXmlType(doc_).getClobVal);
-   Dbms_XmlDom.freeDocument (doc_);
-
-END Finish_Workbook;
-
-PROCEDURE Finish_Workbook_Rels (
-   excel_ IN OUT NOCOPY BLOB )
-IS
-   doc_    dbms_XmlDom.DomDocument := Dbms_XmlDom.newDomDocument;
-   nd_rls_ dbms_XmlDom.DomNode;
-   attrs_  xml_attrs_arr;
-   s_      PLS_INTEGER;
-BEGIN
-
-   -- xl/_rels/workbook.xml.rels
-   Dbms_XmlDom.setVersion (doc_, '1.0" encoding="UTF-8" standalone="yes');
-
-   attrs_('xmlns')   := 'http://schemas.openxmlformats.org/package/2006/relationships';
-   nd_rls_ := Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'Relationships', attrs_);
-
-   attrs_.delete;
-   attrs_('Id')     := 'rId1';
-   attrs_('Type')   := 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings';
-   attrs_('Target') := 'sharedStrings.xml';
-   Xml_Node (doc_, nd_rls_, 'Relationship', attrs_);
-
-   attrs_('Id')     := 'rId2';
-   attrs_('Type')   := 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles';
-   attrs_('Target') := 'styles.xml';
-   Xml_Node (doc_, nd_rls_, 'Relationship', attrs_);
-
-   attrs_('Id')     := 'rId3';
-   attrs_('Type')   := 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme';
-   attrs_('Target') := 'theme/theme1.xml';
-   Xml_Node (doc_, nd_rls_, 'Relationship', attrs_);
-
-   s_ := workbook.sheets.first;
-   WHILE s_ IS NOT null LOOP
-      attrs_('Id')     := 'rId' || to_char(9+s_);
-      attrs_('Type')   := 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet';
-      attrs_('Target') := rep ('worksheets/sheet:P1.xml', s_);
-      Xml_Node (doc_, nd_rls_, 'Relationship', attrs_);
-      s_ := workbook.sheets.next(s_);
-   END LOOP;
-
-   Add1Xml (excel_, 'xl/_rels/workbook.xml.rels', Dbms_XmlDom.getXmlType(doc_).getClobVal);
-   Dbms_XmlDom.freeDocument (doc_);
-
-END Finish_Workbook_Rels;
 
 
 PROCEDURE Finish_Theme (
@@ -3549,6 +3466,158 @@ IS BEGIN
 </a:theme>');
 END Finish_Theme;
 
+
+PROCEDURE Finish_Workbook (
+   excel_ IN OUT NOCOPY BLOB )
+IS
+   doc_    dbms_XmlDom.DomDocument := Dbms_XmlDom.newDomDocument;
+   nd_wb_  dbms_XmlDom.DomNode;
+   nd_bks_ dbms_XmlDom.DomNode;
+   nd_shs_ dbms_XmlDom.DomNode;
+   nd_dnm_ dbms_XmlDom.DomNode;
+   attrs_  xml_attrs_arr;
+   s_      PLS_INTEGER;
+BEGIN
+
+   -- xl/workbook.xml
+   Dbms_XmlDom.setVersion (doc_, '1.0" encoding="UTF-8" standalone="yes');
+   attrs_('xmlns')   := 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
+   attrs_('xmlns:r') := 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
+   nd_wb_ := Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'workbook', attrs_);
+
+   attrs_.delete;
+   attrs_('appName')      := 'xl';
+   attrs_('lastEdited')   := '5';
+   attrs_('lowestEdited') := '5';
+   attrs_('rupBuild')     := '9302';
+   Xml_Node (doc_, nd_wb_, 'fileVersion', attrs_);
+   attrs_.delete;
+   attrs_('date1904')            := 'false';
+   attrs_('defaultThemeVersion') := '124226';
+   Xml_Node (doc_, nd_wb_, 'workbookPr', attrs_);
+
+   nd_bks_ := Xml_Node (doc_, nd_wb_, 'bookViews');
+   attrs_.delete;
+   attrs_('xWindow')      := '120';
+   attrs_('yWindow')      := '45';
+   attrs_('windowWidth')  := '19155';
+   attrs_('windowHeight') := '4935';
+   Xml_Node (doc_, nd_bks_, 'workbookView', attrs_);
+
+   attrs_.delete;
+   nd_shs_ := Xml_Node (doc_, nd_wb_, 'sheets');
+   s_ := workbook.sheets.first;
+   WHILE s_ IS NOT null LOOP
+      attrs_('name')    := workbook.sheets(s_).name;
+      attrs_('sheetId') := to_char(s_);
+      attrs_('r:id')    := rep ('rId:P1', to_char (9 + s_));
+      Xml_Node (doc_, nd_shs_, 'sheet', attrs_);
+      s_ := workbook.sheets.next(s_);
+   END LOOP;
+
+   IF workbook.defined_names.count > 0 THEN
+      nd_dnm_ := Xml_Node (doc_, nd_wb_, 'definedNames');
+      FOR s_ IN 1 .. workbook.defined_names.count LOOP
+         attrs_.delete;
+         attrs_('name') := workbook.defined_names(s_).name;
+         IF workbook.defined_names(s_).sheet IS NOT null THEN
+            attrs_('localSheetId') := to_char(workbook.defined_names(s_).sheet);
+         END IF;
+         Xml_Node (doc_, nd_dnm_, 'definedName', attrs_);
+      END LOOP;
+   END IF;
+   attrs_.delete;
+   attrs_('calcId') := '144525';
+   Xml_Node (doc_, nd_wb_, 'calcPr', attrs_);
+
+   Add1Xml (excel_, 'xl/workbook.xml', Dbms_XmlDom.getXmlType(doc_).getClobVal);
+   Dbms_XmlDom.freeDocument (doc_);
+
+END Finish_Workbook;
+
+PROCEDURE Finish_Workbook_Rels (
+   excel_ IN OUT NOCOPY BLOB )
+IS
+   doc_    dbms_XmlDom.DomDocument := Dbms_XmlDom.newDomDocument;
+   nd_rls_ dbms_XmlDom.DomNode;
+   attrs_  xml_attrs_arr;
+   s_      PLS_INTEGER;
+BEGIN
+
+   -- xl/_rels/workbook.xml.rels
+   Dbms_XmlDom.setVersion (doc_, '1.0" encoding="UTF-8" standalone="yes');
+
+   attrs_('xmlns')   := 'http://schemas.openxmlformats.org/package/2006/relationships';
+   nd_rls_ := Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'Relationships', attrs_);
+
+   attrs_.delete;
+   attrs_('Id')     := 'rId1';
+   attrs_('Type')   := 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings';
+   attrs_('Target') := 'sharedStrings.xml';
+   Xml_Node (doc_, nd_rls_, 'Relationship', attrs_);
+
+   attrs_('Id')     := 'rId2';
+   attrs_('Type')   := 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles';
+   attrs_('Target') := 'styles.xml';
+   Xml_Node (doc_, nd_rls_, 'Relationship', attrs_);
+
+   attrs_('Id')     := 'rId3';
+   attrs_('Type')   := 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme';
+   attrs_('Target') := 'theme/theme1.xml';
+   Xml_Node (doc_, nd_rls_, 'Relationship', attrs_);
+
+   s_ := workbook.sheets.first;
+   WHILE s_ IS NOT null LOOP
+      attrs_('Id')     := 'rId' || to_char(9+s_);
+      attrs_('Type')   := 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet';
+      attrs_('Target') := rep ('worksheets/sheet:P1.xml', s_);
+      Xml_Node (doc_, nd_rls_, 'Relationship', attrs_);
+      s_ := workbook.sheets.next(s_);
+   END LOOP;
+
+   Add1Xml (excel_, 'xl/_rels/workbook.xml.rels', Dbms_XmlDom.getXmlType(doc_).getClobVal);
+   Dbms_XmlDom.freeDocument (doc_);
+
+END Finish_Workbook_Rels;
+
+
+PROCEDURE Finish_Drawings_Rels (
+   excel_ IN OUT NOCOPY BLOB )
+IS
+   doc_     dbms_XmlDom.DomDocument := Dbms_XmlDom.newDomDocument;
+   attrs_   xml_attrs_arr;
+   nd_rels_ dbms_XmlDom.DomNode;
+BEGIN
+
+   IF workbook.images.count = 0 THEN
+      goto skip_drawings_rels;
+   END IF;
+
+   Dbms_XmlDom.setVersion (doc_, '1.0" encoding="UTF-8" standalone="yes');
+
+   attrs_('xmlns') := 'http://schemas.openxmlformats.org/package/2006/relationships';
+   nd_rels_ := Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'Relationships', attrs_);
+
+   FOR dr_ IN 1 .. workbook.images.count LOOP
+      attrs_.delete;
+      attrs_('Id')     := 'rId' || dr_;
+      attrs_('Type')   := 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/image';
+      attrs_('Target') := rep ('../media/image:P1.:P2', dr_, workbook.images(dr_).extension);
+      Xml_Node (doc_, nd_rels_, 'Relationship', attrs_);
+      Add1File (
+         zipped_blob_ => excel_,
+         filename_    => rep ('xl/media/image:P1.:P2', dr_, workbook.images(dr_).extension),
+         content_     => workbook.images(dr_).img_blob
+      );
+   END LOOP;
+
+   Add1Xml (excel_, 'xl/drawings/_rels/drawing1.xml.rels', Dbms_XmlDom.getXmlType(doc_).getClobVal);
+   Dbms_XmlDom.freeDocument (doc_);
+
+   <<skip_drawings_rels>>
+   null;
+
+END Finish_Drawings_Rels;
 
 PROCEDURE Finish_Ws_Relationships (
    excel_ IN OUT NOCOPY BLOB,
@@ -3981,7 +4050,6 @@ FUNCTION Finish RETURN BLOB
 IS
    excel_        BLOB;
    yyy_          BLOB;
-   xxx_          CLOB;
    formula_expr_ VARCHAR2(32767 char);
    s_            PLS_INTEGER;
    row_ix_       PLS_INTEGER;
@@ -3995,10 +4063,12 @@ BEGIN
    Finish_Content_Types (excel_);
    Finish_docProps (excel_);
    Finish_Rels (excel_);
+   Finish_Shared_Strings (excel_);
    Finish_Styles (excel_);
+   Finish_Theme (excel_);
    Finish_Workbook (excel_);
    Finish_Workbook_Rels (excel_);
-   Finish_Theme (excel_);
+   Finish_Drawings_Rels (excel_);
 
    -- Loop for each worksheet
    s_ := workbook.sheets.first;
@@ -4169,37 +4239,11 @@ CASE WHEN workbook.sheets(s_).tabcolor IS not null THEN '<sheetPr><tabColor rgb=
    END LOOP;
    -- END Loop for each worksheet
 
-   IF workbook.images.count > 0 THEN
-      xxx_ := '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">';
-      FOR i_ IN 1 .. workbook.images.count LOOP
-         add1file (excel_, 'xl/media/image' || i_ || '.' || workbook.images(i_).extension, workbook.images(i_).img_blob );
-         xxx_ := xxx_ || '<Relationship Id="rId' || i_ || '" '
-                      || 'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" '
-                      || 'Target="../media/image' || i_ || '.' || workbook.images(i_).extension
-                      || '"/>';
-      END LOOP;
-      xxx_ := xxx_ || '</Relationships>';
-      add1xml (excel_, 'xl/drawings/_rels/drawing1.xml.rels', xxx_);
-   END IF;
-
-   addtxt2utf8blob_init(yyy_);
-   addtxt2utf8blob ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="' || workbook.str_cnt || '" uniqueCount="' || workbook.strings.count() || '">',
-      yyy_
-   );
-   FOR i IN 0 .. workbook.str_ind.count() - 1 LOOP
-      addtxt2utf8blob (
-         '<si><t xml:space="preserve">' ||
-         dbms_xmlgen.convert(substr(workbook.str_ind(i), 1, 32000)) || '</t></si>', yyy_
-      );
-   END LOOP;
-   addtxt2utf8blob ('</sst>', yyy_);
-   addtxt2utf8blob_finish(yyy_);
-   add1file (excel_, 'xl/sharedStrings.xml', yyy_);
-   finish_zip (excel_);
+   Finish_Zip (excel_);
    Clear_Workbook;
+
    RETURN excel_;
+
 END Finish;
 
 PROCEDURE Save (

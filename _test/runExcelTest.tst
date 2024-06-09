@@ -1,5 +1,5 @@
 PL/SQL Developer Test script 3.0
-67
+66
 DECLARE
    file_end_   CONSTANT VARCHAR2(20) := Cbh_Utils_API.Rep ('_:P1.xlsx', to_char(sysdate,'YYYYMMDD-HH24MI'));
    file_start_ CONSTANT VARCHAR2(20) := 'TestOut_';
@@ -16,7 +16,6 @@ BEGIN
    Dbms_Output.Put_Line (file_name_ || ' saved to filesystem');*/
 
    -- Image File
-   --As_Xlsx.Clear_Workbook;
    As_Xlsx.Init_Workbook;
    As_Xlsx.Set_Sheet_Name (1, 'Parameters');
    As_Xlsx.CellS (2, 2, 'dummy data');
