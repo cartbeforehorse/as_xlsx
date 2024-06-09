@@ -757,6 +757,7 @@ TYPE tp_defined_names IS TABLE OF tp_defined_name index by PLS_INTEGER;
 TYPE tp_image IS RECORD (
    img_blob    BLOB,
    img_hash    RAW(128), --NUMBER,
+   extension   VARCHAR2(5),
    width       PLS_INTEGER,
    height      PLS_INTEGER
 );
@@ -2570,6 +2571,7 @@ BEGIN
             END CASE;
             offset_ := offset_ + 4 + 4 + length_ + 4;  -- Length + Chunk type + Chunk data + CRC
          END LOOP;
+         img_rec_.extension := 'png';
 
       ELSIF utl_raw.substr (file_chunk_, 1, 3) = hextoraw('474946') THEN -- gif
          Dbms_Output.Put_Line ('file is GIF');
@@ -2599,9 +2601,10 @@ BEGIN
                   exit;
             END CASE;
          END LOOP;
+         img_rec_.extension := 'gif';
 
       ELSIF utl_raw.substr (file_chunk_,1,2) = hextoraw('FFD8') -- SOI Start of Image
-            AND rawtohex (utl_raw.substr(file_chunk_,3,2)) IN ('FFE0', 'FFE1') -- APP0 jpg; APP1 jpg
+            AND rawtohex (utl_raw.substr(file_chunk_,3,2)) IN ('FFE0', 'FFE1', 'FFEE') -- APP0 jpg; APP1 jpg
       THEN -- jpg
          Dbms_Output.Put_Line ('file is JPG');
 
@@ -2623,8 +2626,10 @@ BEGIN
                offset_ := offset_ + 2 + to_number (utl_raw.substr(file_chunk_,3,2), 'xxxx');
             END IF;
          END LOOP;
+         img_rec_.extension := 'jpeg';
 
       ELSE -- unknown - use the values passed in
+         Dbms_Output.Put_Line ('file is not PNG/GIF/JPG');
          img_rec_.width  := nvl(width_, 0);
          img_rec_.height := nvl(height_, 0);
       END IF;
@@ -2813,16 +2818,31 @@ END Set_Autofilter;
 PROCEDURE Finish_Content_Types (
    excel_ IN OUT NOCOPY BLOB )
 IS
-   s_        PLS_INTEGER;
-   p_        PLS_INTEGER;
-   doc_      dbms_XmlDom.DomDocument := Dbms_XmlDom.newDomDocument;
-   nd_types_ dbms_XmlDom.DomNode;
-   attrs_    xml_attrs_arr;
+   s_         PLS_INTEGER;
+   p_         PLS_INTEGER;
+   doc_       dbms_XmlDom.DomDocument := Dbms_XmlDom.newDomDocument;
+   nd_types_  dbms_XmlDom.DomNode;
+   attrs_     xml_attrs_arr;
+   img_exts_  tp_strings;
+   ext_       VARCHAR2(5);
 BEGIN
 
    Dbms_XmlDom.setVersion (doc_, '1.0" encoding="UTF-8" standalone="yes');
    attrs_('xmlns') := 'http://schemas.openxmlformats.org/package/2006/content-types';
    nd_types_ := Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'Types', attrs_);
+
+   IF workbook.images.count > 0 THEN -- osian must also deal with jpg
+      FOR img_ IN workbook.images.first .. workbook.images.last LOOP
+         ext_ := workbook.images(img_).extension;
+         IF ext_ IS NOT null AND not img_exts_.exists(ext_) THEN
+            attrs_.delete;
+            attrs_('ContentType') := 'image/' || ext_;
+            attrs_('Extension')   := ext_;
+            Xml_Node (doc_, nd_types_, 'Default', attrs_);
+            img_exts_(ext_) := 1;
+         END IF;
+      END LOOP;
+   END IF;
 
    attrs_.delete;
    attrs_('ContentType') := 'application/vnd.openxmlformats-package.relationships+xml';
@@ -2898,13 +2918,6 @@ BEGIN
       END IF;
       s_ := workbook.sheets.next(s_);
    END LOOP;
-
-   IF workbook.images.count > 0 THEN
-      attrs_.delete;
-      attrs_('ContentType') := 'image/png';
-      attrs_('Extension')   := 'png';
-      Xml_Node (doc_, nd_types_, 'Default', attrs_);
-   END IF;
 
    Add1Xml (excel_, '[Content_Types].xml', Dbms_XmlDom.getXmlType(doc_).getClobVal);
    Dbms_XmlDom.freeDocument (doc_);
@@ -3583,7 +3596,7 @@ BEGIN
       -- the default widths => 64 px = 1 col = 609600
       img_colspan_ := trunc (img_width_/64);
       col_         := drawing_.col - 1 + img_colspan_;
-      col_offs_    := (img_width_-img_colspan_*64)*9525;
+      col_offs_    := trunc((img_width_-img_colspan_*64)*9525);
    ELSE
       col_ := drawing_.col;
       LOOP
@@ -3596,14 +3609,14 @@ BEGIN
          col_ := col_ + 1;
       END LOOP;
       col_ := col_ - 1;
-      col_offs_ := img_width_rem_ * 9525;
+      col_offs_ := trunc(img_width_rem_ * 9525);
    END IF;
    IF workbook.sheets(s_).row_fmts.count = 0 THEN
       -- If no heights have been set then we assume the default row heights of
       -- => 20 px = 1 row = 190500
       img_rowspan_ := trunc (img_height_/20);
       row_         := drawing_.row - 1 + img_rowspan_;
-      row_offs_    := (img_height_- img_rowspan_*20) * 9525;
+      row_offs_    := trunc((img_height_- img_rowspan_*20) * 9525);
    ELSE
       row_ := drawing_.row;
       LOOP
@@ -3616,7 +3629,7 @@ BEGIN
          img_height_rem_ := img_height_rem_ - row_height_;
          row_ := row_ + 1;
       END LOOP;
-      row_offs_ := img_height_rem_ * 9525;
+      row_offs_ := trunc(img_height_rem_ * 9525);
       row_ := row_ - 1;
    END IF;
 END Calc_Image_Col_And_Row;
@@ -3639,10 +3652,10 @@ IS
    nd_et_      dbms_XmlDom.DomNode;
    attrs_      xml_attrs_arr;
    drawing_    tp_drawing;
-   col_        PLS_INTEGER;
-   row_        PLS_INTEGER;
-   col_offs_   NUMBER;
-   row_offs_   NUMBER;
+   to_col_     PLS_INTEGER;
+   to_row_     PLS_INTEGER;
+   col_ovfl_  NUMBER;
+   row_ovfl_   NUMBER;
 BEGIN
 
    IF workbook.sheets(s_).drawings.count = 0 THEN
@@ -3658,7 +3671,7 @@ BEGIN
    FOR img_ IN 1 .. workbook.sheets(s_).drawings.count LOOP
 
       drawing_ := workbook.sheets(s_).drawings(img_);
-      Calc_Image_Col_And_Row (col_, row_, col_offs_, row_offs_, drawing_, s_);
+      Calc_Image_Col_And_Row (to_col_, to_row_, col_ovfl_, row_ovfl_, drawing_, s_);
 
       attrs_.delete;
       attrs_('editAs') := 'oneCell';
@@ -3671,10 +3684,10 @@ BEGIN
       Xml_Text_Node (doc_, nd_fr_, 'rowOff', '0', 'xdr');
 
       nd_to_ := Xml_Node (doc_, nd_tc_, 'to', 'xdr');
-      Xml_Text_Node (doc_, nd_to_, 'col', to_char(col_), 'xdr');
-      Xml_Text_Node (doc_, nd_to_, 'colOff', to_char(col_offs_), 'xdr');
-      Xml_Text_Node (doc_, nd_to_, 'row', to_char(row_), 'xdr');
-      Xml_Text_Node (doc_, nd_to_, 'rowOff', to_char(row_offs_), 'xdr');
+      Xml_Text_Node (doc_, nd_to_, 'col', to_char(to_col_), 'xdr');
+      Xml_Text_Node (doc_, nd_to_, 'colOff', to_char(col_ovfl_), 'xdr');
+      Xml_Text_Node (doc_, nd_to_, 'row', to_char(to_row_), 'xdr');
+      Xml_Text_Node (doc_, nd_to_, 'rowOff', to_char(row_ovfl_), 'xdr');
 
       nd_pi_ := Xml_Node (doc_, nd_tc_, 'pic', 'xdr');
       nd_nv_ := Xml_Node (doc_, nd_pi_, 'nvPicPr', 'xdr');
@@ -4119,9 +4132,10 @@ CASE WHEN workbook.sheets(s_).tabcolor IS not null THEN '<sheetPr><tabColor rgb=
     xxx_ := '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">';
     FOR i_ IN 1 .. workbook.images.count LOOP
-       add1file (excel_, 'xl/media/image' || i_ || '.png', workbook.images(i_).img_blob );
+       add1file (excel_, 'xl/media/image' || i_ || '.' || workbook.images(i_).extension, workbook.images(i_).img_blob );
        xxx_ := xxx_ || '<Relationship Id="rId' || i_ || '" '
-                    || 'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image' || i_ || '.png'
+                    || 'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" '
+                    || 'Target="../media/image' || i_ || '.' || workbook.images(i_).extension
                     || '"/>';
     END LOOP;
     xxx_ := xxx_ || '</Relationships>';
