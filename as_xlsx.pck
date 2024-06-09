@@ -3268,6 +3268,52 @@ BEGIN
 
 END Finish_Workbook;
 
+PROCEDURE Finish_Workbook_Rels (
+   excel_ IN OUT NOCOPY BLOB )
+IS
+   doc_    dbms_XmlDom.DomDocument := Dbms_XmlDom.newDomDocument;
+   nd_rls_ dbms_XmlDom.DomNode;
+   attrs_  xml_attrs_arr;
+   s_      PLS_INTEGER;
+BEGIN
+
+   -- xl/_rels/workbook.xml.rels
+   Dbms_XmlDom.setVersion (doc_, '1.0" encoding="UTF-8" standalone="yes');
+
+   attrs_('xmlns')   := 'http://schemas.openxmlformats.org/package/2006/relationships';
+   nd_rls_ := Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'Relationships', attrs_);
+
+   attrs_.delete;
+   attrs_('Id')     := 'rId1';
+   attrs_('Type')   := 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings';
+   attrs_('Target') := 'sharedStrings.xml';
+   Xml_Node (doc_, nd_rls_, 'Relationship', attrs_);
+
+   attrs_('Id')     := 'rId2';
+   attrs_('Type')   := 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles';
+   attrs_('Target') := 'styles.xml';
+   Xml_Node (doc_, nd_rls_, 'Relationship', attrs_);
+
+   attrs_('Id')     := 'rId3';
+   attrs_('Type')   := 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme';
+   attrs_('Target') := 'theme/theme1.xml';
+   Xml_Node (doc_, nd_rls_, 'Relationship', attrs_);
+
+   s_ := workbook.sheets.first;
+   WHILE s_ IS NOT null LOOP
+      attrs_('Id')     := 'rId' || to_char(9+s_);
+      attrs_('Type')   := 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet';
+      attrs_('Target') := rep ('worksheets/sheet:P1.xml', s_);
+      Xml_Node (doc_, nd_rls_, 'Relationship', attrs_);
+      s_ := workbook.sheets.next(s_);
+   END LOOP;
+
+   Add1Xml (excel_, 'xl/_rels/workbook.xml.rels', Dbms_XmlDom.getXmlType(doc_).getClobVal);
+   Dbms_XmlDom.freeDocument (doc_);
+
+END Finish_Workbook_Rels;
+
+
 PROCEDURE Finish_Theme (
    excel_ IN OUT NOCOPY BLOB )
 IS BEGIN
@@ -3951,18 +3997,20 @@ BEGIN
    Finish_Rels (excel_);
    Finish_Styles (excel_);
    Finish_Workbook (excel_);
+   Finish_Workbook_Rels (excel_);
    Finish_Theme (excel_);
 
    -- Loop for each worksheet
    s_ := workbook.sheets.first;
    WHILE s_ IS not null LOOP
+
       col_min_ := 16384;
       col_max_ := 1;
       row_ix_ := workbook.sheets(s_).rows.first();
       WHILE row_ix_ IS not null LOOP
-         col_min_ := least(col_min_, workbook.sheets(s_).rows(row_ix_).first());
-         col_max_ := greatest(col_max_, workbook.sheets(s_).rows(row_ix_).last());
-         row_ix_ := workbook.sheets(s_).rows.next(row_ix_);
+         col_min_ := least (col_min_, workbook.sheets(s_).rows(row_ix_).first);
+         col_max_ := greatest (col_max_, workbook.sheets(s_).rows(row_ix_).last);
+         row_ix_  := workbook.sheets(s_).rows.next(row_ix_);
       END LOOP;
 
       addtxt2utf8blob_init(yyy_);
@@ -3972,120 +4020,126 @@ CASE WHEN workbook.sheets(s_).tabcolor IS not null THEN '<sheetPr><tabColor rgb=
 '<dimension ref="' || alfan_col(col_min_) || workbook.sheets(s_).rows.first() || ':' || alfan_col(col_max_) || workbook.sheets(s_).rows.last() || '"/>
 <sheetViews>
 <sheetView' || CASE WHEN s_ = 1 THEN ' tabSelected="1"' END || ' workbookViewId="0">', yyy_);
-    IF workbook.sheets(s_).freeze_rows > 0 AND workbook.sheets(s_).freeze_cols > 0 THEN
-      addtxt2utf8blob (
-        '<pane xSplit="' || workbook.sheets(s_).freeze_cols || '" '
-        || 'ySplit="' || workbook.sheets(s_).freeze_rows || '" '
-        || 'topLeftCell="' || alfan_col(workbook.sheets(s_).freeze_cols+1) || (workbook.sheets(s_).freeze_rows+1) || '" '
-        || 'activePane="bottomLeft" state="frozen"/>',
-        yyy_
-      );
-    ELSE
-      IF workbook.sheets(s_).freeze_rows > 0 THEN
-        addtxt2utf8blob (
-          '<pane ySplit="' || workbook.sheets(s_).freeze_rows || '" topLeftCell="A' ||
-            (workbook.sheets(s_).freeze_rows+1) || '" activePane="bottomLeft" state="frozen"/>',
-          yyy_
-        );
-      END IF;
-      IF workbook.sheets(s_).freeze_cols > 0 THEN
-        addtxt2utf8blob (
-          '<pane xSplit="' || workbook.sheets(s_).freeze_cols || '" topLeftCell="' ||
-          alfan_col(workbook.sheets(s_).freeze_cols+1) ||
-          '1" activePane="bottomLeft" state="frozen"/>',
-          yyy_
-        );
-      END IF;
-    END IF;
-    addtxt2utf8blob ('</sheetView>
-</sheetViews>
-<sheetFormatPr defaultRowHeight="15" x14ac:dyDescent="0.25"/>', yyy_);
-    IF workbook.sheets(s_).widths.count() > 0 THEN
-      addtxt2utf8blob ('<cols>', yyy_);
-      col_ix_ := workbook.sheets(s_).widths.first();
-      WHILE col_ix_ IS not null LOOP
-        addtxt2utf8blob ('<col min="' || col_ix_ || '" max="' || col_ix_ || '" width="' || to_char(workbook.sheets(s_).widths(col_ix_), 'TM9', 'NLS_NUMERIC_CHARACTERS=.,' ) || '" customWidth="1"/>', yyy_);
-        col_ix_ := workbook.sheets(s_).widths.next(col_ix_);
-      END LOOP;
-      addtxt2utf8blob('</cols>', yyy_);
-    END IF;
-    addtxt2utf8blob('<sheetData>', yyy_);
-    row_ix_ := workbook.sheets(s_).rows.first();
-    WHILE row_ix_ IS not null LOOP
-      IF workbook.sheets(s_).row_fmts.exists(row_ix_) AND workbook.sheets(s_).row_fmts(row_ix_).height IS not null THEN
-          addtxt2utf8blob( '<row r="' || row_ix_ || '" spans="' || col_min_ || ':' || col_max_ || '" customHeight="1" ht="'
-                         || to_char( workbook.sheets(s_).row_fmts(row_ix_).height, 'TM9', 'NLS_NUMERIC_CHARACTERS=.,' ) || '" >', yyy_ );
+      IF workbook.sheets(s_).freeze_rows > 0 AND workbook.sheets(s_).freeze_cols > 0 THEN
+         addtxt2utf8blob (
+            '<pane xSplit="' || workbook.sheets(s_).freeze_cols || '" '
+            || 'ySplit="' || workbook.sheets(s_).freeze_rows || '" '
+            || 'topLeftCell="' || alfan_col(workbook.sheets(s_).freeze_cols+1) || (workbook.sheets(s_).freeze_rows+1) || '" '
+            || 'activePane="bottomLeft" state="frozen"/>',
+            yyy_
+         );
       ELSE
-        addtxt2utf8blob( '<row r="' || row_ix_ || '" spans="' || col_min_ || ':' || col_max_ || '">', yyy_ );
+         IF workbook.sheets(s_).freeze_rows > 0 THEN
+            addtxt2utf8blob (
+               '<pane ySplit="' || workbook.sheets(s_).freeze_rows || '" topLeftCell="A' ||
+                  (workbook.sheets(s_).freeze_rows+1) || '" activePane="bottomLeft" state="frozen"/>',
+               yyy_
+            );
+         END IF;
+         IF workbook.sheets(s_).freeze_cols > 0 THEN
+            addtxt2utf8blob (
+               '<pane xSplit="' || workbook.sheets(s_).freeze_cols || '" topLeftCell="' ||
+               alfan_col(workbook.sheets(s_).freeze_cols+1) ||
+               '1" activePane="bottomLeft" state="frozen"/>',
+               yyy_
+            );
+         END IF;
       END IF;
-      col_ix_ := workbook.sheets(s_).rows(row_ix_).first();
-      WHILE col_ix_ IS not null LOOP
-        IF workbook.sheets(s_).rows(row_ix_)(col_ix_).formula_idx IS null THEN
-          formula_expr_ := null;
-        ELSE
-          formula_expr_ := '<f>' || workbook.formulas(workbook.sheets(s_).rows(row_ix_)(col_ix_).formula_idx) || '</f>';
-        END IF;
-        addtxt2utf8blob ('<c r="' || alfan_col(col_ix_) || row_ix_ || '"'
-          || ' ' || workbook.sheets(s_).rows(row_ix_)(col_ix_).style
-          || '>' || formula_expr_ || '<v>'
-          || to_char(workbook.sheets(s_).rows(row_ix_)(col_ix_).value, 'TM9', 'NLS_NUMERIC_CHARACTERS=.,' )
-          || '</v></c>', yyy_
-        );
-        col_ix_ := workbook.sheets(s_).rows(row_ix_).next(col_ix_);
+      addtxt2utf8blob ('</sheetView></sheetViews><sheetFormatPr defaultRowHeight="15" x14ac:dyDescent="0.25"/>', yyy_);
+      IF workbook.sheets(s_).widths.count() > 0 THEN
+         addtxt2utf8blob ('<cols>', yyy_);
+         col_ix_ := workbook.sheets(s_).widths.first();
+         WHILE col_ix_ IS not null LOOP
+            addtxt2utf8blob ('<col min="' || col_ix_ || '" max="' || col_ix_ || '" width="' || to_char(workbook.sheets(s_).widths(col_ix_), 'TM9', 'NLS_NUMERIC_CHARACTERS=.,' ) || '" customWidth="1"/>', yyy_);
+            col_ix_ := workbook.sheets(s_).widths.next(col_ix_);
+         END LOOP;
+         addtxt2utf8blob('</cols>', yyy_);
+      END IF;
+      addtxt2utf8blob('<sheetData>', yyy_);
+      row_ix_ := workbook.sheets(s_).rows.first();
+      WHILE row_ix_ IS not null LOOP
+         IF workbook.sheets(s_).row_fmts.exists(row_ix_) AND workbook.sheets(s_).row_fmts(row_ix_).height IS not null THEN
+             addtxt2utf8blob( '<row r="' || row_ix_ || '" spans="' || col_min_ || ':' || col_max_ || '" customHeight="1" ht="'
+                         || to_char( workbook.sheets(s_).row_fmts(row_ix_).height, 'TM9', 'NLS_NUMERIC_CHARACTERS=.,' ) || '" >', yyy_ );
+         ELSE
+            addtxt2utf8blob( '<row r="' || row_ix_ || '" spans="' || col_min_ || ':' || col_max_ || '">', yyy_ );
+         END IF;
+         col_ix_ := workbook.sheets(s_).rows(row_ix_).first();
+         WHILE col_ix_ IS not null LOOP
+            IF workbook.sheets(s_).rows(row_ix_)(col_ix_).formula_idx IS null THEN
+               formula_expr_ := null;
+            ELSE
+               formula_expr_ := '<f>' || workbook.formulas(workbook.sheets(s_).rows(row_ix_)(col_ix_).formula_idx) || '</f>';
+            END IF;
+            addtxt2utf8blob ('<c r="' || alfan_col(col_ix_) || row_ix_ || '"'
+               || ' ' || workbook.sheets(s_).rows(row_ix_)(col_ix_).style
+               || '>' || formula_expr_ || '<v>'
+               || to_char(workbook.sheets(s_).rows(row_ix_)(col_ix_).value, 'TM9', 'NLS_NUMERIC_CHARACTERS=.,' )
+               || '</v></c>', yyy_
+            );
+            col_ix_ := workbook.sheets(s_).rows(row_ix_).next(col_ix_);
+         END LOOP;
+         addtxt2utf8blob( '</row>', yyy_ );
+         row_ix_ := workbook.sheets(s_).rows.next(row_ix_);
       END LOOP;
-      addtxt2utf8blob( '</row>', yyy_ );
-      row_ix_ := workbook.sheets(s_).rows.next(row_ix_);
-    END LOOP;
-    addtxt2utf8blob( '</sheetData>', yyy_ );
-    FOR a IN 1 ..  workbook.sheets(s_).autofilters.count() LOOP
-      addtxt2utf8blob( '<autoFilter ref="' ||
-        alfan_col( nvl( workbook.sheets(s_).autofilters(a).column_start, col_min_ ) ) ||
-        nvl( workbook.sheets(s_).autofilters(a).row_start, workbook.sheets(s_).rows.first() ) || ':' ||
-        alfan_col(coalesce( workbook.sheets(s_).autofilters(a).column_end, workbook.sheets(s_).autofilters(a).column_start, col_max_)) ||
-        nvl(workbook.sheets(s_).autofilters(a).row_end, workbook.sheets(s_).rows.last()) || '"/>', yyy_);
-    END LOOP;
-    IF workbook.sheets(s_).mergecells.count() > 0 THEN
-      addtxt2utf8blob( '<mergeCells count="' || to_char(workbook.sheets(s_).mergecells.count()) || '">', yyy_);
-      FOR m IN 1 ..  workbook.sheets(s_).mergecells.count() LOOP
-        addtxt2utf8blob( '<mergeCell ref="' || workbook.sheets(s_).mergecells( m ) || '"/>', yyy_);
+      addtxt2utf8blob( '</sheetData>', yyy_ );
+      FOR a IN 1 ..  workbook.sheets(s_).autofilters.count() LOOP
+         addtxt2utf8blob( '<autoFilter ref="' ||
+            alfan_col( nvl( workbook.sheets(s_).autofilters(a).column_start, col_min_ ) ) ||
+            nvl( workbook.sheets(s_).autofilters(a).row_start, workbook.sheets(s_).rows.first() ) || ':' ||
+            alfan_col(coalesce( workbook.sheets(s_).autofilters(a).column_end, workbook.sheets(s_).autofilters(a).column_start, col_max_)) ||
+            nvl(workbook.sheets(s_).autofilters(a).row_end, workbook.sheets(s_).rows.last()) || '"/>',
+            yyy_
+         );
       END LOOP;
-      addtxt2utf8blob('</mergeCells>', yyy_);
-    END IF;
+      IF workbook.sheets(s_).mergecells.count() > 0 THEN
+         addtxt2utf8blob( '<mergeCells count="' || to_char(workbook.sheets(s_).mergecells.count()) || '">', yyy_);
+         FOR m IN 1 ..  workbook.sheets(s_).mergecells.count() LOOP
+            addtxt2utf8blob( '<mergeCell ref="' || workbook.sheets(s_).mergecells( m ) || '"/>', yyy_);
+         END LOOP;
+         addtxt2utf8blob('</mergeCells>', yyy_);
+      END IF;
 --
-    IF workbook.sheets(s_).validations.count() > 0 THEN
-      addtxt2utf8blob( '<dataValidations count="' || to_char( workbook.sheets(s_).validations.count() ) || '">', yyy_ );
-      FOR m IN 1 ..  workbook.sheets(s_).validations.count() LOOP
-        addtxt2utf8blob ('<dataValidation' ||
-            ' type="' || workbook.sheets(s_).validations(m).type || '"' ||
-            ' errorStyle="' || workbook.sheets(s_).validations(m).errorstyle || '"' ||
-            ' allowBlank="' || CASE WHEN nvl(workbook.sheets(s_).validations(m).allowBlank, true) THEN '1' ELSE '0' END || '"' ||
-            ' sqref="' || workbook.sheets(s_).validations(m).sqref || '"', yyy_ );
-        IF workbook.sheets(s_).validations(m).prompt IS not null THEN
-          addtxt2utf8blob(' showInputMessage="1" prompt="' || workbook.sheets(s_).validations(m).prompt || '"', yyy_);
-          IF workbook.sheets(s_).validations(m).title IS not null THEN
-            addtxt2utf8blob( ' promptTitle="' || workbook.sheets(s_).validations(m).title || '"', yyy_);
-          END IF;
-        END IF;
-        IF workbook.sheets(s_).validations(m).showerrormessage THEN
-          addtxt2utf8blob( ' showErrorMessage="1"', yyy_);
-          IF workbook.sheets(s_).validations(m).error_title IS not null THEN
-            addtxt2utf8blob( ' errorTitle="' || workbook.sheets(s_).validations(m).error_title || '"', yyy_);
-          END IF;
-          IF workbook.sheets(s_).validations(m).error_txt IS not null THEN
-            addtxt2utf8blob(' error="' || workbook.sheets(s_).validations(m).error_txt || '"', yyy_);
-          END IF;
-        END IF;
-        addtxt2utf8blob( '>', yyy_ );
-        IF workbook.sheets(s_).validations(m).formula1 IS not null THEN
-          addtxt2utf8blob ('<formula1>' || workbook.sheets(s_).validations(m).formula1 || '</formula1>', yyy_);
-        END IF;
-        IF workbook.sheets(s_).validations(m).formula2 IS not null THEN
-          addtxt2utf8blob ('<formula2>' || workbook.sheets(s_).validations(m).formula2 || '</formula2>', yyy_);
-        END IF;
-        addtxt2utf8blob ('</dataValidation>', yyy_);
-      END LOOP;
-      addtxt2utf8blob ('</dataValidations>', yyy_);
-    END IF;
+      IF workbook.sheets(s_).validations.count() > 0 THEN
+         addtxt2utf8blob (
+            '<dataValidations count="' || to_char( workbook.sheets(s_).validations.count() ) || '">', yyy_
+         );
+         FOR m IN 1 ..  workbook.sheets(s_).validations.count() LOOP
+            addtxt2utf8blob ('<dataValidation' ||
+               ' type="' || workbook.sheets(s_).validations(m).type || '"' ||
+               ' errorStyle="' || workbook.sheets(s_).validations(m).errorstyle || '"' ||
+               ' allowBlank="' || CASE WHEN nvl(workbook.sheets(s_).validations(m).allowBlank, true) THEN '1' ELSE '0' END || '"' ||
+               ' sqref="' || workbook.sheets(s_).validations(m).sqref || '"', yyy_ );
+            IF workbook.sheets(s_).validations(m).prompt IS not null THEN
+               addtxt2utf8blob(' showInputMessage="1" prompt="' || workbook.sheets(s_).validations(m).prompt || '"', yyy_);
+               IF workbook.sheets(s_).validations(m).title IS not null THEN
+                  addtxt2utf8blob( ' promptTitle="' || workbook.sheets(s_).validations(m).title || '"', yyy_);
+               END IF;
+            END IF;
+            IF workbook.sheets(s_).validations(m).showerrormessage THEN
+               addtxt2utf8blob (' showErrorMessage="1"', yyy_);
+               IF workbook.sheets(s_).validations(m).error_title IS not null THEN
+                  addtxt2utf8blob (
+                     ' errorTitle="' || workbook.sheets(s_).validations(m).error_title || '"', yyy_
+                  );
+               END IF;
+               IF workbook.sheets(s_).validations(m).error_txt IS not null THEN
+                  addtxt2utf8blob (
+                     ' error="' || workbook.sheets(s_).validations(m).error_txt || '"', yyy_
+                  );
+               END IF;
+            END IF;
+            addtxt2utf8blob( '>', yyy_ );
+            IF workbook.sheets(s_).validations(m).formula1 IS not null THEN
+               addtxt2utf8blob ('<formula1>' || workbook.sheets(s_).validations(m).formula1 || '</formula1>', yyy_);
+            END IF;
+            IF workbook.sheets(s_).validations(m).formula2 IS not null THEN
+               addtxt2utf8blob ('<formula2>' || workbook.sheets(s_).validations(m).formula2 || '</formula2>', yyy_);
+            END IF;
+            addtxt2utf8blob ('</dataValidation>', yyy_);
+         END LOOP;
+         addtxt2utf8blob ('</dataValidations>', yyy_);
+      END IF;
 
       IF workbook.sheets(s_).hyperlinks.count() > 0 THEN
          addtxt2utf8blob ('<hyperlinks>', yyy_);
@@ -4113,52 +4167,39 @@ CASE WHEN workbook.sheets(s_).tabcolor IS not null THEN '<sheetPr><tabColor rgb=
       s_ := workbook.sheets.next(s_);
 
    END LOOP;
+   -- END Loop for each worksheet
 
-  xxx_ := '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/>
-<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
-<Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme" Target="theme/theme1.xml"/>';
-  s_ := workbook.sheets.first;
-  WHILE s_ IS not null LOOP
-    xxx_ := xxx_ || ( '
-<Relationship Id="rId' || (9+s_) || '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet' || s_ || '.xml"/>' );
-    s_ := workbook.sheets.next(s_);
-  END LOOP;
-  xxx_ := xxx_ || '</Relationships>';
-  add1xml (excel_, 'xl/_rels/workbook.xml.rels', xxx_);
-
-  IF workbook.images.count > 0 THEN
-    xxx_ := '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+   IF workbook.images.count > 0 THEN
+      xxx_ := '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">';
-    FOR i_ IN 1 .. workbook.images.count LOOP
-       add1file (excel_, 'xl/media/image' || i_ || '.' || workbook.images(i_).extension, workbook.images(i_).img_blob );
-       xxx_ := xxx_ || '<Relationship Id="rId' || i_ || '" '
-                    || 'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" '
-                    || 'Target="../media/image' || i_ || '.' || workbook.images(i_).extension
-                    || '"/>';
-    END LOOP;
-    xxx_ := xxx_ || '</Relationships>';
-    add1xml (excel_, 'xl/drawings/_rels/drawing1.xml.rels', xxx_);
-  END IF;
+      FOR i_ IN 1 .. workbook.images.count LOOP
+         add1file (excel_, 'xl/media/image' || i_ || '.' || workbook.images(i_).extension, workbook.images(i_).img_blob );
+         xxx_ := xxx_ || '<Relationship Id="rId' || i_ || '" '
+                      || 'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" '
+                      || 'Target="../media/image' || i_ || '.' || workbook.images(i_).extension
+                      || '"/>';
+      END LOOP;
+      xxx_ := xxx_ || '</Relationships>';
+      add1xml (excel_, 'xl/drawings/_rels/drawing1.xml.rels', xxx_);
+   END IF;
 
-  addtxt2utf8blob_init(yyy_);
-  addtxt2utf8blob ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+   addtxt2utf8blob_init(yyy_);
+   addtxt2utf8blob ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="' || workbook.str_cnt || '" uniqueCount="' || workbook.strings.count() || '">',
-    yyy_
-  );
-  FOR i IN 0 .. workbook.str_ind.count() - 1 LOOP
-    addtxt2utf8blob (
-       '<si><t xml:space="preserve">' ||
-       dbms_xmlgen.convert(substr(workbook.str_ind(i), 1, 32000)) || '</t></si>', yyy_
-    );
-  END LOOP;
-  addtxt2utf8blob ('</sst>', yyy_);
-  addtxt2utf8blob_finish(yyy_);
-  add1file (excel_, 'xl/sharedStrings.xml', yyy_);
-  finish_zip (excel_);
-  Clear_Workbook;
-  RETURN excel_;
+      yyy_
+   );
+   FOR i IN 0 .. workbook.str_ind.count() - 1 LOOP
+      addtxt2utf8blob (
+         '<si><t xml:space="preserve">' ||
+         dbms_xmlgen.convert(substr(workbook.str_ind(i), 1, 32000)) || '</t></si>', yyy_
+      );
+   END LOOP;
+   addtxt2utf8blob ('</sst>', yyy_);
+   addtxt2utf8blob_finish(yyy_);
+   add1file (excel_, 'xl/sharedStrings.xml', yyy_);
+   finish_zip (excel_);
+   Clear_Workbook;
+   RETURN excel_;
 END Finish;
 
 PROCEDURE Save (
