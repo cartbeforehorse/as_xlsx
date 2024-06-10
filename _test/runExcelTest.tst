@@ -1,5 +1,5 @@
 PL/SQL Developer Test script 3.0
-66
+64
 DECLARE
    file_end_   CONSTANT VARCHAR2(20) := Cbh_Utils_API.Rep ('_:P1.xlsx', to_char(sysdate,'YYYYMMDD-HH24MI'));
    file_start_ CONSTANT VARCHAR2(20) := 'TestOut_';
@@ -7,13 +7,12 @@ DECLARE
 BEGIN
 
    -- Comment File
-   /*As_Xlsx.Clear_Workbook;
    As_Xlsx.Init_Workbook;
    As_Xlsx.Set_Sheet_Name (1, 'Parameters');
    As_Xlsx.Comment (2, 2, 'This is a silly dingle dongle', 'Bob the Builder', 300, 200, 1);
    file_name_ := file_start_ || 'Comment' || file_end_;
    As_Xlsx.Save (As_Xlsx.Finish, 'EXCEL_OUT', file_name_);
-   Dbms_Output.Put_Line (file_name_ || ' saved to filesystem');*/
+   Dbms_Output.Put_Line (file_name_ || ' saved to filesystem');
 
    -- Image File
    As_Xlsx.Init_Workbook;
@@ -46,7 +45,6 @@ BEGIN
    Dbms_Output.Put_Line (file_name_ || ' saved to filesystem');
 
    -- Comment and Image file
-   /*As_Xlsx.Clear_Workbook;
    As_Xlsx.Init_Workbook;
    As_Xlsx.Set_Sheet_Name (1, 'Parameters');
    As_Xlsx.Comment (2, 2, 'This is a silly dingle dongle', 'Bob the Builder', 300, 200, 1);
@@ -63,7 +61,7 @@ BEGIN
    );
    file_name_ := file_start_ || 'CommentAndImage' || file_end_;
    As_Xlsx.Save (As_Xlsx.Finish, 'EXCEL_OUT', file_name_);
-   Dbms_Output.Put_Line (file_name_ || ' saved to filesystem');*/
+   Dbms_Output.Put_Line (file_name_ || ' saved to filesystem');
 
 END Make;
 0
