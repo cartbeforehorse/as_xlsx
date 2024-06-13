@@ -781,7 +781,7 @@ TYPE tp_book IS RECORD (
    images        tp_images
 );
 
-workbook              tp_book;
+wb_                   tp_book;
 g_useXf_              BOOLEAN := true;
 g_addtxt2utf8blob_tmp VARCHAR2(32767);
 
@@ -1255,6 +1255,9 @@ FUNCTION Alfan_Range (
    col_br_ IN PLS_INTEGER,
    row_br_ IN PLS_INTEGER ) RETURN VARCHAR2
 IS BEGIN
+   IF col_tl_ IS null OR row_tl_ IS null OR col_br_ IS null OR row_br_ IS null THEN
+      RETURN 'A1';
+   END IF;
    RETURN Alfan_Cell (col_tl_, row_tl_) || ':' || Alfan_Cell (col_br_, row_br_);
 END Alfan_Range;
 
@@ -1278,9 +1281,9 @@ FUNCTION Get_Cell_Value_Num (
    row_    IN PLS_INTEGER,
    sheet_  IN PLS_INTEGER := null ) RETURN NUMBER
 IS
-   sh_ PLS_INTEGER  := nvl(sheet_, workbook.sheets.count);
+   sh_ PLS_INTEGER  := nvl(sheet_, wb_.sheets.count);
 BEGIN
-   RETURN workbook.sheets(sh_).rows(row_)(col_).ora_value.num_val;
+   RETURN wb_.sheets(sh_).rows(row_)(col_).ora_value.num_val;
 END Get_Cell_Value_Num;
 
 FUNCTION Get_Cell_Value_Str (
@@ -1288,9 +1291,9 @@ FUNCTION Get_Cell_Value_Str (
    row_    IN PLS_INTEGER,
    sheet_  IN PLS_INTEGER := null ) RETURN VARCHAR2
 IS
-   sh_ PLS_INTEGER := nvl(sheet_, workbook.sheets.count);
+   sh_ PLS_INTEGER := nvl(sheet_, wb_.sheets.count);
 BEGIN
-   RETURN workbook.sheets(sh_).rows(row_)(col_).ora_value.str_val;
+   RETURN wb_.sheets(sh_).rows(row_)(col_).ora_value.str_val;
 END Get_Cell_Value_Str;
 
 FUNCTION Get_Cell_Value_Date (
@@ -1298,9 +1301,9 @@ FUNCTION Get_Cell_Value_Date (
    row_    IN PLS_INTEGER,
    sheet_  IN PLS_INTEGER := null ) RETURN DATE
 IS
-   sh_ PLS_INTEGER := nvl(sheet_, workbook.sheets.count);
+   sh_ PLS_INTEGER := nvl(sheet_, wb_.sheets.count);
 BEGIN
-   RETURN workbook.sheets(sh_).rows(row_)(col_).ora_value.dt_val;
+   RETURN wb_.sheets(sh_).rows(row_)(col_).ora_value.dt_val;
 END Get_Cell_Value_Date;
 
 FUNCTION Get_Cell_Value (
@@ -1308,13 +1311,13 @@ FUNCTION Get_Cell_Value (
    row_    IN PLS_INTEGER,
    sheet_  IN PLS_INTEGER := null ) RETURN VARCHAR2
 IS
-   sh_ PLS_INTEGER := nvl(sheet_, workbook.sheets.count);
+   sh_ PLS_INTEGER := nvl(sheet_, wb_.sheets.count);
 BEGIN
-   IF workbook.sheets(sh_).rows(row_)(col_).datatype = 'string' THEN
+   IF wb_.sheets(sh_).rows(row_)(col_).datatype = 'string' THEN
       RETURN Get_Cell_Value_Str (col_, row_, sheet_);
-   ELSIF workbook.sheets(sh_).rows(row_)(col_).datatype = 'number' THEN
+   ELSIF wb_.sheets(sh_).rows(row_)(col_).datatype = 'number' THEN
       RETURN to_char(Get_Cell_VAlue_Num (col_, row_, sheet_));
-   ELSIF workbook.sheets(sh_).rows(row_)(col_).datatype = 'date' THEN
+   ELSIF wb_.sheets(sh_).rows(row_)(col_).datatype = 'date' THEN
       RETURN to_char (Get_Cell_Value_Date (col_, row_, sheet_), 'YYYY-MM-DD-HH24:MI');
    END IF;
 END Get_Cell_Value;
@@ -1327,74 +1330,74 @@ END Get_Cell_Value;
 --
 PROCEDURE Clear_Workbook
 IS
-   s_      PLS_INTEGER := workbook.sheets.first;
+   s_      PLS_INTEGER := wb_.sheets.first;
    row_ix_ PLS_INTEGER;
 BEGIN
    WHILE s_ IS NOT null LOOP
-      row_ix_ := workbook.sheets(s_).rows.first();
+      row_ix_ := wb_.sheets(s_).rows.first();
       WHILE row_ix_ IS NOT null LOOP
-         workbook.sheets(s_).rows(row_ix_).delete();
-         row_ix_ := workbook.sheets(s_).rows.next(row_ix_);
+         wb_.sheets(s_).rows(row_ix_).delete();
+         row_ix_ := wb_.sheets(s_).rows.next(row_ix_);
       END LOOP;
-      workbook.sheets(s_).rows.delete();
-      workbook.sheets(s_).widths.delete();
-      workbook.sheets(s_).autofilters.delete();
-      workbook.sheets(s_).hyperlinks.delete();
-      workbook.sheets(s_).col_fmts.delete();
-      workbook.sheets(s_).row_fmts.delete();
-      workbook.sheets(s_).comments.delete();
-      workbook.sheets(s_).mergecells.delete();
-      workbook.sheets(s_).validations.delete();
-      workbook.sheets(s_).drawings.delete();
-      s_ := workbook.sheets.next(s_);
+      wb_.sheets(s_).rows.delete();
+      wb_.sheets(s_).widths.delete();
+      wb_.sheets(s_).autofilters.delete();
+      wb_.sheets(s_).hyperlinks.delete();
+      wb_.sheets(s_).col_fmts.delete();
+      wb_.sheets(s_).row_fmts.delete();
+      wb_.sheets(s_).comments.delete();
+      wb_.sheets(s_).mergecells.delete();
+      wb_.sheets(s_).validations.delete();
+      wb_.sheets(s_).drawings.delete();
+      s_ := wb_.sheets.next(s_);
    END LOOP;
-   workbook.strings.delete();
-   workbook.str_ind.delete();
-   workbook.fonts.delete();
-   workbook.fills.delete();
-   workbook.borders.delete();
-   workbook.numFmts.delete();
-   workbook.cellXfs.delete();
-   workbook.defined_names.delete();
-   workbook.formulas.delete();
-   FOR i_ IN 1 .. workbook.images.count LOOP
-      dbms_lob.freeTemporary (workbook.images(i_).img_blob);
+   wb_.strings.delete();
+   wb_.str_ind.delete();
+   wb_.fonts.delete();
+   wb_.fills.delete();
+   wb_.borders.delete();
+   wb_.numFmts.delete();
+   wb_.cellXfs.delete();
+   wb_.defined_names.delete();
+   wb_.formulas.delete();
+   FOR i_ IN 1 .. wb_.images.count LOOP
+      dbms_lob.freeTemporary (wb_.images(i_).img_blob);
    END LOOP;
-   workbook.images.delete();
-   workbook := null;
+   wb_.images.delete();
+   wb_ := null;
 END Clear_Workbook;
 
 PROCEDURE Set_Tabcolor (
    tabcolor_ VARCHAR2,
    sheet_    PLS_INTEGER := null )
 IS
-   sh_ PLS_INTEGER := nvl(sheet_, workbook.sheets.count);
+   sh_ PLS_INTEGER := nvl(sheet_, wb_.sheets.count);
 BEGIN
-   workbook.sheets(sh_).tabcolor := substr(tabcolor_, 1, 8);
+   wb_.sheets(sh_).tabcolor := substr(tabcolor_, 1, 8);
 END Set_Tabcolor;
 
 FUNCTION New_Sheet (
    sheetname_ VARCHAR2 := null,
    tab_color_ VARCHAR2 := null ) RETURN PLS_INTEGER
 IS
-   s_ PLS_INTEGER := workbook.sheets.count + 1;
+   s_ PLS_INTEGER := wb_.sheets.count + 1;
 BEGIN
-   workbook.sheets(s_).name := nvl(dbms_xmlgen.convert(translate(sheetname_, 'a/\[]*:?', 'a')), 'Sheet'||s_);
-   IF workbook.strings.count = 0 THEN
-      workbook.str_cnt := 0;
+   wb_.sheets(s_).name := nvl(dbms_xmlgen.convert(translate(sheetname_, 'a/\[]*:?', 'a')), 'Sheet'||s_);
+   IF wb_.strings.count = 0 THEN
+      wb_.str_cnt := 0;
    END IF;
-   IF workbook.fonts.count = 0 THEN
-      workbook.fontid := Get_Font('Calibri');
+   IF wb_.fonts.count = 0 THEN
+      wb_.fontid := Get_Font('Calibri');
    END IF;
-   IF workbook.fills.count = 0 THEN
+   IF wb_.fills.count = 0 THEN
       Get_Fill('none');
       Get_Fill('gray125');
    END IF;
-   IF workbook.borders.count = 0 THEN
+   IF wb_.borders.count = 0 THEN
       Get_Border ('', '', '', '');
    END IF;
    Set_TabColor(tab_color_, s_);
-   workbook.sheets(s_).fontid := workbook.fontid;
+   wb_.sheets(s_).fontid := wb_.fontid;
    RETURN s_;
 END New_Sheet;
 
@@ -1411,7 +1414,7 @@ PROCEDURE Set_Sheet_Name (
    sheet_  IN PLS_INTEGER,
    name_   IN VARCHAR2 )
 IS BEGIN
-   workbook.sheets(sheet_).name := nvl(dbms_xmlgen.convert(translate(name_, 'a/\[]*:?', 'a')), 'Sheet'||sheet_);
+   wb_.sheets(sheet_).name := nvl(dbms_xmlgen.convert(translate(name_, 'a/\[]*:?', 'a')), 'Sheet'||sheet_);
 END Set_Sheet_Name;
 
 PROCEDURE Set_Col_Width (
@@ -1431,12 +1434,12 @@ BEGIN
       nr_chr_ := length(translate(format_, 'a\"', 'a'));
    END IF;
    width_ := trunc((nr_chr_*7+5)/7*256)/256; -- assume default 11 point Calibri
-   IF workbook.sheets(sheet_).widths.exists(col_) THEN
-      workbook.sheets(sheet_).widths(col_) := greatest(
-         workbook.sheets(sheet_).widths(col_), width_
+   IF wb_.sheets(sheet_).widths.exists(col_) THEN
+      wb_.sheets(sheet_).widths(col_) := greatest(
+         wb_.sheets(sheet_).widths(col_), width_
       );
    ELSE
-      workbook.sheets(sheet_).widths(col_) := greatest(width_, 8.43);
+      wb_.sheets(sheet_).widths(col_) := greatest(width_, 8.43);
    END IF;
 END Set_Col_Width;
 
@@ -1470,19 +1473,19 @@ BEGIN
    IF format_ is null THEN
       RETURN 0;
    END IF;
-   cnt_ := workbook.numFmts.count;
+   cnt_ := wb_.numFmts.count;
    FOR i_ in 1 .. cnt_ LOOP
-      IF workbook.numFmts(i_).formatCode = format_ THEN
-         numFmtId_ := workbook.numFmts(i_).numFmtId;
+      IF wb_.numFmts(i_).formatCode = format_ THEN
+         numFmtId_ := wb_.numFmts(i_).numFmtId;
          EXIT;
       END IF;
    END LOOP;
    IF numFmtId_ is null THEN
-      numFmtId_ := CASE WHEN cnt_ = 0 THEN 164 ELSE workbook.numFmts(cnt_).numFmtId + 1 END;
+      numFmtId_ := CASE WHEN cnt_ = 0 THEN 164 ELSE wb_.numFmts(cnt_).numFmtId + 1 END;
       cnt_ := cnt_ + 1;
-      workbook.numFmts(cnt_).numFmtId   := numFmtId_;
-      workbook.numFmts(cnt_).formatCode := format_;
-      workbook.numFmtIndexes(numFmtId_) := cnt_;
+      wb_.numFmts(cnt_).numFmtId   := numFmtId_;
+      wb_.numFmts(cnt_).formatCode := format_;
+      wb_.numFmtIndexes(numFmtId_) := cnt_;
    END IF;
    RETURN numFmtId_;
 END Get_NumFmt;
@@ -1509,9 +1512,9 @@ IS
    ix_ PLS_INTEGER := Get_Font (name_, family_, fontsize_, theme_, underline_, italic_, bold_, rgb_);
 BEGIN
    IF sheet_ IS null THEN
-      workbook.fontid := ix_;
+      wb_.fontid := ix_;
    ELSE
-      workbook.sheets(sheet_).fontid := ix_;
+      wb_.sheets(sheet_).fontid := ix_;
    END IF;
 END Set_Font;
 
@@ -1527,32 +1530,32 @@ FUNCTION Get_Font (
 IS
    ix_ PLS_INTEGER;
 BEGIN
-   IF workbook.fonts.count > 0 THEN
-      FOR f_ IN 0 .. workbook.fonts.count - 1 LOOP
-         IF (     workbook.fonts(f_).name      = name_
-              AND workbook.fonts(f_).family    = family_
-              AND workbook.fonts(f_).fontsize  = fontsize_
-              AND workbook.fonts(f_).theme     = theme_
-              AND workbook.fonts(f_).underline = underline_
-              AND workbook.fonts(f_).italic    = italic_
-              AND workbook.fonts(f_).bold      = bold_
-              AND (     workbook.fonts(f_).rgb = rgb_
-                    OR (workbook.fonts(f_).rgb IS null AND rgb_ IS null)
+   IF wb_.fonts.count > 0 THEN
+      FOR f_ IN 0 .. wb_.fonts.count - 1 LOOP
+         IF (     wb_.fonts(f_).name      = name_
+              AND wb_.fonts(f_).family    = family_
+              AND wb_.fonts(f_).fontsize  = fontsize_
+              AND wb_.fonts(f_).theme     = theme_
+              AND wb_.fonts(f_).underline = underline_
+              AND wb_.fonts(f_).italic    = italic_
+              AND wb_.fonts(f_).bold      = bold_
+              AND (     wb_.fonts(f_).rgb = rgb_
+                    OR (wb_.fonts(f_).rgb IS null AND rgb_ IS null)
               )
          ) THEN
             RETURN f_;
          END IF;
       END LOOP;
    END IF;
-   ix_ := workbook.fonts.count;
-   workbook.fonts(ix_).name      := name_;
-   workbook.fonts(ix_).family    := family_;
-   workbook.fonts(ix_).fontsize  := fontsize_;
-   workbook.fonts(ix_).theme     := theme_;
-   workbook.fonts(ix_).underline := underline_;
-   workbook.fonts(ix_).italic    := italic_;
-   workbook.fonts(ix_).bold      := bold_;
-   workbook.fonts(ix_).rgb       := rgb_;
+   ix_ := wb_.fonts.count;
+   wb_.fonts(ix_).name      := name_;
+   wb_.fonts(ix_).family    := family_;
+   wb_.fonts(ix_).fontsize  := fontsize_;
+   wb_.fonts(ix_).theme     := theme_;
+   wb_.fonts(ix_).underline := underline_;
+   wb_.fonts(ix_).italic    := italic_;
+   wb_.fonts(ix_).bold      := bold_;
+   wb_.fonts(ix_).rgb       := rgb_;
    RETURN ix_;
 END Get_Font;
 
@@ -1564,20 +1567,20 @@ FUNCTION Get_Fill (
 IS
    ix_ PLS_INTEGER;
 BEGIN
-   IF workbook.fills.count > 0 THEN
-      FOR f_ IN 0 .. workbook.fills.count - 1 LOOP
-         IF (   workbook.fills(f_).patternType = patternType_
-            AND nvl(workbook.fills(f_).fgRGB, 'x') = nvl(upper(fgRGB_), 'x')
-            AND nvl(workbook.fills(f_).bgRGB, 'x') = nvl(upper(bgRGB_), 'x')
+   IF wb_.fills.count > 0 THEN
+      FOR f_ IN 0 .. wb_.fills.count - 1 LOOP
+         IF (   wb_.fills(f_).patternType = patternType_
+            AND nvl(wb_.fills(f_).fgRGB, 'x') = nvl(upper(fgRGB_), 'x')
+            AND nvl(wb_.fills(f_).bgRGB, 'x') = nvl(upper(bgRGB_), 'x')
          ) THEN
             RETURN f_;
          END IF;
       END LOOP;
    END IF;
-   ix_ := workbook.fills.count;
-   workbook.fills(ix_).patternType := patternType_;
-   workbook.fills(ix_).fgRGB       := upper(fgRGB_);
-   workbook.fills(ix_).bgRGB       := upper(bgRGB_);
+   ix_ := wb_.fills.count;
+   wb_.fills(ix_).patternType := patternType_;
+   wb_.fills(ix_).fgRGB       := upper(fgRGB_);
+   wb_.fills(ix_).bgRGB       := upper(bgRGB_);
    RETURN ix_;
 END Get_Fill;
 
@@ -1609,22 +1612,22 @@ FUNCTION Get_Border (
 IS
    ix_ PLS_INTEGER;
 BEGIN
-   IF workbook.borders.count > 0 THEN
-      FOR b_ IN 0 .. workbook.borders.count - 1 LOOP
-         IF (   nvl(workbook.borders(b_).top,    'x') = nvl(top_, 'x')
-            AND nvl(workbook.borders(b_).bottom, 'x') = nvl(bottom_, 'x')
-            AND nvl(workbook.borders(b_).left,   'x') = nvl(left_, 'x')
-            AND nvl(workbook.borders(b_).right,  'x') = nvl(right_, 'x')
+   IF wb_.borders.count > 0 THEN
+      FOR b_ IN 0 .. wb_.borders.count - 1 LOOP
+         IF (   nvl(wb_.borders(b_).top,    'x') = nvl(top_, 'x')
+            AND nvl(wb_.borders(b_).bottom, 'x') = nvl(bottom_, 'x')
+            AND nvl(wb_.borders(b_).left,   'x') = nvl(left_, 'x')
+            AND nvl(wb_.borders(b_).right,  'x') = nvl(right_, 'x')
          ) THEN
             RETURN b_;
          END IF;
       END LOOP;
    END IF;
-   ix_ := workbook.borders.count;
-   workbook.borders(ix_).top    := top_;
-   workbook.borders(ix_).bottom := bottom_;
-   workbook.borders(ix_).left   := left_;
-   workbook.borders(ix_).right  := right_;
+   ix_ := wb_.borders.count;
+   wb_.borders(ix_).top    := top_;
+   wb_.borders(ix_).bottom := bottom_;
+   wb_.borders(ix_).left   := left_;
+   wb_.borders(ix_).right  := right_;
    RETURN ix_;
 END Get_Border;
 
@@ -1656,10 +1659,10 @@ PROCEDURE Add_Border_To_Cell (
    right_   IN VARCHAR2    := '',
    sheet_   IN PLS_INTEGER := null )
 IS
-   sh_          PLS_INTEGER  := nvl(sheet_, workbook.sheets.count);
+   sh_          PLS_INTEGER  := nvl(sheet_, wb_.sheets.count);
    Xf_          tp_Xf_fmt    := Get_Cell_Xff(sh_, col_, row_);
-   cell_border_ tp_border    := workbook.borders(Xf_.borderId);
-   cell_dt_     VARCHAR2(30) := workbook.sheets(sh_).rows(row_)(col_).datatype;
+   cell_border_ tp_border    := wb_.borders(Xf_.borderId);
+   cell_dt_     VARCHAR2(30) := wb_.sheets(sh_).rows(row_)(col_).datatype;
    border_id_   PLS_INTEGER;
 BEGIN
 
@@ -1673,17 +1676,17 @@ BEGIN
 
    IF cell_dt_ = 'number' THEN
       Cell (
-         col_, row_, Get_Cell_Value_Num (col_, row_, sh_), --workbook.sheets(sh_).rows(row_)(col_).ora_value.num_val,
+         col_, row_, Get_Cell_Value_Num (col_, row_, sh_), --wb_.sheets(sh_).rows(row_)(col_).ora_value.num_val,
          Xf_.numFmtId, Xf_.fontId, Xf_.fillId, border_id_, Xf_.alignment, sh_
       );
    ELSIF cell_dt_ = 'string' THEN
       Cell (
-         col_, row_, Get_Cell_Value_Str (col_, row_, sh_), --workbook.sheets(sh_).rows(row_)(col_).ora_value.str_val,
+         col_, row_, Get_Cell_Value_Str (col_, row_, sh_), --wb_.sheets(sh_).rows(row_)(col_).ora_value.str_val,
          Xf_.numFmtId, Xf_.fontId, Xf_.fillId, border_id_, Xf_.alignment, sh_
       );
    ELSIF cell_dt_ = 'date' THEN
       Cell (
-         col_, row_, Get_Cell_Value_Date (col_, row_, sh_), --workbook.sheets(sh_).rows(row_)(col_).ora_value.dt_val,
+         col_, row_, Get_Cell_Value_Date (col_, row_, sh_), --wb_.sheets(sh_).rows(row_)(col_).ora_value.dt_val,
          Xf_.numFmtId, Xf_.fontId, Xf_.fillId, border_id_, Xf_.alignment, sh_
       );
    END IF;
@@ -1704,7 +1707,7 @@ PROCEDURE Add_Border_To_Range (
    style_     IN VARCHAR2    := 'medium', -- thin|medium|thick|dotted...
    sheet_     IN PLS_INTEGER := null )
 IS
-   sh_         PLS_INTEGER := nvl(sheet_, workbook.sheets.count);
+   sh_         PLS_INTEGER := nvl(sheet_, wb_.sheets.count);
    col_start_  PLS_INTEGER := cell_left_;
    col_end_    PLS_INTEGER := cell_left_ + width_ - 1;
    row_start_  PLS_INTEGER := cell_top_;
@@ -1784,24 +1787,24 @@ END Get_Alignment;
 FUNCTION Get_Or_Create_XfId (
    Xf_ tp_Xf_fmt ) RETURN PLS_INTEGER
 IS
-   xf_count_ PLS_INTEGER := workbook.cellXfs.count;
+   xf_count_ PLS_INTEGER := wb_.cellXfs.count;
    xfId_     PLS_INTEGER;
 BEGIN
    FOR i_ IN 1 .. xf_count_ LOOP
-      IF (   workbook.cellXfs(i_).numFmtId = Xf_.numFmtId
-         AND workbook.cellXfs(i_).fontId = Xf_.fontId
-         AND workbook.cellXfs(i_).fillId = Xf_.fillId
-         AND workbook.cellXfs(i_).borderId = Xf_.borderId
-         AND nvl(workbook.cellXfs(i_).alignment.vertical, 'x') = nvl (Xf_.alignment.vertical, 'x')
-         AND nvl(workbook.cellXfs(i_).alignment.horizontal, 'x') = nvl (Xf_.alignment.horizontal, 'x')
-         AND nvl(workbook.cellXfs(i_).alignment.wrapText, false) = nvl (Xf_.alignment.wrapText, false)
+      IF (   wb_.cellXfs(i_).numFmtId = Xf_.numFmtId
+         AND wb_.cellXfs(i_).fontId = Xf_.fontId
+         AND wb_.cellXfs(i_).fillId = Xf_.fillId
+         AND wb_.cellXfs(i_).borderId = Xf_.borderId
+         AND nvl(wb_.cellXfs(i_).alignment.vertical, 'x') = nvl (Xf_.alignment.vertical, 'x')
+         AND nvl(wb_.cellXfs(i_).alignment.horizontal, 'x') = nvl (Xf_.alignment.horizontal, 'x')
+         AND nvl(wb_.cellXfs(i_).alignment.wrapText, false) = nvl (Xf_.alignment.wrapText, false)
       ) THEN
          XfId_ := i_;
          exit;
       END IF;
    END LOOP;
    IF XfId_ IS null THEN -- we didn't find a matching style, so create a new one
-      workbook.cellXfs(xf_count_+1) := Xf_;
+      wb_.cellXfs(xf_count_+1) := Xf_;
       xfId_ := xf_count_ + 1;
    END IF;
    RETURN xfId_;
@@ -1827,14 +1830,14 @@ BEGIN
       RETURN '';
    END IF;
 
-   IF workbook.sheets(sheet_).col_fmts.exists(col_) THEN
-      col_Xf_ := workbook.sheets(sheet_).col_fmts(col_);
+   IF wb_.sheets(sheet_).col_fmts.exists(col_) THEN
+      col_Xf_ := wb_.sheets(sheet_).col_fmts(col_);
    END IF;
-   IF workbook.sheets(sheet_).row_fmts.exists(row_) THEN
-      row_Xf_ := workbook.sheets(sheet_).row_fmts(row_);
+   IF wb_.sheets(sheet_).row_fmts.exists(row_) THEN
+      row_Xf_ := wb_.sheets(sheet_).row_fmts(row_);
    END IF;
 
-   Xf_.numFmtId  := coalesce (numFmtId_, col_Xf_.numFmtId, row_Xf_.numFmtId, workbook.sheets(sheet_).fontid, workbook.fontid);
+   Xf_.numFmtId  := coalesce (numFmtId_, col_Xf_.numFmtId, row_Xf_.numFmtId, wb_.sheets(sheet_).fontid, wb_.fontid);
    Xf_.fontId    := coalesce (fontId_, col_Xf_.fontId, row_Xf_.fontId, 0);
    Xf_.fillId    := coalesce (fillId_, col_Xf_.fillId, row_Xf_.fillId, 0);
    Xf_.borderId  := coalesce (borderId_, col_Xf_.borderId, row_Xf_.borderId, 0);
@@ -1852,7 +1855,7 @@ BEGIN
    END IF;
 
    IF Xf_.numFmtId > 0 THEN
-      Set_Col_Width (sheet_, col_, workbook.numFmts(workbook.numFmtIndexes(Xf_.numFmtId)).formatCode);
+      Set_Col_Width (sheet_, col_, wb_.numFmts(wb_.numFmtIndexes(Xf_.numFmtId)).formatCode);
    END IF;
 
    XfId_ := Get_Or_Create_XfId (Xf_);
@@ -1876,10 +1879,10 @@ FUNCTION Get_Cell_XfId (
 IS
    style_tag_ VARCHAR2(50);
 BEGIN
-   IF workbook.sheets(sheet_).rows.exists(row_) AND
-      workbook.sheets(sheet_).rows(row_).exists(col_)
+   IF wb_.sheets(sheet_).rows.exists(row_) AND
+      wb_.sheets(sheet_).rows(row_).exists(col_)
    THEN
-      style_tag_ := workbook.sheets(sheet_).rows(row_)(col_).style;
+      style_tag_ := wb_.sheets(sheet_).rows(row_)(col_).style;
    ELSE
       -- We need to create the cell in the PlSql model so that later functions
       -- can manipulate it
@@ -1907,7 +1910,7 @@ BEGIN
    IF xfId_ IS null THEN
       RETURN null;
    ELSE
-      RETURN workbook.cellXfs (xfId_);
+      RETURN wb_.cellXfs (xfId_);
    END IF;
 END Get_Cell_Xf;
 
@@ -1925,18 +1928,18 @@ BEGIN
    -- the cell's Row + Column don't have a "background" style
    IF cell_XfId_ IS NOT null THEN
 
-      RETURN workbook.cellXfs (cell_xfId_);
+      RETURN wb_.cellXfs (cell_xfId_);
 
    ELSE
 
-      IF workbook.sheets(sheet_).col_fmts.exists(col_) THEN
-         col_Xf_ := workbook.sheets(sheet_).col_fmts(col_);
+      IF wb_.sheets(sheet_).col_fmts.exists(col_) THEN
+         col_Xf_ := wb_.sheets(sheet_).col_fmts(col_);
       END IF;
-      IF workbook.sheets(sheet_).row_fmts.exists(row_) THEN
-         row_Xf_ := workbook.sheets(sheet_).row_fmts(row_);
+      IF wb_.sheets(sheet_).row_fmts.exists(row_) THEN
+         row_Xf_ := wb_.sheets(sheet_).row_fmts(row_);
       END IF;
 
-      Xf_.numFmtId  := coalesce (col_Xf_.numFmtId, row_Xf_.numFmtId, workbook.sheets(sheet_).fontid, workbook.fontid);
+      Xf_.numFmtId  := coalesce (col_Xf_.numFmtId, row_Xf_.numFmtId, wb_.sheets(sheet_).fontid, wb_.fontid);
       Xf_.fontId    := coalesce (col_Xf_.fontId, row_Xf_.fontId, 0);
       Xf_.fillId    := coalesce (col_Xf_.fillId, row_Xf_.fillId, 0);
       Xf_.borderId  := coalesce (col_Xf_.borderId, row_Xf_.borderId, 0);
@@ -1977,14 +1980,14 @@ PROCEDURE Cell ( -- num version
    alignment_ IN tp_alignment := null,
    sheet_     IN PLS_INTEGER  := null )
 IS
-   sh_ PLS_INTEGER := nvl(sheet_, workbook.sheets.count);
+   sh_ PLS_INTEGER := nvl(sheet_, wb_.sheets.count);
 BEGIN
-   workbook.sheets(sh_).rows(row_)(col_).datatype  := 'number';
-   workbook.sheets(sh_).rows(row_)(col_).ora_value := tp_cell_value (
+   wb_.sheets(sh_).rows(row_)(col_).datatype  := 'number';
+   wb_.sheets(sh_).rows(row_)(col_).ora_value := tp_cell_value (
       str_val => '', num_val => value_, dt_val => null
    );
-   workbook.sheets(sh_).rows(row_)(col_).value     := value_;
-   workbook.sheets(sh_).rows(row_)(col_).style     := get_XfId (
+   wb_.sheets(sh_).rows(row_)(col_).value     := value_;
+   wb_.sheets(sh_).rows(row_)(col_).style     := get_XfId (
       sh_, col_, row_, numFmtId_, fontId_, fillId_, borderId_, alignment_
    );
 END Cell;
@@ -2001,8 +2004,8 @@ PROCEDURE Cell ( -- num version overload
    alignment_ IN VARCHAR2    := null,
    sheet_     IN PLS_INTEGER := null )
 IS
-   fm_ix_ PLS_INTEGER := workbook.formulas.count;
-   sh_    PLS_INTEGER := nvl (sheet_, workbook.sheets.count);
+   fm_ix_ PLS_INTEGER := wb_.formulas.count;
+   sh_    PLS_INTEGER := nvl (sheet_, wb_.sheets.count);
 BEGIN
    Cell (
       col_, row_, value_num_,
@@ -2014,8 +2017,8 @@ BEGIN
       sheet_
    );
    IF formula_ IS NOT null THEN
-      workbook.formulas(fm_ix_) := formula_;
-      workbook.sheets(sh_).rows(row_)(col_).formula_idx := fm_ix_;
+      wb_.formulas(fm_ix_) := formula_;
+      wb_.sheets(sh_).rows(row_)(col_).formula_idx := fm_ix_;
    END IF;
 END Cell;
 
@@ -2043,14 +2046,14 @@ FUNCTION Add_String (
 IS
    ix_ PLS_INTEGER;
 BEGIN
-   IF workbook.strings.exists(nvl(string_,'')) THEN
-      ix_ := workbook.strings(nvl(string_,''));
+   IF wb_.strings.exists(nvl(string_,'')) THEN
+      ix_ := wb_.strings(nvl(string_,''));
    ELSE
-      ix_ := workbook.strings.count;
-      workbook.str_ind(ix_) := string_;
-      workbook.strings(nvl(string_,'')) := ix_;
+      ix_ := wb_.strings.count;
+      wb_.str_ind(ix_) := string_;
+      wb_.strings(nvl(string_,'')) := ix_;
    END IF;
-   workbook.str_cnt := workbook.str_cnt + 1;
+   wb_.str_cnt := wb_.str_cnt + 1;
    RETURN ix_;
 END Add_String;
 
@@ -2065,18 +2068,18 @@ PROCEDURE Cell ( -- string version
    alignment_ IN tp_alignment := null,
    sheet_     IN PLS_INTEGER  := null )
 IS
-   sh_    PLS_INTEGER  := nvl(sheet_, workbook.sheets.count);
+   sh_    PLS_INTEGER  := nvl(sheet_, wb_.sheets.count);
    align_ tp_alignment := alignment_;
 BEGIN
-   workbook.sheets(sh_).rows(row_)(col_).datatype  := 'string';
-   workbook.sheets(sh_).rows(row_)(col_).ora_value := tp_cell_value (
+   wb_.sheets(sh_).rows(row_)(col_).datatype  := 'string';
+   wb_.sheets(sh_).rows(row_)(col_).ora_value := tp_cell_value (
       str_val => value_, num_val => null, dt_val => null
    );
-   workbook.sheets(sh_).rows(row_)(col_).value     := Add_String(value_);
+   wb_.sheets(sh_).rows(row_)(col_).value     := Add_String(value_);
    IF align_.wrapText IS null AND instr(value_, chr(13)) > 0 THEN
       align_.wrapText := true;
    END IF;
-   workbook.sheets(sh_).rows(row_)(col_).style := 't="s" ' || get_XfId (
+   wb_.sheets(sh_).rows(row_)(col_).style := 't="s" ' || get_XfId (
       sh_, col_, row_, numFmtId_, fontId_, fillId_, borderId_, align_
    );
 END Cell;
@@ -2093,8 +2096,8 @@ PROCEDURE Cell ( -- string version overload
    alignment_ IN VARCHAR2    := null,
    sheet_     IN PLS_INTEGER := null ) 
 IS
-   fm_ix_ PLS_INTEGER := workbook.formulas.count;
-   sh_    PLS_INTEGER := nvl (sheet_, workbook.sheets.count);
+   fm_ix_ PLS_INTEGER := wb_.formulas.count;
+   sh_    PLS_INTEGER := nvl (sheet_, wb_.sheets.count);
 BEGIN
    Cell (
       col_, row_, value_str_,
@@ -2106,8 +2109,8 @@ BEGIN
       sh_
    );
    IF formula_ IS NOT null THEN
-      workbook.formulas(fm_ix_) := formula_;
-      workbook.sheets(sh_).rows(row_)(col_).formula_idx := fm_ix_;
+      wb_.formulas(fm_ix_) := formula_;
+      wb_.sheets(sh_).rows(row_)(col_).formula_idx := fm_ix_;
    END IF;
 END Cell;
 
@@ -2142,22 +2145,22 @@ PROCEDURE Cell (  -- date version
    sheet_     IN PLS_INTEGER  := null )
 IS
    num_fmt_id_ PLS_INTEGER := numFmtId_;
-   sh_         PLS_INTEGER := nvl(sheet_, workbook.sheets.count);
+   sh_         PLS_INTEGER := nvl(sheet_, wb_.sheets.count);
 BEGIN
-   workbook.sheets(sh_).rows(row_)(col_).datatype  := 'date';
-   workbook.sheets(sh_).rows(row_)(col_).ora_value := tp_cell_value (
+   wb_.sheets(sh_).rows(row_)(col_).datatype  := 'date';
+   wb_.sheets(sh_).rows(row_)(col_).ora_value := tp_cell_value (
       str_val => '', num_val => null, dt_val => value_
    );
-   workbook.sheets(sh_).rows(row_)(col_).value     := (value_ - date '1900-03-01') + 61;
+   wb_.sheets(sh_).rows(row_)(col_).value     := (value_ - date '1900-03-01') + 61;
    IF num_fmt_id_ IS null
-      AND not (    workbook.sheets(sh_).col_fmts.exists(col_)
-               AND workbook.sheets(sh_).col_fmts(col_).numFmtId IS not null )
-      AND not (    workbook.sheets(sh_).row_fmts.exists(row_)
-               AND workbook.sheets(sh_).row_fmts(row_).numFmtId IS not null )
+      AND not (    wb_.sheets(sh_).col_fmts.exists(col_)
+               AND wb_.sheets(sh_).col_fmts(col_).numFmtId IS not null )
+      AND not (    wb_.sheets(sh_).row_fmts.exists(row_)
+               AND wb_.sheets(sh_).row_fmts(row_).numFmtId IS not null )
    THEN
       num_fmt_id_ := get_numFmt('dd/mm/yyyy');
    END IF;
-   workbook.sheets(sh_).rows(row_)(col_).style := get_XfId (
+   wb_.sheets(sh_).rows(row_)(col_).style := get_XfId (
       sh_, col_, row_, num_fmt_id_, fontId_, fillId_, borderId_, alignment_
    );
 END Cell;
@@ -2174,8 +2177,8 @@ PROCEDURE Cell ( -- date version overload
    alignment_ IN VARCHAR2    := null,
    sheet_     IN PLS_INTEGER := null )
 IS
-   fm_ix_ PLS_INTEGER := workbook.formulas.count;
-   sh_    PLS_INTEGER := nvl (sheet_, workbook.sheets.count);
+   fm_ix_ PLS_INTEGER := wb_.formulas.count;
+   sh_    PLS_INTEGER := nvl (sheet_, wb_.sheets.count);
 BEGIN
    Cell (
       col_, row_, value_dt_,
@@ -2187,8 +2190,8 @@ BEGIN
       sheet_
    );
    IF formula_ IS NOT null THEN
-      workbook.formulas(fm_ix_) := formula_;
-      workbook.sheets(sh_).rows(row_)(col_).formula_idx := fm_ix_;
+      wb_.formulas(fm_ix_) := formula_;
+      wb_.sheets(sh_).rows(row_)(col_).formula_idx := fm_ix_;
    END IF;
 END Cell;
 
@@ -2236,19 +2239,19 @@ PROCEDURE Query_Date_Cell (
    sheet_ IN PLS_INTEGER := null,
    XfId_  IN VARCHAR2 )
 IS
-   sh_ PLS_INTEGER := nvl(sheet_, workbook.sheets.count);
+   sh_ PLS_INTEGER := nvl(sheet_, wb_.sheets.count);
 BEGIN
    Cell (col_, row_, value_, 0, sheet_ => sheet_);
-   workbook.sheets(sh_).rows(row_)(col_).style := XfId_;
+   wb_.sheets(sh_).rows(row_)(col_).style := XfId_;
 END Query_Date_Cell;
 
 PROCEDURE Condition_Color_Col (
    col_   IN PLS_INTEGER,
    sheet_ IN PLS_INTEGER := null )
 IS
-   sh_        PLS_INTEGER := nvl(sheet_, workbook.sheets.count);
-   first_row_ PLS_INTEGER := workbook.sheets(sh_).rows.FIRST;
-   last_row_  PLS_INTEGER := workbook.sheets(sh_).rows.LAST;
+   sh_        PLS_INTEGER := nvl(sheet_, wb_.sheets.count);
+   first_row_ PLS_INTEGER := wb_.sheets(sh_).rows.FIRST;
+   last_row_  PLS_INTEGER := wb_.sheets(sh_).rows.LAST;
    str_ix_    PLS_INTEGER;
    str_val_   VARCHAR2(50);
    XfId_      PLS_INTEGER;
@@ -2261,25 +2264,25 @@ BEGIN
 
    FOR r_ IN first_row_ .. last_row_ LOOP
 
-      str_ix_  := workbook.sheets(sh_).rows(r_)(col_).value;
-      str_val_ := substr (workbook.str_ind(str_ix_), 1, 50);
+      str_ix_  := wb_.sheets(sh_).rows(r_)(col_).value;
+      str_val_ := substr (wb_.str_ind(str_ix_), 1, 50);
 
       IF fills_.exists(str_val_) THEN
 
          XfId_ := Get_Cell_XfId (sh_, col_, r_);
 
          IF XfId_ IS null THEN
-            workbook.sheets(sh_).rows(r_)(col_).style := 't="s" ' || get_XfId (
+            wb_.sheets(sh_).rows(r_)(col_).style := 't="s" ' || get_XfId (
                sh_, col_, r_, fillId_ => fills_(str_val_)
             );
          ELSE
-            num_fmt_          := workbook.cellXfs(XfId_).numFmtId;
-            font_id_          := workbook.cellXfs(XfId_).fontId;
-            border_id_        := workbook.cellXfs(XfId_).borderId;
-            align_.vertical   := workbook.cellXfs(XfId_).alignment.vertical;
-            align_.horizontal := workbook.cellXfs(XfId_).alignment.horizontal;
-            align_.wrapText   := workbook.cellXfs(XfId_).alignment.wrapText;
-            workbook.sheets(sh_).rows(r_)(col_).style := 't="s" ' || get_XfId (
+            num_fmt_          := wb_.cellXfs(XfId_).numFmtId;
+            font_id_          := wb_.cellXfs(XfId_).fontId;
+            border_id_        := wb_.cellXfs(XfId_).borderId;
+            align_.vertical   := wb_.cellXfs(XfId_).alignment.vertical;
+            align_.horizontal := wb_.cellXfs(XfId_).alignment.horizontal;
+            align_.wrapText   := wb_.cellXfs(XfId_).alignment.wrapText;
+            wb_.sheets(sh_).rows(r_)(col_).style := 't="s" ' || get_XfId (
                sh_, col_, r_, num_fmt_, font_id_, fills_(str_val_), border_id_, align_
             );
          END IF;
@@ -2298,13 +2301,13 @@ PROCEDURE Hyperlink (
    sheet_ IN PLS_INTEGER := null )
 IS
    ix_ PLS_INTEGER;
-   sh_ PLS_INTEGER := nvl(sheet_, workbook.sheets.count);
+   sh_ PLS_INTEGER := nvl(sheet_, wb_.sheets.count);
 BEGIN
-   workbook.sheets(sh_).rows(row_)(col_).value := add_string(nvl(value_, url_));
-   workbook.sheets(sh_).rows(row_)(col_).style := 't="s" ' || get_XfId(sh_, col_, row_, '', Get_Font('Calibri', theme_ => 10, underline_ => true));
-   ix_ := workbook.sheets(sh_).hyperlinks.count + 1;
-   workbook.sheets(sh_).hyperlinks(ix_).cell := alfan_col(col_) || row_;
-   workbook.sheets(sh_).hyperlinks(ix_).url := url_;
+   wb_.sheets(sh_).rows(row_)(col_).value := add_string(nvl(value_, url_));
+   wb_.sheets(sh_).rows(row_)(col_).style := 't="s" ' || get_XfId(sh_, col_, row_, '', Get_Font('Calibri', theme_ => 10, underline_ => true));
+   ix_ := wb_.sheets(sh_).hyperlinks.count + 1;
+   wb_.sheets(sh_).hyperlinks(ix_).cell := alfan_col(col_) || row_;
+   wb_.sheets(sh_).hyperlinks(ix_).url := url_;
 END Hyperlink;
 
 PROCEDURE Comment (
@@ -2316,15 +2319,15 @@ PROCEDURE Comment (
    height_ IN PLS_INTEGER := 100,
    sheet_  IN PLS_INTEGER := null )
 IS
-   sh_ PLS_INTEGER := nvl(sheet_, workbook.sheets.count);
-   ix_ PLS_INTEGER := workbook.sheets(sh_).comments.count + 1;
+   sh_ PLS_INTEGER := nvl(sheet_, wb_.sheets.count);
+   ix_ PLS_INTEGER := wb_.sheets(sh_).comments.count + 1;
 BEGIN
-   workbook.sheets(sh_).comments(ix_).row    := row_;
-   workbook.sheets(sh_).comments(ix_).column := col_;
-   workbook.sheets(sh_).comments(ix_).text   := dbms_xmlgen.convert(text_);
-   workbook.sheets(sh_).comments(ix_).author := dbms_xmlgen.convert(author_);
-   workbook.sheets(sh_).comments(ix_).width  := width_;
-   workbook.sheets(sh_).comments(ix_).height := height_;
+   wb_.sheets(sh_).comments(ix_).row    := row_;
+   wb_.sheets(sh_).comments(ix_).column := col_;
+   wb_.sheets(sh_).comments(ix_).text   := dbms_xmlgen.convert(text_);
+   wb_.sheets(sh_).comments(ix_).author := dbms_xmlgen.convert(author_);
+   wb_.sheets(sh_).comments(ix_).width  := width_;
+   wb_.sheets(sh_).comments(ix_).height := height_;
 END Comment;
 
 PROCEDURE Num_Formula (
@@ -2339,12 +2342,12 @@ PROCEDURE Num_Formula (
    alignment_     IN tp_alignment := null,
    sheet_         IN PLS_INTEGER  := null )
 IS
-   ix_ PLS_INTEGER := workbook.formulas.count;
-   sh_ PLS_INTEGER := nvl (sheet_, workbook.sheets.count);
+   ix_ PLS_INTEGER := wb_.formulas.count;
+   sh_ PLS_INTEGER := nvl (sheet_, wb_.sheets.count);
 BEGIN
-   workbook.formulas(ix_) := formula_;
+   wb_.formulas(ix_) := formula_;
    Cell (col_, row_, default_value_, numFmtId_, fontId_, fillId_, borderId_, alignment_, sh_);
-   workbook.sheets(sh_).rows(row_)(col_).formula_idx := ix_;
+   wb_.sheets(sh_).rows(row_)(col_).formula_idx := ix_;
 END Num_Formula;
 
 PROCEDURE Str_Formula (
@@ -2359,12 +2362,12 @@ PROCEDURE Str_Formula (
    alignment_     IN tp_alignment := null,
    sheet_         IN PLS_INTEGER  := null )
 IS
-   ix_ PLS_INTEGER := workbook.formulas.count;
-   sh_ PLS_INTEGER := nvl(sheet_, workbook.sheets.count);
+   ix_ PLS_INTEGER := wb_.formulas.count;
+   sh_ PLS_INTEGER := nvl(sheet_, wb_.sheets.count);
 BEGIN
-   workbook.formulas(ix_) := formula_;
+   wb_.formulas(ix_) := formula_;
    Cell (col_, row_, default_value_, numFmtId_, fontId_, fillId_, borderId_, alignment_, sh_);
-   workbook.sheets(sh_).rows(row_)(col_).formula_idx := ix_;
+   wb_.sheets(sh_).rows(row_)(col_).formula_idx := ix_;
 END Str_Formula;
 
 PROCEDURE Formula (
@@ -2421,10 +2424,10 @@ PROCEDURE Mergecells (
    sheet_  IN PLS_INTEGER := null )
 IS
    ix_   PLS_INTEGER;
-   sh_ PLS_INTEGER := nvl (sheet_, workbook.sheets.count);
+   sh_ PLS_INTEGER := nvl (sheet_, wb_.sheets.count);
 BEGIN
-   ix_ := workbook.sheets(sh_).mergecells.count + 1;
-   workbook.sheets(sh_).mergecells(ix_) :=
+   ix_ := wb_.sheets(sh_).mergecells.count + 1;
+   wb_.sheets(sh_).mergecells(ix_) :=
       alfan_col(tl_col_) || tl_row_ || ':' || alfan_col(br_col_) || br_row_;
 END Mergecells;
 
@@ -2442,19 +2445,19 @@ PROCEDURE Add_Validation (
    sheet_       IN PLS_INTEGER := null )
 IS
    ix_     PLS_INTEGER;
-   sh_ PLS_INTEGER := nvl(sheet_, workbook.sheets.count);
+   sh_ PLS_INTEGER := nvl(sheet_, wb_.sheets.count);
 BEGIN
-   ix_ := workbook.sheets(sh_).validations.count + 1;
-   workbook.sheets(sh_).validations(ix_).type        := p_type;
-   workbook.sheets(sh_).validations(ix_).errorstyle  := p_style;
-   workbook.sheets(sh_).validations(ix_).sqref       := p_sqref;
-   workbook.sheets(sh_).validations(ix_).formula1    := p_formula1;
-   workbook.sheets(sh_).validations(ix_).formula2    := p_formula2;
-   workbook.sheets(sh_).validations(ix_).error_title := p_error_title;
-   workbook.sheets(sh_).validations(ix_).error_txt   := p_error_txt;
-   workbook.sheets(sh_).validations(ix_).title       := p_title;
-   workbook.sheets(sh_).validations(ix_).prompt      := p_prompt;
-   workbook.sheets(sh_).validations(ix_).showerrormessage := p_show_error;
+   ix_ := wb_.sheets(sh_).validations.count + 1;
+   wb_.sheets(sh_).validations(ix_).type        := p_type;
+   wb_.sheets(sh_).validations(ix_).errorstyle  := p_style;
+   wb_.sheets(sh_).validations(ix_).sqref       := p_sqref;
+   wb_.sheets(sh_).validations(ix_).formula1    := p_formula1;
+   wb_.sheets(sh_).validations(ix_).formula2    := p_formula2;
+   wb_.sheets(sh_).validations(ix_).error_title := p_error_title;
+   wb_.sheets(sh_).validations(ix_).error_txt   := p_error_txt;
+   wb_.sheets(sh_).validations(ix_).title       := p_title;
+   wb_.sheets(sh_).validations(ix_).prompt      := p_prompt;
+   wb_.sheets(sh_).validations(ix_).showerrormessage := p_show_error;
 END Add_Validation;
 
 PROCEDURE List_Validation (
@@ -2524,7 +2527,7 @@ PROCEDURE Add_Image (
    width_       IN PLS_INTEGER := null,
    height_      IN PLS_INTEGER := null )
 IS
-   sh_         PLS_INTEGER := coalesce (sheet_, workbook.sheets.count);
+   sh_         PLS_INTEGER := coalesce (sheet_, wb_.sheets.count);
    img_ix_     PLS_INTEGER;
    hash_       RAW(128) := Dbms_Crypto.Hash (img_blob_, dbms_crypto.hash_md5);
    img_rec_    tp_image;
@@ -2535,8 +2538,8 @@ IS
    hex_        VARCHAR2(8);
 BEGIN
 
-   FOR i_ IN 1 .. workbook.images.count LOOP
-      IF workbook.images(i_).img_hash = hash_ THEN
+   FOR i_ IN 1 .. wb_.images.count LOOP
+      IF wb_.images(i_).img_hash = hash_ THEN
          img_ix_ := i_;
          exit;
       END IF;
@@ -2544,7 +2547,7 @@ BEGIN
 
    IF img_ix_ IS null THEN
 
-      img_ix_ := workbook.images.count + 1;
+      img_ix_ := wb_.images.count + 1;
       dbms_lob.createTemporary (img_rec_.img_blob, true);
       
       dbms_lob.copy (img_rec_.img_blob, img_blob_, dbms_lob.lobmaxsize, 1, 1);
@@ -2634,7 +2637,7 @@ BEGIN
          img_rec_.height := nvl(height_, 0);
       END IF;
 
-      workbook.images(img_ix_) := img_rec_;
+      wb_.images(img_ix_) := img_rec_;
 
    END IF;
 
@@ -2645,7 +2648,7 @@ BEGIN
    drawing_.name        := name_;
    drawing_.title       := title_;
    drawing_.description := description_;
-   workbook.sheets(sh_).drawings(workbook.sheets(sh_).drawings.count+1) := drawing_;
+   wb_.sheets(sh_).drawings(wb_.sheets(sh_).drawings.count+1) := drawing_;
 
 END Add_Image;
 
@@ -2699,12 +2702,12 @@ PROCEDURE Defined_Name (
    localsheet_ PLS_INTEGER := null )
 IS
    ix_ PLS_INTEGER;
-   sh_ PLS_INTEGER := nvl(sheet_, workbook.sheets.count);
+   sh_ PLS_INTEGER := nvl(sheet_, wb_.sheets.count);
 BEGIN
-   ix_ := workbook.defined_names.count + 1;
-   workbook.defined_names(ix_).name := name_;
-   workbook.defined_names(ix_).ref := 'Sheet' || sh_ || '!$' || alfan_col(tl_col_) || '$' || tl_row_ || ':$' || alfan_col(br_col_) || '$' || br_row_;
-   workbook.defined_names(ix_).sheet := localsheet_;
+   ix_ := wb_.defined_names.count + 1;
+   wb_.defined_names(ix_).name := name_;
+   wb_.defined_names(ix_).ref := 'Sheet' || sh_ || '!$' || alfan_col(tl_col_) || '$' || tl_row_ || ':$' || alfan_col(br_col_) || '$' || br_row_;
+   wb_.defined_names(ix_).sheet := localsheet_;
 END Defined_Name;
 
 PROCEDURE Set_Column_Width (
@@ -2713,9 +2716,9 @@ PROCEDURE Set_Column_Width (
    sheet_ PLS_INTEGER := null )
 IS
    w_  NUMBER      := trunc(round(width_*7)*256/7)/256;
-   sh_ PLS_INTEGER := nvl(sheet_, workbook.sheets.count);
+   sh_ PLS_INTEGER := nvl(sheet_, wb_.sheets.count);
 BEGIN
-   workbook.sheets(sh_).widths(col_) := w_;
+   wb_.sheets(sh_).widths(col_) := w_;
 END Set_Column_Width;
 
 PROCEDURE Set_Column (
@@ -2727,13 +2730,13 @@ PROCEDURE Set_Column (
    alignment_ tp_alignment := null,
    sheet_     PLS_INTEGER  := null )
 IS
-   sh_ PLS_INTEGER := nvl(sheet_, workbook.sheets.count);
+   sh_ PLS_INTEGER := nvl(sheet_, wb_.sheets.count);
 BEGIN
-   workbook.sheets(sh_).col_fmts(col_).numFmtId  := numFmtId_;
-   workbook.sheets(sh_).col_fmts(col_).fontId    := fontId_;
-   workbook.sheets(sh_).col_fmts(col_).fillId    := fillId_;
-   workbook.sheets(sh_).col_fmts(col_).borderId  := borderId_;
-   workbook.sheets(sh_).col_fmts(col_).alignment := alignment_;
+   wb_.sheets(sh_).col_fmts(col_).numFmtId  := numFmtId_;
+   wb_.sheets(sh_).col_fmts(col_).fontId    := fontId_;
+   wb_.sheets(sh_).col_fmts(col_).fillId    := fillId_;
+   wb_.sheets(sh_).col_fmts(col_).borderId  := borderId_;
+   wb_.sheets(sh_).col_fmts(col_).alignment := alignment_;
 END Set_Column;
 
 PROCEDURE Set_Row (
@@ -2746,17 +2749,17 @@ PROCEDURE Set_Row (
    sheet_     IN PLS_INTEGER  := null,
    height_    IN NUMBER       := null )
 IS
-   sh_ PLS_INTEGER := nvl(sheet_, workbook.sheets.count);
+   sh_ PLS_INTEGER := nvl(sheet_, wb_.sheets.count);
    c_  tp_cells;
 BEGIN
-   workbook.sheets(sh_).row_fmts(row_).numFmtId  := numFmtId_;
-   workbook.sheets(sh_).row_fmts(row_).fontId    := fontId_;
-   workbook.sheets(sh_).row_fmts(row_).fillId    := fillId_;
-   workbook.sheets(sh_).row_fmts(row_).borderId  := borderId_;
-   workbook.sheets(sh_).row_fmts(row_).alignment := alignment_;
-   workbook.sheets(sh_).row_fmts(row_).height    := trunc(height_*4/3)*3/4;
-   IF not workbook.sheets(sh_).rows.exists(row_) THEN
-      workbook.sheets(sh_).rows(row_) := c_;
+   wb_.sheets(sh_).row_fmts(row_).numFmtId  := numFmtId_;
+   wb_.sheets(sh_).row_fmts(row_).fontId    := fontId_;
+   wb_.sheets(sh_).row_fmts(row_).fillId    := fillId_;
+   wb_.sheets(sh_).row_fmts(row_).borderId  := borderId_;
+   wb_.sheets(sh_).row_fmts(row_).alignment := alignment_;
+   wb_.sheets(sh_).row_fmts(row_).height    := trunc(height_*4/3)*3/4;
+   IF not wb_.sheets(sh_).rows.exists(row_) THEN
+      wb_.sheets(sh_).rows(row_) := c_;
    END IF;
 END Set_Row;
 
@@ -2764,20 +2767,20 @@ PROCEDURE Freeze_Rows (
    nr_rows_ IN PLS_INTEGER := 1,
    sheet_   IN PLS_INTEGER := null )
 IS
-   sh_ PLS_INTEGER := nvl(sheet_, workbook.sheets.count);
+   sh_ PLS_INTEGER := nvl(sheet_, wb_.sheets.count);
 BEGIN
-   workbook.sheets(sh_).freeze_cols := null;
-   workbook.sheets(sh_).freeze_rows := nr_rows_;
+   wb_.sheets(sh_).freeze_cols := null;
+   wb_.sheets(sh_).freeze_rows := nr_rows_;
 END Freeze_Rows;
 
 PROCEDURE Freeze_Cols (
    nr_cols_ IN PLS_INTEGER := 1,
    sheet_   IN PLS_INTEGER := null )
 IS
-   sh_ PLS_INTEGER := nvl(sheet_, workbook.sheets.count);
+   sh_ PLS_INTEGER := nvl(sheet_, wb_.sheets.count);
 BEGIN
-   workbook.sheets(sh_).freeze_rows := null;
-   workbook.sheets(sh_).freeze_cols := nr_cols_;
+   wb_.sheets(sh_).freeze_rows := null;
+   wb_.sheets(sh_).freeze_cols := nr_cols_;
 END Freeze_Cols;
 
 PROCEDURE Freeze_Pane (
@@ -2785,10 +2788,10 @@ PROCEDURE Freeze_Pane (
    row_   IN PLS_INTEGER,
    sheet_ IN PLS_INTEGER := null )
 IS
-   sh_ PLS_INTEGER := nvl (sheet_, workbook.sheets.count);
+   sh_ PLS_INTEGER := nvl (sheet_, wb_.sheets.count);
 BEGIN
-   workbook.sheets(sh_).freeze_rows := row_;
-   workbook.sheets(sh_).freeze_cols := col_;
+   wb_.sheets(sh_).freeze_rows := row_;
+   wb_.sheets(sh_).freeze_cols := col_;
 END Freeze_Pane;
 
 PROCEDURE Set_Autofilter (
@@ -2799,12 +2802,12 @@ PROCEDURE Set_Autofilter (
    sheet_     IN PLS_INTEGER := null )
 IS
    ix_ PLS_INTEGER := 1;
-   sh_ PLS_INTEGER := nvl(sheet_, workbook.sheets.count);
+   sh_ PLS_INTEGER := nvl(sheet_, wb_.sheets.count);
 BEGIN
-   workbook.sheets(sh_).autofilters(ix_).column_start := col_start_;
-   workbook.sheets(sh_).autofilters(ix_).column_end   := col_end_;
-   workbook.sheets(sh_).autofilters(ix_).row_start    := row_start_;
-   workbook.sheets(sh_).autofilters(ix_).row_end      := row_end_;
+   wb_.sheets(sh_).autofilters(ix_).column_start := col_start_;
+   wb_.sheets(sh_).autofilters(ix_).column_end   := col_end_;
+   wb_.sheets(sh_).autofilters(ix_).row_start    := row_start_;
+   wb_.sheets(sh_).autofilters(ix_).row_end      := row_end_;
    Defined_Name (col_start_, row_start_, col_end_, row_end_, '_xlnm._FilterDatabase', sh_, sh_-1);
 END Set_Autofilter;
 
@@ -2819,21 +2822,21 @@ PROCEDURE Finish_Content_Types (
    excel_ IN OUT NOCOPY BLOB )
 IS
    s_         PLS_INTEGER;
-   p_         PLS_INTEGER;
    doc_       dbms_XmlDom.DomDocument := Dbms_XmlDom.newDomDocument;
    nd_types_  dbms_XmlDom.DomNode;
    attrs_     xml_attrs_arr;
    img_exts_  tp_strings;
    ext_       VARCHAR2(5);
+   pivots_    NUMBER := 1;
 BEGIN
 
    Dbms_XmlDom.setVersion (doc_, '1.0" encoding="UTF-8" standalone="yes');
    attrs_('xmlns') := 'http://schemas.openxmlformats.org/package/2006/content-types';
    nd_types_ := Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'Types', attrs_);
 
-   IF workbook.images.count > 0 THEN -- osian must also deal with jpg
-      FOR img_ IN workbook.images.first .. workbook.images.last LOOP
-         ext_ := workbook.images(img_).extension;
+   IF wb_.images.count > 0 THEN
+      FOR img_ IN wb_.images.first .. wb_.images.last LOOP
+         ext_ := wb_.images(img_).extension;
          IF ext_ IS NOT null AND not img_exts_.exists(ext_) THEN
             attrs_.delete;
             attrs_('ContentType') := 'image/' || ext_;
@@ -2860,12 +2863,24 @@ BEGIN
    attrs_('ContentType') := 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml';
    Xml_Node (doc_, nd_types_, 'Override', attrs_);
 
-   s_ := workbook.sheets.first;
+   s_ := wb_.sheets.first;
    WHILE s_ IS NOT null LOOP
+
       attrs_('PartName')    := rep('/xl/worksheets/sheet:P1.xml', s_);
       attrs_('ContentType') := 'application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml';
       Xml_Node (doc_, nd_types_, 'Override', attrs_);
-      s_ := workbook.sheets.next(s_);
+
+      IF wb_.sheets(s_).pivots.count > 0 THEN
+         attrs_('PartName')    := rep('/xl/pivotCache/pivotCacheDefinition:P1.xml', pivots_);
+         attrs_('ContentType') := 'application/vnd.openxmlformats-officedocument.spreadsheetml.pivotCacheDefinition+xml';
+         Xml_Node (doc_, nd_types_, 'Override', attrs_);
+         attrs_('PartName')    := rep('/xl/pivotCache/pivotCacheRecords:P1.xml', pivots_);
+         attrs_('ContentType') := 'application/vnd.openxmlformats-officedocument.spreadsheetml.pivotCacheRecords+xml';
+         Xml_Node (doc_, nd_types_, 'Override', attrs_);
+         pivots_ := pivots_ + 1;
+      END IF;
+      s_ := wb_.sheets.next(s_);
+
    END LOOP;
 
    attrs_('PartName')    := '/xl/theme/theme1.xml';
@@ -2878,25 +2893,6 @@ BEGIN
    attrs_('ContentType') := 'application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml';
    Xml_Node (doc_, nd_types_, 'Override', attrs_);
 
-   p_ := workbook.pivots_list.first;
-   WHILE p_ IS NOT null LOOP
-
-      attrs_('PartName')    := rep('/xl/pivotCache/pivotCacheDefinition:P1.xml', p_);
-      attrs_('ContentType') := 'application/vnd.openxmlformats-officedocument.spreadsheetml.pivotCacheDefinition+xml';
-      Xml_Node (doc_, nd_types_, 'Override', attrs_);
-
-      attrs_('PartName')    := rep('/xl/pivotCache/pivotCacheRecords:P1.xml', p_);
-      attrs_('ContentType') := 'application/vnd.openxmlformats-officedocument.spreadsheetml.pivotCacheRecords+xml';
-      Xml_Node (doc_, nd_types_, 'Override', attrs_);
-
-      attrs_('PartName')    := rep('xl/pivotTables/pivotTable:P1.xml', p_);
-      attrs_('ContentType') := 'application/vnd.openxmlformats-officedocument.spreadsheetml.pivotTable+xml';
-      Xml_Node (doc_, nd_types_, 'Override', attrs_);
-
-      p_ := workbook.pivots_list.next(p_);
-
-   END LOOP;
-
    attrs_('PartName')    := '/docProps/core.xml';
    attrs_('ContentType') := 'application/vnd.openxmlformats-package.core-properties+xml';
    Xml_Node (doc_, nd_types_, 'Override', attrs_);
@@ -2904,19 +2900,19 @@ BEGIN
    attrs_('ContentType') := 'application/vnd.openxmlformats-officedocument.extended-properties+xml';
    Xml_Node (doc_, nd_types_, 'Override', attrs_);
 
-   s_ := workbook.sheets.first;
+   s_ := wb_.sheets.first;
    WHILE s_ IS NOT null LOOP
-      IF workbook.sheets(s_).comments.count > 0 THEN
+      IF wb_.sheets(s_).comments.count > 0 THEN
          attrs_('PartName')    := rep('/xl/comments:P1.xml', s_);
          attrs_('ContentType') := 'application/vnd.openxmlformats-officedocument.spreadsheetml.comments+xml';
          Xml_Node (doc_, nd_types_, 'Override', attrs_);
       END IF;
-      IF workbook.sheets(s_).drawings.count > 0 THEN
+      IF wb_.sheets(s_).drawings.count > 0 THEN
          attrs_('PartName')    := rep('/xl/drawings/drawing:P1.xml', s_);
          attrs_('ContentType') := 'application/vnd.openxmlformats-officedocument.drawing+xml';
          Xml_Node (doc_, nd_types_, 'Override', attrs_);
       END IF;
-      s_ := workbook.sheets.next(s_);
+      s_ := wb_.sheets.next(s_);
    END LOOP;
 
    Add1Xml (excel_, '[Content_Types].xml', Dbms_XmlDom.getXmlType(doc_).getClobVal);
@@ -3011,17 +3007,17 @@ BEGIN
    nd_var_ := Xml_Node (doc_, nd_vec_, 'variant', 'vt');
    Xml_Text_Node (doc_, nd_var_, 'lpstr', 'Worksheets', 'vt');
    nd_var_ := Xml_Node (doc_, nd_vec_, 'variant', 'vt');
-   Xml_Text_Node (doc_, nd_var_, 'i4', to_char(workbook.sheets.count), 'vt');
+   Xml_Text_Node (doc_, nd_var_, 'i4', to_char(wb_.sheets.count), 'vt');
 
    nd_top_ := Xml_Node (doc_, nd_prop_, 'TitlesOfParts');
    attrs_.delete;
-   attrs_('size')     := workbook.sheets.count;
+   attrs_('size')     := wb_.sheets.count;
    attrs_('baseType') := 'lpstr';
    nd_vec_ := Xml_Node (doc_, nd_top_, 'vector', 'vt', attrs_);
-   s_ := workbook.sheets.first;
+   s_ := wb_.sheets.first;
    WHILE s_ IS NOT null LOOP
-      Xml_Text_Node (doc_, nd_vec_, 'lpstr', workbook.sheets(s_).name, 'vt');
-      s_ := workbook.sheets.next(s_);
+      Xml_Text_Node (doc_, nd_vec_, 'lpstr', wb_.sheets(s_).name, 'vt');
+      s_ := wb_.sheets.next(s_);
    END LOOP;
    Xml_Text_Node (doc_, nd_prop_, 'LinksUpToDate', 'false');
    Xml_Text_Node (doc_, nd_prop_, 'SharedDoc', 'false');
@@ -3044,16 +3040,16 @@ BEGIN
    -- xl/sharedStrings.xml
    Dbms_XmlDom.setVersion (doc_, '1.0" encoding="UTF-8" standalone="yes');
    attrs_('xmlns')       := 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
-   attrs_('count')       := to_char(workbook.str_cnt);
-   attrs_('uniqueCount') := workbook.strings.count;
+   attrs_('count')       := to_char(wb_.str_cnt);
+   attrs_('uniqueCount') := wb_.strings.count;
    nd_sst_ := Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'sst', attrs_);
 
    attrs_.delete;
    attrs_('xml:space') := 'preserve';
-   FOR str_ix_ IN 0 .. workbook.str_ind.count - 1 LOOP
+   FOR str_ix_ IN 0 .. wb_.str_ind.count - 1 LOOP
       Xml_Text_Node (
          doc_ => doc_, append_to_ => Xml_Node(doc_,nd_sst_,'si'), tag_name_ => 't',
-         text_content_ => Dbms_XmlGen.Convert (substr(workbook.str_ind(str_ix_), 1, 32000)),
+         text_content_ => Dbms_XmlGen.Convert (substr(wb_.str_ind(str_ix_), 1, 32000)),
          attrs_ => attrs_
       );
    END LOOP;
@@ -3089,41 +3085,41 @@ BEGIN
    attrs_('xmlns:x14ac')  := 'http://schemas.microsoft.com/office/spreadsheetml/2009/9/ac';
    nd_stl_ := Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'styleSheet', attrs_);
 
-   IF workbook.numFmts.count > 0 THEN
+   IF wb_.numFmts.count > 0 THEN
       attrs_.delete;
-      attrs_('count') := to_char(workbook.numFmts.count);
+      attrs_('count') := to_char(wb_.numFmts.count);
       nd_numf_ := Xml_Node (doc_, nd_stl_, 'numFmts', attrs_);
       attrs_.delete;
-      FOR nf_ IN 1 .. workbook.numFmts.count LOOP
-         attrs_('numFmtId')   := workbook.numFmts(nf_).numFmtId;
-         attrs_('formatCode') := workbook.numFmts(nf_).formatCode;
+      FOR nf_ IN 1 .. wb_.numFmts.count LOOP
+         attrs_('numFmtId')   := wb_.numFmts(nf_).numFmtId;
+         attrs_('formatCode') := wb_.numFmts(nf_).formatCode;
          Xml_Node (doc_, nd_numf_, 'numFmt', attrs_);
       END LOOP;
    END IF;
 
    attrs_.delete;
-   attrs_('count')            := workbook.fonts.count;
+   attrs_('count')            := wb_.fonts.count;
    attrs_('x14ac:knownFonts') := '1';
    nd_fnts_ := Xml_Node (doc_, nd_stl_, 'fonts', attrs_);
-   FOR f_ IN 0 .. workbook.fonts.count-1 LOOP
+   FOR f_ IN 0 .. wb_.fonts.count-1 LOOP
       nd_fnt_ := Xml_Node (doc_, nd_fnts_, 'font');
-      IF workbook.fonts(f_).bold     THEN Xml_Node (doc_, nd_fnt_, 'b'); END IF;
-      IF workbook.fonts(f_).italic   THEN Xml_Node (doc_, nd_fnt_, 'i'); END IF;
-      IF workbook.fonts(f_).underline THEN Xml_Node (doc_, nd_fnt_, 'u'); END IF;
+      IF wb_.fonts(f_).bold     THEN Xml_Node (doc_, nd_fnt_, 'b'); END IF;
+      IF wb_.fonts(f_).italic   THEN Xml_Node (doc_, nd_fnt_, 'i'); END IF;
+      IF wb_.fonts(f_).underline THEN Xml_Node (doc_, nd_fnt_, 'u'); END IF;
       attrs_.delete;
-      attrs_('val') := to_char(workbook.fonts(f_).fontsize, 'TM9', 'NLS_NUMERIC_CHARACTERS=.,');
+      attrs_('val') := to_char(wb_.fonts(f_).fontsize, 'TM9', 'NLS_NUMERIC_CHARACTERS=.,');
       Xml_Node (doc_, nd_fnt_, 'sz', attrs_);
       attrs_.delete;
-      IF workbook.fonts(f_).rgb IS NOT null THEN
-         attrs_('rgb')   := workbook.fonts(f_).rgb;
+      IF wb_.fonts(f_).rgb IS NOT null THEN
+         attrs_('rgb')   := wb_.fonts(f_).rgb;
       ELSE
-         attrs_('theme') := workbook.fonts(f_).theme;
+         attrs_('theme') := wb_.fonts(f_).theme;
       END IF;
       Xml_Node (doc_, nd_fnt_, 'color', attrs_);
       attrs_.delete;
-      attrs_('val') := workbook.fonts(f_).name;
+      attrs_('val') := wb_.fonts(f_).name;
       Xml_Node (doc_, nd_fnt_, 'name', attrs_);
-      attrs_('val') := workbook.fonts(f_).family;
+      attrs_('val') := wb_.fonts(f_).family;
       Xml_Node (doc_, nd_fnt_, 'family', attrs_);
       attrs_.delete;
       attrs_('val') := 'none';
@@ -3131,37 +3127,37 @@ BEGIN
    END LOOP;
 
    attrs_.delete;
-   attrs_('count') := workbook.fills.count;
+   attrs_('count') := wb_.fills.count;
    nd_fills_ := Xml_Node (doc_, nd_stl_, 'fills', attrs_);
-   FOR f_ IN 0 .. workbook.fills.count-1 LOOP
+   FOR f_ IN 0 .. wb_.fills.count-1 LOOP
       nd_fill_ := Xml_Node (doc_, nd_fills_, 'fill');
       attrs_.delete;
-      attrs_('patternType') := workbook.fills(f_).patternType;
+      attrs_('patternType') := wb_.fills(f_).patternType;
       nd_pf_ := Xml_Node (doc_, nd_fill_, 'patternFill', attrs_);
       attrs_.delete;
-      IF workbook.fills(f_).fgRGB IS NOT null THEN
-         attrs_('rgb') := workbook.fills(f_).fgRGB;
+      IF wb_.fills(f_).fgRGB IS NOT null THEN
+         attrs_('rgb') := wb_.fills(f_).fgRGB;
          Xml_Node (doc_, nd_pf_, 'fgColor', attrs_);
       END IF;
-      IF workbook.fills(f_).bgRGB IS NOT null THEN
-         attrs_('rgb') := workbook.fills(f_).bgRGB;
+      IF wb_.fills(f_).bgRGB IS NOT null THEN
+         attrs_('rgb') := wb_.fills(f_).bgRGB;
          Xml_Node (doc_, nd_pf_, 'bgColor', attrs_);
       END IF;
    END LOOP;
 
    attrs_.delete;
-   attrs_('count') := workbook.borders.count;
+   attrs_('count') := wb_.borders.count;
    nd_bdrs_ := Xml_Node (doc_, nd_stl_, 'borders', attrs_);
-   FOR b_ IN 0 .. workbook.borders.count-1 LOOP
+   FOR b_ IN 0 .. wb_.borders.count-1 LOOP
       nd_bdr_ := Xml_Node (doc_, nd_bdrs_, 'border');
       attrs_.delete;
-      IF workbook.borders(b_).left   IS null THEN attrs_.delete; ELSE attrs_('style') := workbook.borders(b_).left; END IF;
+      IF wb_.borders(b_).left   IS null THEN attrs_.delete; ELSE attrs_('style') := wb_.borders(b_).left; END IF;
       Xml_Node (doc_, nd_bdr_, 'left', attrs_);
-      IF workbook.borders(b_).right  IS null THEN attrs_.delete; ELSE attrs_('style') := workbook.borders(b_).right; END IF;
+      IF wb_.borders(b_).right  IS null THEN attrs_.delete; ELSE attrs_('style') := wb_.borders(b_).right; END IF;
       Xml_Node (doc_, nd_bdr_, 'right', attrs_);
-      IF workbook.borders(b_).top    IS null THEN attrs_.delete; ELSE attrs_('style') := workbook.borders(b_).top; END IF;
+      IF wb_.borders(b_).top    IS null THEN attrs_.delete; ELSE attrs_('style') := wb_.borders(b_).top; END IF;
       Xml_Node (doc_, nd_bdr_, 'top', attrs_);
-      IF workbook.borders(b_).bottom IS null THEN attrs_.delete; ELSE attrs_('style') := workbook.borders(b_).bottom; END IF;
+      IF wb_.borders(b_).bottom IS null THEN attrs_.delete; ELSE attrs_('style') := wb_.borders(b_).bottom; END IF;
       Xml_Node (doc_, nd_bdr_, 'bottom', attrs_);
    END LOOP;
 
@@ -3176,7 +3172,7 @@ BEGIN
    Xml_Node (doc_, nd_xfs_, 'xf', attrs_);
 
    attrs_.delete;
-   attrs_('count') := workbook.cellXfs.count+1;
+   attrs_('count') := wb_.cellXfs.count+1;
    nd_xfs_ := Xml_Node (doc_, nd_stl_, 'cellXfs', attrs_);
    attrs_.delete;
    attrs_('numFmtId') := '0';
@@ -3185,18 +3181,18 @@ BEGIN
    attrs_('borderId') := '0';
    attrs_('xfId')     := '0';
    Xml_Node (doc_, nd_xfs_, 'xf', attrs_);
-   FOR x_ IN 1 .. workbook.cellXfs.count LOOP
+   FOR x_ IN 1 .. wb_.cellXfs.count LOOP
       attrs_.delete;
-      attrs_('numFmtId') := workbook.cellXfs(x_).numFmtId;
-      attrs_('fontId')   := workbook.cellXfs(x_).fontId;
-      attrs_('fillId')   := workbook.cellXfs(x_).fillId;
-      attrs_('borderId') := workbook.cellXfs(x_).borderId;
+      attrs_('numFmtId') := wb_.cellXfs(x_).numFmtId;
+      attrs_('fontId')   := wb_.cellXfs(x_).fontId;
+      attrs_('fillId')   := wb_.cellXfs(x_).fillId;
+      attrs_('borderId') := wb_.cellXfs(x_).borderId;
       nd_xf_ := Xml_Node (doc_, nd_xfs_, 'xf', attrs_);
-      IF workbook.cellXfs(x_).alignment.horizontal IS NOT null OR workbook.cellXfs(x_).alignment.vertical IS NOT null OR workbook.cellXfs(x_).alignment.wrapText IS NOT null THEN
+      IF wb_.cellXfs(x_).alignment.horizontal IS NOT null OR wb_.cellXfs(x_).alignment.vertical IS NOT null OR wb_.cellXfs(x_).alignment.wrapText IS NOT null THEN
          attrs_.delete;
-         IF workbook.cellXfs(x_).alignment.horizontal IS NOT null THEN attrs_('horizontal') := workbook.cellXfs(x_).alignment.horizontal; END IF;
-         IF workbook.cellXfs(x_).alignment.vertical    IS NOT null THEN attrs_('vertical')   := workbook.cellXfs(x_).alignment.vertical;   END IF;
-         IF workbook.cellXfs(x_).alignment.wrapText THEN attrs_('wrapText') := 'true'; END IF;
+         IF wb_.cellXfs(x_).alignment.horizontal IS NOT null THEN attrs_('horizontal') := wb_.cellXfs(x_).alignment.horizontal; END IF;
+         IF wb_.cellXfs(x_).alignment.vertical    IS NOT null THEN attrs_('vertical')   := wb_.cellXfs(x_).alignment.vertical;   END IF;
+         IF wb_.cellXfs(x_).alignment.wrapText THEN attrs_('wrapText') := 'true'; END IF;
          Xml_Node (doc_, nd_xf_, 'alignment', attrs_);
       END IF;
    END LOOP;
@@ -3506,22 +3502,22 @@ BEGIN
 
    attrs_.delete;
    nd_shs_ := Xml_Node (doc_, nd_wb_, 'sheets');
-   s_ := workbook.sheets.first;
+   s_ := wb_.sheets.first;
    WHILE s_ IS NOT null LOOP
-      attrs_('name')    := workbook.sheets(s_).name;
+      attrs_('name')    := wb_.sheets(s_).name;
       attrs_('sheetId') := to_char(s_);
       attrs_('r:id')    := rep ('rId:P1', to_char (9 + s_));
       Xml_Node (doc_, nd_shs_, 'sheet', attrs_);
-      s_ := workbook.sheets.next(s_);
+      s_ := wb_.sheets.next(s_);
    END LOOP;
 
-   IF workbook.defined_names.count > 0 THEN
+   IF wb_.defined_names.count > 0 THEN
       nd_dnm_ := Xml_Node (doc_, nd_wb_, 'definedNames');
-      FOR s_ IN 1 .. workbook.defined_names.count LOOP
+      FOR s_ IN 1 .. wb_.defined_names.count LOOP
          attrs_.delete;
-         attrs_('name') := workbook.defined_names(s_).name;
-         IF workbook.defined_names(s_).sheet IS NOT null THEN
-            attrs_('localSheetId') := to_char(workbook.defined_names(s_).sheet);
+         attrs_('name') := wb_.defined_names(s_).name;
+         IF wb_.defined_names(s_).sheet IS NOT null THEN
+            attrs_('localSheetId') := to_char(wb_.defined_names(s_).sheet);
          END IF;
          Xml_Node (doc_, nd_dnm_, 'definedName', attrs_);
       END LOOP;
@@ -3566,13 +3562,13 @@ BEGIN
    attrs_('Target') := 'theme/theme1.xml';
    Xml_Node (doc_, nd_rls_, 'Relationship', attrs_);
 
-   s_ := workbook.sheets.first;
+   s_ := wb_.sheets.first;
    WHILE s_ IS NOT null LOOP
       attrs_('Id')     := 'rId' || to_char(9+s_);
       attrs_('Type')   := 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet';
       attrs_('Target') := rep ('worksheets/sheet:P1.xml', s_);
       Xml_Node (doc_, nd_rls_, 'Relationship', attrs_);
-      s_ := workbook.sheets.next(s_);
+      s_ := wb_.sheets.next(s_);
    END LOOP;
 
    Add1Xml (excel_, 'xl/_rels/workbook.xml.rels', Dbms_XmlDom.getXmlType(doc_).getClobVal);
@@ -3589,7 +3585,7 @@ IS
    nd_rels_ dbms_XmlDom.DomNode;
 BEGIN
 
-   IF workbook.images.count = 0 THEN
+   IF wb_.images.count = 0 THEN
       goto skip_drawings_rels;
    END IF;
 
@@ -3598,16 +3594,16 @@ BEGIN
    attrs_('xmlns') := 'http://schemas.openxmlformats.org/package/2006/relationships';
    nd_rels_ := Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'Relationships', attrs_);
 
-   FOR dr_ IN 1 .. workbook.images.count LOOP
+   FOR dr_ IN 1 .. wb_.images.count LOOP
       attrs_.delete;
       attrs_('Id')     := 'rId' || dr_;
       attrs_('Type')   := 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/image';
-      attrs_('Target') := rep ('../media/image:P1.:P2', dr_, workbook.images(dr_).extension);
+      attrs_('Target') := rep ('../media/image:P1.:P2', dr_, wb_.images(dr_).extension);
       Xml_Node (doc_, nd_rels_, 'Relationship', attrs_);
       Add1File (
          zipped_blob_ => excel_,
-         filename_    => rep ('xl/media/image:P1.:P2', dr_, workbook.images(dr_).extension),
-         content_     => workbook.images(dr_).img_blob
+         filename_    => rep ('xl/media/image:P1.:P2', dr_, wb_.images(dr_).extension),
+         content_     => wb_.images(dr_).img_blob
       );
    END LOOP;
 
@@ -3619,15 +3615,236 @@ BEGIN
 
 END Finish_Drawings_Rels;
 
+PROCEDURE Finish_Worksheet (
+   excel_ IN OUT NOCOPY BLOB,
+   s_     IN            PLS_INTEGER )
+IS
+   doc_     dbms_XmlDom.DomDocument := Dbms_XmlDom.newDomDocument;
+   attrs_   xml_attrs_arr;
+   nd_ws_   dbms_XmlDom.DomNode;
+   nd_svs_  dbms_XmlDom.DomNode;
+   nd_sv_   dbms_XmlDom.DomNode;
+   nd_cls_  dbms_XmlDom.DomNode;
+   nd_sd_   dbms_XmlDom.DomNode;
+   nd_r_    dbms_XmlDom.DomNode;
+   nd_c_    dbms_XmlDom.DomNode;
+   nd_mc_   dbms_XmlDom.DomNode;
+   nd_dvs_  dbms_XmlDom.DomNode;
+   nd_dv_   dbms_XmlDom.DomNode;
+   nd_h_    dbms_XmlDom.DomNode;
+   row_ix_  PLS_INTEGER := wb_.sheets(s_).rows.first;
+   col_ix_  PLS_INTEGER;
+   col_min_ PLS_INTEGER := 16384;
+   col_max_ PLS_INTEGER := 1;
+   id_      PLS_INTEGER := 1;
+BEGIN
+
+   WHILE row_ix_ IS not null LOOP
+      col_min_ := least (col_min_, wb_.sheets(s_).rows(row_ix_).first);
+      col_max_ := greatest (col_max_, wb_.sheets(s_).rows(row_ix_).last);
+      row_ix_  := wb_.sheets(s_).rows.next(row_ix_);
+   END LOOP;
+
+   Dbms_XmlDom.setVersion (doc_, '1.0" encoding="UTF-8" standalone="yes');
+
+   attrs_('xmlns')        := 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
+   attrs_('xmlns:r')      := 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
+   attrs_('xmlns:xdr')    := 'http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing';
+   attrs_('xmlns:x14')    := 'http://schemas.microsoft.com/office/spreadsheetml/2009/9/main';
+   attrs_('xmlns:mc')     := 'http://schemas.openxmlformats.org/markup-compatibility/2006';
+   attrs_('mc:Ignorable') := 'x14ac';
+   attrs_('xmlns:x14ac')  := 'http://schemas.microsoft.com/office/spreadsheetml/2009/9/ac';
+   nd_ws_ := Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'worksheet', attrs_);
+   IF wb_.sheets(s_).tabcolor IS NOT null THEN
+      attrs_.delete;
+      attrs_('rgb') := wb_.sheets(s_).tabcolor;
+      Xml_Node (doc_, Xml_Node(doc_,nd_ws_,'sheetPr'), 'tabColor', attrs_);
+   END IF;
+
+   attrs_.delete;
+   attrs_('ref') := Alfan_Range (
+      col_tl_ => col_min_, row_tl_ => wb_.sheets(s_).rows.first,
+      col_br_ => col_max_, row_br_ => wb_.sheets(s_).rows.last
+   );
+   Xml_Node (doc_, nd_ws_, 'dimension', attrs_);
+
+   nd_svs_ := Xml_Node (doc_, nd_ws_, 'sheetViews');
+   attrs_.delete;
+   IF s_ = 1 THEN attrs_('tabSelected') := '1'; END IF;
+   attrs_('workbookViewId') := '0';
+   nd_sv_  := Xml_Node (doc_, nd_svs_, 'sheetView', attrs_);
+
+   attrs_.delete;
+   attrs_('activePane')  := 'bottomLeft';
+   attrs_('state')       := 'frozen';
+   IF wb_.sheets(s_).freeze_rows > 0 AND wb_.sheets(s_).freeze_cols > 0 THEN
+      attrs_('xSplit')      := wb_.sheets(s_).freeze_cols;
+      attrs_('ySplit')      := wb_.sheets(s_).freeze_rows;
+      attrs_('topLeftCell') := Alfan_Cell (wb_.sheets(s_).freeze_cols+1, wb_.sheets(s_).freeze_rows+1);
+   ELSIF wb_.sheets(s_).freeze_rows > 0 THEN
+      attrs_('ySplit')      := wb_.sheets(s_).freeze_rows;
+      attrs_('topLeftCell') := Alfan_Cell (1, wb_.sheets(s_).freeze_rows+1);
+   ELSIF wb_.sheets(s_).freeze_cols > 0 THEN
+      attrs_('xSplit')      := wb_.sheets(s_).freeze_cols;
+      attrs_('topLeftCell') := Alfan_Cell (wb_.sheets(s_).freeze_cols+1, 1);
+   END IF;
+   Xml_Node (doc_, nd_sv_, 'pane', attrs_);
+
+   attrs_.delete;
+   attrs_('defaultRowHeight') := '15';
+   attrs_('x14ac:dyDescent')  := '0.25';
+   Xml_Node (doc_, nd_ws_, 'sheetFormatPr', attrs_);
+
+   IF wb_.sheets(s_).widths.count > 0 THEN
+      nd_cls_ := Xml_Node (doc_, nd_ws_, 'cols');
+      attrs_.delete;
+      col_ix_ := wb_.sheets(s_).widths.first;
+      WHILE col_ix_ IS NOT null LOOP
+         attrs_('min')         := col_ix_;
+         attrs_('max')         := col_ix_;
+         attrs_('width')       := to_char (wb_.sheets(s_).widths(col_ix_), 'TM9', 'NLS_NUMERIC_CHARACTERS=.,');
+         attrs_('customWidth') := '1';
+         Xml_Node (doc_, nd_cls_, 'col', attrs_);
+         col_ix_ := wb_.sheets(s_).widths.next(col_ix_);
+      END LOOP;
+   END IF;
+
+   nd_sd_ := Xml_Node (doc_, nd_ws_, 'sheetData');
+   row_ix_ := wb_.sheets(s_).rows.first;
+   WHILE row_ix_ IS NOT null LOOP
+      attrs_.delete;
+      attrs_('r')     := to_char(row_ix_);
+      attrs_('spans') := to_char(col_min_) || ':' || to_char(col_max_);
+      IF wb_.sheets(s_).row_fmts.exists(row_ix_) AND wb_.sheets(s_).row_fmts(row_ix_).height IS NOT null THEN
+         attrs_('customHeight') := '1';
+         attrs_('ht')           := to_char (wb_.sheets(s_).row_fmts(row_ix_).height, 'TM9', 'NLS_NUMERIC_CHARACTERS=.,');
+      END IF;
+      nd_r_ := Xml_Node (doc_, nd_sd_, 'row', attrs_);
+
+      col_ix_ := wb_.sheets(s_).rows(row_ix_).first;
+      WHILE col_ix_ IS NOT null LOOP
+         attrs_.delete;
+         attrs_('r') := Alfan_Cell (col_ix_, row_ix_);
+         -- osian
+         -- this is complicated, because the string gets built differently for the style
+         -- style must be added here, including `t=""` attrs_('t') := '';
+         nd_c_ := Xml_Node (doc_, nd_r_, 'c', attrs_);
+         IF wb_.sheets(s_).rows(row_ix_)(col_ix_).formula_idx IS NOT null THEN
+            Xml_Text_Node (doc_, nd_c_, 'f', wb_.formulas(wb_.sheets(s_).rows(row_ix_)(col_ix_).formula_idx));
+         END IF;
+         Xml_Text_Node (doc_, nd_c_, 'v', to_char(wb_.sheets(s_).rows(row_ix_)(col_ix_).value, 'TM9', 'NLS_NUMERIC_CHARACTERS=.,'));
+         col_ix_ := wb_.sheets(s_).rows(row_ix_).next(col_ix_);
+      END LOOP;
+      row_ix_ := wb_.sheets(s_).rows.next(row_ix_);
+   END LOOP;
+
+   FOR af_ IN 1 .. wb_.sheets(s_).autofilters.count LOOP
+      attrs_.delete;
+      attrs_('ref') := Alfan_Range (
+         col_tl_ => nvl (wb_.sheets(s_).autofilters(af_).column_start, col_min_),
+         row_tl_ => nvl (wb_.sheets(s_).autofilters(af_).row_start, wb_.sheets(s_).rows.first),
+         col_br_ => coalesce (wb_.sheets(s_).autofilters(af_).column_end, wb_.sheets(s_).autofilters(af_).column_start, col_max_),
+         row_br_ => nvl (wb_.sheets(s_).autofilters(af_).row_end, wb_.sheets(s_).rows.last)
+      );
+      Xml_Node (doc_, nd_ws_, 'autoFilter', attrs_);
+   END LOOP;
+
+   IF wb_.sheets(s_).mergecells.count > 0 THEN
+      attrs_.delete;
+      attrs_('count') := to_char(wb_.sheets(s_).mergecells.count);
+      nd_mc_ := Xml_Node (doc_, nd_ws_, 'mergeCells', attrs_);
+      FOR mg_ IN 1 .. wb_.sheets(s_).mergecells.count LOOP
+         attrs_.delete;
+         attrs_('ref') := wb_.sheets(s_).mergecells(mg_);
+         Xml_Node (doc_, nd_mc_, 'mergeCell', attrs_);
+      END LOOP;
+   END IF;
+
+   IF wb_.sheets(s_).validations.count > 0 THEN
+      attrs_.delete;
+      attrs_('count') := to_char(wb_.sheets(s_).validations.count);
+      nd_dvs_ := Xml_Node (doc_, nd_ws_, 'dataValidations');
+
+      FOR v_ IN wb_.sheets(s_).validations.count LOOP
+         attrs_.delete;
+         attrs_('type')       := wb_.sheets(s_).validations(v_).type;
+         attrs_('errorStyle') := wb_.sheets(s_).validations(v_).errorstyle;
+         attrs_('allowBlank') := CASE WHEN nvl(wb_.sheets(s_).validations(v_).allowBlank, true) THEN '1' ELSE '0' END;
+         attrs_('sqref')      := wb_.sheets(s_).validations(v_).sqref;
+         IF wb_.sheets(s_).validations(v_).prompt IS NOT null THEN
+            attrs_('showInputMessage') := '1';
+            attrs_('prompt')           := wb_.sheets(s_).validations(v_).prompt;
+            IF wb_.sheets(s_).validations(v_).title IS NOT null THEN
+               attrs_('promptTitle') := wb_.sheets(s_).validations(v_).title;
+            END IF;
+         END IF;
+         IF wb_.sheets(s_).validations(v_).showerrormessage THEN
+            attrs_('showErrorMessage') := '1';
+            IF wb_.sheets(s_).validations(v_).error_title IS NOT null THEN
+               attrs_('errorTitle') := wb_.sheets(s_).validations(v_).error_title;
+            END IF;
+            IF wb_.sheets(s_).validations(v_).error_txt IS NOT null THEN
+               attrs_('error') := wb_.sheets(s_).validations(v_).error_txt;
+            END IF;
+         END IF;
+         nd_dv_ := Xml_Node (doc_, nd_dvs_, 'dataValidation', attrs_);
+
+         IF wb_.sheets(s_).validations(v_).formula1 IS NOT null THEN
+            Xml_Text_Node (doc_, nd_dv_, 'formula1', wb_.sheets(s_).validations(v_).formula1);
+         END IF;
+         IF wb_.sheets(s_).validations(v_).formula2 IS NOT null THEN
+            Xml_Text_Node (doc_, nd_dv_, 'formula2', wb_.sheets(s_).validations(v_).formula2);
+         END IF;
+      END LOOP;
+   END IF;
+
+   IF wb_.sheets(s_).hyperlinks.count > 0 THEN
+      nd_h_ := Xml_Node (doc_, nd_ws_, 'hyperlinks');
+      FOR h_ IN 1 .. wb_.sheets(s_).hyperlinks.count LOOP
+         attrs_.delete;
+         attrs_('ref')  := wb_.sheets(s_).hyperlinks(h_).cell;
+         attrs_('r:id') := rep ('rId:P1', id_);
+         Xml_Node (doc_, nd_h_, 'hyperlink', attrs_);
+         id_ := id_ + 1;
+      END LOOP;
+   END IF;
+
+   attrs_.delete;
+   attrs_('left')   := '0.7';
+   attrs_('right')  := '0.7';
+   attrs_('top')    := '0.75';
+   attrs_('bottom') := '0.75';
+   attrs_('header') := '0.3';
+   attrs_('footer') := '0.3';
+   Xml_Node (doc_, nd_ws_, 'pageMargins', attrs_);
+
+   IF wb_.sheets(s_).drawings.count > 0 THEN
+      attrs_.delete;
+      attrs_('r:id') := rep ('rId:P1', id_);
+      Xml_Node (doc_, nd_ws_, 'drawing', attrs_);
+      id_ := id_ + 1;
+   END IF;
+   
+   IF wb_.sheets(s_).comments.count > 0 THEN
+      attrs_.delete;
+      attrs_('r:id') := rep ('rId:P1', id_);
+      Xml_Node (doc_, nd_ws_, 'legacyDrawing', attrs_);
+   END IF;
+
+   Add1Xml (excel_, rep('xl/worksheets/sheet:P1.xml',s_), Dbms_XmlDom.getXmlType(doc_).getClobVal);
+   Dbms_XmlDom.freeDocument (doc_);
+
+END Finish_Worksheet;
+
 PROCEDURE Finish_Ws_Relationships (
    excel_ IN OUT NOCOPY BLOB,
    s_     IN            PLS_INTEGER )
 IS
    id_            PLS_INTEGER := 1;
-   nr_hyperlinks_ PLS_INTEGER := workbook.sheets(s_).hyperlinks.count;
-   nr_comments_   PLS_INTEGER := workbook.sheets(s_).comments.count;
-   nr_pivots_     PLS_INTEGER := workbook.sheets(s_).pivots.count;
-   nr_drawings_   PLS_INTEGER := workbook.sheets(s_).drawings.count;
+   nr_hyperlinks_ PLS_INTEGER := wb_.sheets(s_).hyperlinks.count;
+   nr_comments_   PLS_INTEGER := wb_.sheets(s_).comments.count;
+   nr_pivots_     PLS_INTEGER := wb_.sheets(s_).pivots.count;
+   nr_drawings_   PLS_INTEGER := wb_.sheets(s_).drawings.count;
    doc_           dbms_XmlDom.DomDocument := Dbms_XmlDom.newDomDocument;
    attrs_         xml_attrs_arr;
    nd_rels_       dbms_XmlDom.DomNode;
@@ -3642,10 +3859,10 @@ BEGIN
    nd_rels_ := Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'Relationships', attrs_);
 
    FOR h_ IN 1 .. nr_hyperlinks_ LOOP
-      IF workbook.sheets(s_).hyperlinks(h_).url IS NOT null THEN
+      IF wb_.sheets(s_).hyperlinks(h_).url IS NOT null THEN
          attrs_('Id')         := rep ('rId:P1', id_);
          attrs_('Type')       := 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink';
-         attrs_('Target')     := workbook.sheets(s_).hyperlinks(h_).url;
+         attrs_('Target')     := wb_.sheets(s_).hyperlinks(h_).url;
          attrs_('TargetMode') := 'External';
          Xml_Node (doc_, nd_rels_, 'Relationship', attrs_);
          id_ := id_ + 1;
@@ -3699,8 +3916,8 @@ PROCEDURE Calc_Image_Col_And_Row (
    s_        IN            PLS_INTEGER )
 IS
    scale_          NUMBER := nvl (drawing_.scale, 1);
-   img_width_      NUMBER := workbook.images(drawing_.img_id).width  * scale_;
-   img_height_     NUMBER := workbook.images(drawing_.img_id).height * scale_;
+   img_width_      NUMBER := wb_.images(drawing_.img_id).width  * scale_;
+   img_height_     NUMBER := wb_.images(drawing_.img_id).height * scale_;
    img_width_rem_  NUMBER := img_width_;
    img_height_rem_ NUMBER := img_height_;
    img_colspan_    PLS_INTEGER;
@@ -3708,7 +3925,7 @@ IS
    col_width_      NUMBER;
    row_height_     NUMBER;
 BEGIN
-   IF workbook.sheets(s_).widths.count = 0 THEN
+   IF wb_.sheets(s_).widths.count = 0 THEN
       -- If no widths have been set, we can assume that all columns are set to
       -- the default widths => 64 px = 1 col = 609600
       img_colspan_ := trunc (img_width_/64);
@@ -3718,8 +3935,8 @@ BEGIN
       col_ := drawing_.col;
       LOOP
          col_width_ := CASE
-            WHEN not workbook.sheets(s_).widths.exists(col_) THEN 64
-            ELSE round(7*workbook.sheets(s_).widths(col_))
+            WHEN not wb_.sheets(s_).widths.exists(col_) THEN 64
+            ELSE round(7*wb_.sheets(s_).widths(col_))
          END;
          EXIT WHEN img_width_rem_ < col_width_;
          img_width_rem_ := img_width_rem_ - col_width_;
@@ -3728,7 +3945,7 @@ BEGIN
       col_ := col_ - 1;
       col_offs_ := trunc(img_width_rem_ * 9525);
    END IF;
-   IF workbook.sheets(s_).row_fmts.count = 0 THEN
+   IF wb_.sheets(s_).row_fmts.count = 0 THEN
       -- If no heights have been set then we assume the default row heights of
       -- => 20 px = 1 row = 190500
       img_rowspan_ := trunc (img_height_/20);
@@ -3738,8 +3955,8 @@ BEGIN
       row_ := drawing_.row;
       LOOP
          row_height_ := CASE
-            WHEN workbook.sheets(s_).row_fmts.exists(row_) AND workbook.sheets(s_).row_fmts(row_).height IS NOT null THEN
-               round (4 * workbook.sheets(s_).row_fmts(row_).height / 3)
+            WHEN wb_.sheets(s_).row_fmts.exists(row_) AND wb_.sheets(s_).row_fmts(row_).height IS NOT null THEN
+               round (4 * wb_.sheets(s_).row_fmts(row_).height / 3)
             ELSE 20
          END;
          EXIT WHEN img_height_rem_ < row_height_;
@@ -3775,7 +3992,7 @@ IS
    row_ovfl_   NUMBER;
 BEGIN
 
-   IF workbook.sheets(s_).drawings.count = 0 THEN
+   IF wb_.sheets(s_).drawings.count = 0 THEN
       goto skip_drawings;
    END IF;
 
@@ -3785,9 +4002,9 @@ BEGIN
    attrs_('xmlns:a')   := 'http://schemas.openxmlformats.org/drawingml/2006/main';
    nd_ws_ := Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'wsDr', 'xdr', attrs_);
 
-   FOR img_ IN 1 .. workbook.sheets(s_).drawings.count LOOP
+   FOR img_ IN 1 .. wb_.sheets(s_).drawings.count LOOP
 
-      drawing_ := workbook.sheets(s_).drawings(img_);
+      drawing_ := wb_.sheets(s_).drawings(img_);
       Calc_Image_Col_And_Row (to_col_, to_row_, col_ovfl_, row_ovfl_, drawing_, s_);
 
       attrs_.delete;
@@ -3879,12 +4096,12 @@ IS
    colspan_       NUMBER;
 BEGIN
 
-   IF workbook.sheets(s_).comments.count = 0 THEN
+   IF wb_.sheets(s_).comments.count = 0 THEN
       goto skiop_comments;
    END IF;
 
-   FOR c_ IN 1 .. workbook.sheets(s_).comments.count LOOP
-      ws_authors_(workbook.sheets(s_).comments(c_).author) := 0;
+   FOR c_ IN 1 .. wb_.sheets(s_).comments.count LOOP
+      ws_authors_(wb_.sheets(s_).comments(c_).author) := 0;
    END LOOP;
 
    -- xl/comments:P1.xml
@@ -3902,13 +4119,13 @@ BEGIN
    END LOOP;
 
    nd_cml_ := Xml_Node (doc_, nd_cms_, 'commentList');
-   FOR cm_ IN 1 .. workbook.sheets(s_).comments.count LOOP
+   FOR cm_ IN 1 .. wb_.sheets(s_).comments.count LOOP
       attrs_.delete;
-      attrs_('ref') := Alfan_Cell (workbook.sheets(s_).comments(cm_).column, workbook.sheets(s_).comments(cm_).row);
-      attrs_('authorId') := ws_authors_(workbook.sheets(s_).comments(cm_).author);
+      attrs_('ref') := Alfan_Cell (wb_.sheets(s_).comments(cm_).column, wb_.sheets(s_).comments(cm_).row);
+      attrs_('authorId') := ws_authors_(wb_.sheets(s_).comments(cm_).author);
       nd_cm_ := Xml_Node (doc_, nd_cml_, 'comment', attrs_);
       nd_tx_ := Xml_Node (doc_, nd_cm_, 'text');
-      IF workbook.sheets(s_).comments(cm_).author IS NOT null THEN
+      IF wb_.sheets(s_).comments(cm_).author IS NOT null THEN
          nd_r_  := Xml_Node (doc_, nd_tx_, 'r');
          nd_pr_ := Xml_Node (doc_, nd_r_, 'rPr');
          Xml_Node (doc_, nd_pr_, 'b');
@@ -3925,7 +4142,7 @@ BEGIN
          Xml_Node (doc_, nd_pr_, 'charset', attrs_);
          attrs_.delete;
          attrs_('xml:space') := 'preserve';
-         Xml_Text_Node (doc_, nd_r_, 't', workbook.sheets(s_).comments(cm_).author, attrs_);
+         Xml_Text_Node (doc_, nd_r_, 't', wb_.sheets(s_).comments(cm_).author, attrs_);
       END IF;
       nd_r_  := Xml_Node (doc_, nd_tx_, 'r');
       nd_pr_ := Xml_Node (doc_, nd_r_, 'rPr');
@@ -3942,8 +4159,8 @@ BEGIN
       Xml_Node (doc_, nd_pr_, 'charset', attrs_);
       attrs_.delete;
       attrs_('xml:space') := 'preserve';
-      nl_ := CASE WHEN workbook.sheets(s_).comments(cm_).author IS NOT null THEN chr(13) || chr(10) END;
-      Xml_Text_Node (doc_, nd_r_, 't', nl_ || workbook.sheets(s_).comments(cm_).text, attrs_);
+      nl_ := CASE WHEN wb_.sheets(s_).comments(cm_).author IS NOT null THEN chr(13) || chr(10) END;
+      Xml_Text_Node (doc_, nd_r_, 't', nl_ || wb_.sheets(s_).comments(cm_).text, attrs_);
    END LOOP;
 
    Add1Xml (excel_, rep('xl/comments:P1.xml',s_), Dbms_XmlDom.getXmlType(doc_).getClobVal);
@@ -3977,7 +4194,7 @@ BEGIN
    attrs_('o:connecttype')   := 'rect';
    Xml_Node (doc_, nd_st_, 'path', 'v', attrs_);
 
-   FOR cm_ IN 1 .. workbook.sheets(s_).comments.count LOOP
+   FOR cm_ IN 1 .. wb_.sheets(s_).comments.count LOOP
       attrs_.delete;
       attrs_('id')          := rep('_x0000_s:P1', to_char(cm_));
       attrs_('type')        := '#_x0000_t202';
@@ -4008,12 +4225,12 @@ BEGIN
       Xml_Node (doc_, nd_cd_, 'MoveWithCells', 'x');
       Xml_Node (doc_, nd_cd_, 'SizeWithCells', 'x');
 
-      comment_w_rem_ := workbook.sheets(s_).comments(cm_).width;
-      comment_h_     := workbook.sheets(s_).comments(cm_).height;
+      comment_w_rem_ := wb_.sheets(s_).comments(cm_).width;
+      comment_h_     := wb_.sheets(s_).comments(cm_).height;
       colspan_       := 1;
       LOOP
-         IF workbook.sheets(s_).widths.exists(workbook.sheets(s_).comments(cm_).column+colspan_) THEN
-            col_w_ := 256 * workbook.sheets(s_).widths(workbook.sheets(s_).comments(cm_).column+colspan_);
+         IF wb_.sheets(s_).widths.exists(wb_.sheets(s_).comments(cm_).column+colspan_) THEN
+            col_w_ := 256 * wb_.sheets(s_).widths(wb_.sheets(s_).comments(cm_).column+colspan_);
             col_w_ := trunc((col_w_+18)/256*7); -- assume default 11 point Calibri
          ELSE
             col_w_ := 64;
@@ -4026,17 +4243,17 @@ BEGIN
          doc_, nd_cd_, 'Anchor',
          rep (
             ':P1,15,:P2,30,:P3,:P4,:P5,:P6',
-            to_char(workbook.sheets(s_).comments(cm_).column),
-            to_char(workbook.sheets(s_).comments(cm_).row),
-            to_char(workbook.sheets(s_).comments(cm_).column+colspan_-1),
+            to_char(wb_.sheets(s_).comments(cm_).column),
+            to_char(wb_.sheets(s_).comments(cm_).row),
+            to_char(wb_.sheets(s_).comments(cm_).column+colspan_-1),
             to_char(round(comment_w_rem_)),
-            to_char(workbook.sheets(s_).comments(cm_).row+1+trunc(comment_h_/20)),
+            to_char(wb_.sheets(s_).comments(cm_).row+1+trunc(comment_h_/20)),
             to_char(mod(comment_h_, 20))
          ), 'x'
       );
       Xml_Text_Node (doc_, nd_cd_, 'AutoFill', 'False', 'x');
-      Xml_Text_Node (doc_, nd_cd_, 'Row', to_char(workbook.sheets(s_).comments(cm_).row-1), 'x');
-      Xml_Text_Node (doc_, nd_cd_, 'Column', to_char(workbook.sheets(s_).comments(cm_).column-1), 'x');
+      Xml_Text_Node (doc_, nd_cd_, 'Row', to_char(wb_.sheets(s_).comments(cm_).row-1), 'x');
+      Xml_Text_Node (doc_, nd_cd_, 'Column', to_char(wb_.sheets(s_).comments(cm_).column-1), 'x');
    END LOOP;
 
    Add1Xml (excel_, rep('xl/drawings/vmlDrawing:P1.vml',s_), Dbms_XmlDom.getXmlType(doc_).getClobVal);
@@ -4074,172 +4291,175 @@ BEGIN
    Finish_Drawings_Rels (excel_);
 
    -- Loop for each worksheet
-   s_ := workbook.sheets.first;
+   s_ := wb_.sheets.first;
    WHILE s_ IS not null LOOP
 
+if false then
       col_min_ := 16384;
       col_max_ := 1;
-      row_ix_ := workbook.sheets(s_).rows.first();
+      row_ix_ := wb_.sheets(s_).rows.first();
       WHILE row_ix_ IS not null LOOP
-         col_min_ := least (col_min_, workbook.sheets(s_).rows(row_ix_).first);
-         col_max_ := greatest (col_max_, workbook.sheets(s_).rows(row_ix_).last);
-         row_ix_  := workbook.sheets(s_).rows.next(row_ix_);
+         col_min_ := least (col_min_, wb_.sheets(s_).rows(row_ix_).first);
+         col_max_ := greatest (col_max_, wb_.sheets(s_).rows(row_ix_).last);
+         row_ix_  := wb_.sheets(s_).rows.next(row_ix_);
       END LOOP;
 
       addtxt2utf8blob_init(yyy_);
       addtxt2utf8blob ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" xmlns:x14="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" mc:Ignorable="x14ac" xmlns:x14ac="http://schemas.microsoft.com/office/spreadsheetml/2009/9/ac">' ||
-CASE WHEN workbook.sheets(s_).tabcolor IS not null THEN '<sheetPr><tabColor rgb="' || workbook.sheets(s_).tabcolor || '"/></sheetPr>' end ||
-'<dimension ref="' || alfan_col(col_min_) || workbook.sheets(s_).rows.first() || ':' || alfan_col(col_max_) || workbook.sheets(s_).rows.last() || '"/>
+CASE WHEN wb_.sheets(s_).tabcolor IS not null THEN '<sheetPr><tabColor rgb="' || wb_.sheets(s_).tabcolor || '"/></sheetPr>' end ||
+'<dimension ref="' || alfan_col(col_min_) || wb_.sheets(s_).rows.first() || ':' || alfan_col(col_max_) || wb_.sheets(s_).rows.last() || '"/>
 <sheetViews>
 <sheetView' || CASE WHEN s_ = 1 THEN ' tabSelected="1"' END || ' workbookViewId="0">', yyy_);
-      IF workbook.sheets(s_).freeze_rows > 0 AND workbook.sheets(s_).freeze_cols > 0 THEN
+      IF wb_.sheets(s_).freeze_rows > 0 AND wb_.sheets(s_).freeze_cols > 0 THEN
          addtxt2utf8blob (
-            '<pane xSplit="' || workbook.sheets(s_).freeze_cols || '" '
-            || 'ySplit="' || workbook.sheets(s_).freeze_rows || '" '
-            || 'topLeftCell="' || alfan_col(workbook.sheets(s_).freeze_cols+1) || (workbook.sheets(s_).freeze_rows+1) || '" '
+            '<pane xSplit="' || wb_.sheets(s_).freeze_cols || '" '
+            || 'ySplit="' || wb_.sheets(s_).freeze_rows || '" '
+            || 'topLeftCell="' || alfan_col(wb_.sheets(s_).freeze_cols+1) || (wb_.sheets(s_).freeze_rows+1) || '" '
             || 'activePane="bottomLeft" state="frozen"/>',
             yyy_
          );
       ELSE
-         IF workbook.sheets(s_).freeze_rows > 0 THEN
+         IF wb_.sheets(s_).freeze_rows > 0 THEN
             addtxt2utf8blob (
-               '<pane ySplit="' || workbook.sheets(s_).freeze_rows || '" topLeftCell="A' ||
-                  (workbook.sheets(s_).freeze_rows+1) || '" activePane="bottomLeft" state="frozen"/>',
+               '<pane ySplit="' || wb_.sheets(s_).freeze_rows || '" topLeftCell="A' ||
+                  (wb_.sheets(s_).freeze_rows+1) || '" activePane="bottomLeft" state="frozen"/>',
                yyy_
             );
          END IF;
-         IF workbook.sheets(s_).freeze_cols > 0 THEN
+         IF wb_.sheets(s_).freeze_cols > 0 THEN
             addtxt2utf8blob (
-               '<pane xSplit="' || workbook.sheets(s_).freeze_cols || '" topLeftCell="' ||
-               alfan_col(workbook.sheets(s_).freeze_cols+1) ||
+               '<pane xSplit="' || wb_.sheets(s_).freeze_cols || '" topLeftCell="' ||
+               alfan_col(wb_.sheets(s_).freeze_cols+1) ||
                '1" activePane="bottomLeft" state="frozen"/>',
                yyy_
             );
          END IF;
       END IF;
       addtxt2utf8blob ('</sheetView></sheetViews><sheetFormatPr defaultRowHeight="15" x14ac:dyDescent="0.25"/>', yyy_);
-      IF workbook.sheets(s_).widths.count > 0 THEN
+      IF wb_.sheets(s_).widths.count > 0 THEN
          addtxt2utf8blob ('<cols>', yyy_);
-         col_ix_ := workbook.sheets(s_).widths.first();
+         col_ix_ := wb_.sheets(s_).widths.first();
          WHILE col_ix_ IS not null LOOP
-            addtxt2utf8blob ('<col min="' || col_ix_ || '" max="' || col_ix_ || '" width="' || to_char(workbook.sheets(s_).widths(col_ix_), 'TM9', 'NLS_NUMERIC_CHARACTERS=.,' ) || '" customWidth="1"/>', yyy_);
-            col_ix_ := workbook.sheets(s_).widths.next(col_ix_);
+            addtxt2utf8blob ('<col min="' || col_ix_ || '" max="' || col_ix_ || '" width="' || to_char(wb_.sheets(s_).widths(col_ix_), 'TM9', 'NLS_NUMERIC_CHARACTERS=.,' ) || '" customWidth="1"/>', yyy_);
+            col_ix_ := wb_.sheets(s_).widths.next(col_ix_);
          END LOOP;
          addtxt2utf8blob('</cols>', yyy_);
       END IF;
       addtxt2utf8blob('<sheetData>', yyy_);
-      row_ix_ := workbook.sheets(s_).rows.first();
+      row_ix_ := wb_.sheets(s_).rows.first();
       WHILE row_ix_ IS not null LOOP
-         IF workbook.sheets(s_).row_fmts.exists(row_ix_) AND workbook.sheets(s_).row_fmts(row_ix_).height IS not null THEN
+         IF wb_.sheets(s_).row_fmts.exists(row_ix_) AND wb_.sheets(s_).row_fmts(row_ix_).height IS not null THEN
              addtxt2utf8blob( '<row r="' || row_ix_ || '" spans="' || col_min_ || ':' || col_max_ || '" customHeight="1" ht="'
-                         || to_char( workbook.sheets(s_).row_fmts(row_ix_).height, 'TM9', 'NLS_NUMERIC_CHARACTERS=.,' ) || '" >', yyy_ );
+                         || to_char( wb_.sheets(s_).row_fmts(row_ix_).height, 'TM9', 'NLS_NUMERIC_CHARACTERS=.,' ) || '" >', yyy_ );
          ELSE
             addtxt2utf8blob( '<row r="' || row_ix_ || '" spans="' || col_min_ || ':' || col_max_ || '">', yyy_ );
          END IF;
-         col_ix_ := workbook.sheets(s_).rows(row_ix_).first();
+         col_ix_ := wb_.sheets(s_).rows(row_ix_).first();
          WHILE col_ix_ IS not null LOOP
-            IF workbook.sheets(s_).rows(row_ix_)(col_ix_).formula_idx IS null THEN
+            IF wb_.sheets(s_).rows(row_ix_)(col_ix_).formula_idx IS null THEN
                formula_expr_ := null;
             ELSE
-               formula_expr_ := '<f>' || workbook.formulas(workbook.sheets(s_).rows(row_ix_)(col_ix_).formula_idx) || '</f>';
+               formula_expr_ := '<f>' || wb_.formulas(wb_.sheets(s_).rows(row_ix_)(col_ix_).formula_idx) || '</f>';
             END IF;
             addtxt2utf8blob ('<c r="' || alfan_col(col_ix_) || row_ix_ || '"'
-               || ' ' || workbook.sheets(s_).rows(row_ix_)(col_ix_).style
+               || ' ' || wb_.sheets(s_).rows(row_ix_)(col_ix_).style
                || '>' || formula_expr_ || '<v>'
-               || to_char(workbook.sheets(s_).rows(row_ix_)(col_ix_).value, 'TM9', 'NLS_NUMERIC_CHARACTERS=.,' )
+               || to_char(wb_.sheets(s_).rows(row_ix_)(col_ix_).value, 'TM9', 'NLS_NUMERIC_CHARACTERS=.,' )
                || '</v></c>', yyy_
             );
-            col_ix_ := workbook.sheets(s_).rows(row_ix_).next(col_ix_);
+            col_ix_ := wb_.sheets(s_).rows(row_ix_).next(col_ix_);
          END LOOP;
          addtxt2utf8blob( '</row>', yyy_ );
-         row_ix_ := workbook.sheets(s_).rows.next(row_ix_);
+         row_ix_ := wb_.sheets(s_).rows.next(row_ix_);
       END LOOP;
       addtxt2utf8blob( '</sheetData>', yyy_ );
-      FOR a IN 1 ..  workbook.sheets(s_).autofilters.count LOOP
+      FOR a IN 1 ..  wb_.sheets(s_).autofilters.count LOOP
          addtxt2utf8blob( '<autoFilter ref="' ||
-            alfan_col( nvl( workbook.sheets(s_).autofilters(a).column_start, col_min_ ) ) ||
-            nvl( workbook.sheets(s_).autofilters(a).row_start, workbook.sheets(s_).rows.first() ) || ':' ||
-            alfan_col(coalesce( workbook.sheets(s_).autofilters(a).column_end, workbook.sheets(s_).autofilters(a).column_start, col_max_)) ||
-            nvl(workbook.sheets(s_).autofilters(a).row_end, workbook.sheets(s_).rows.last()) || '"/>',
+            alfan_col( nvl( wb_.sheets(s_).autofilters(a).column_start, col_min_ ) ) ||
+            nvl( wb_.sheets(s_).autofilters(a).row_start, wb_.sheets(s_).rows.first() ) || ':' ||
+            alfan_col(coalesce( wb_.sheets(s_).autofilters(a).column_end, wb_.sheets(s_).autofilters(a).column_start, col_max_)) ||
+            nvl(wb_.sheets(s_).autofilters(a).row_end, wb_.sheets(s_).rows.last()) || '"/>',
             yyy_
          );
       END LOOP;
-      IF workbook.sheets(s_).mergecells.count > 0 THEN
-         addtxt2utf8blob( '<mergeCells count="' || to_char(workbook.sheets(s_).mergecells.count) || '">', yyy_);
-         FOR m IN 1 ..  workbook.sheets(s_).mergecells.count LOOP
-            addtxt2utf8blob( '<mergeCell ref="' || workbook.sheets(s_).mergecells( m ) || '"/>', yyy_);
+      IF wb_.sheets(s_).mergecells.count > 0 THEN
+         addtxt2utf8blob( '<mergeCells count="' || to_char(wb_.sheets(s_).mergecells.count) || '">', yyy_);
+         FOR m IN 1 ..  wb_.sheets(s_).mergecells.count LOOP
+            addtxt2utf8blob( '<mergeCell ref="' || wb_.sheets(s_).mergecells( m ) || '"/>', yyy_);
          END LOOP;
          addtxt2utf8blob('</mergeCells>', yyy_);
       END IF;
 --
-      IF workbook.sheets(s_).validations.count > 0 THEN
+      IF wb_.sheets(s_).validations.count > 0 THEN
          addtxt2utf8blob (
-            '<dataValidations count="' || to_char( workbook.sheets(s_).validations.count ) || '">', yyy_
+            '<dataValidations count="' || to_char( wb_.sheets(s_).validations.count ) || '">', yyy_
          );
-         FOR m IN 1 ..  workbook.sheets(s_).validations.count LOOP
+         FOR m IN 1 ..  wb_.sheets(s_).validations.count LOOP
             addtxt2utf8blob ('<dataValidation' ||
-               ' type="' || workbook.sheets(s_).validations(m).type || '"' ||
-               ' errorStyle="' || workbook.sheets(s_).validations(m).errorstyle || '"' ||
-               ' allowBlank="' || CASE WHEN nvl(workbook.sheets(s_).validations(m).allowBlank, true) THEN '1' ELSE '0' END || '"' ||
-               ' sqref="' || workbook.sheets(s_).validations(m).sqref || '"', yyy_ );
-            IF workbook.sheets(s_).validations(m).prompt IS not null THEN
-               addtxt2utf8blob(' showInputMessage="1" prompt="' || workbook.sheets(s_).validations(m).prompt || '"', yyy_);
-               IF workbook.sheets(s_).validations(m).title IS not null THEN
-                  addtxt2utf8blob( ' promptTitle="' || workbook.sheets(s_).validations(m).title || '"', yyy_);
+               ' type="' || wb_.sheets(s_).validations(m).type || '"' ||
+               ' errorStyle="' || wb_.sheets(s_).validations(m).errorstyle || '"' ||
+               ' allowBlank="' || CASE WHEN nvl(wb_.sheets(s_).validations(m).allowBlank, true) THEN '1' ELSE '0' END || '"' ||
+               ' sqref="' || wb_.sheets(s_).validations(m).sqref || '"', yyy_ );
+            IF wb_.sheets(s_).validations(m).prompt IS not null THEN
+               addtxt2utf8blob(' showInputMessage="1" prompt="' || wb_.sheets(s_).validations(m).prompt || '"', yyy_);
+               IF wb_.sheets(s_).validations(m).title IS not null THEN
+                  addtxt2utf8blob( ' promptTitle="' || wb_.sheets(s_).validations(m).title || '"', yyy_);
                END IF;
             END IF;
-            IF workbook.sheets(s_).validations(m).showerrormessage THEN
+            IF wb_.sheets(s_).validations(m).showerrormessage THEN
                addtxt2utf8blob (' showErrorMessage="1"', yyy_);
-               IF workbook.sheets(s_).validations(m).error_title IS not null THEN
+               IF wb_.sheets(s_).validations(m).error_title IS not null THEN
                   addtxt2utf8blob (
-                     ' errorTitle="' || workbook.sheets(s_).validations(m).error_title || '"', yyy_
+                     ' errorTitle="' || wb_.sheets(s_).validations(m).error_title || '"', yyy_
                   );
                END IF;
-               IF workbook.sheets(s_).validations(m).error_txt IS not null THEN
+               IF wb_.sheets(s_).validations(m).error_txt IS not null THEN
                   addtxt2utf8blob (
-                     ' error="' || workbook.sheets(s_).validations(m).error_txt || '"', yyy_
+                     ' error="' || wb_.sheets(s_).validations(m).error_txt || '"', yyy_
                   );
                END IF;
             END IF;
             addtxt2utf8blob( '>', yyy_ );
-            IF workbook.sheets(s_).validations(m).formula1 IS not null THEN
-               addtxt2utf8blob ('<formula1>' || workbook.sheets(s_).validations(m).formula1 || '</formula1>', yyy_);
+            IF wb_.sheets(s_).validations(m).formula1 IS not null THEN
+               addtxt2utf8blob ('<formula1>' || wb_.sheets(s_).validations(m).formula1 || '</formula1>', yyy_);
             END IF;
-            IF workbook.sheets(s_).validations(m).formula2 IS not null THEN
-               addtxt2utf8blob ('<formula2>' || workbook.sheets(s_).validations(m).formula2 || '</formula2>', yyy_);
+            IF wb_.sheets(s_).validations(m).formula2 IS not null THEN
+               addtxt2utf8blob ('<formula2>' || wb_.sheets(s_).validations(m).formula2 || '</formula2>', yyy_);
             END IF;
             addtxt2utf8blob ('</dataValidation>', yyy_);
          END LOOP;
          addtxt2utf8blob ('</dataValidations>', yyy_);
       END IF;
 
-      IF workbook.sheets(s_).hyperlinks.count > 0 THEN
+      IF wb_.sheets(s_).hyperlinks.count > 0 THEN
          addtxt2utf8blob ('<hyperlinks>', yyy_);
-         FOR h IN 1 ..  workbook.sheets(s_).hyperlinks.count LOOP
-            addtxt2utf8blob ('<hyperlink ref="' || workbook.sheets(s_).hyperlinks(h).cell || '" r:id="rId' || id_ || '"/>', yyy_);
+         FOR h IN 1 ..  wb_.sheets(s_).hyperlinks.count LOOP
+            addtxt2utf8blob ('<hyperlink ref="' || wb_.sheets(s_).hyperlinks(h).cell || '" r:id="rId' || id_ || '"/>', yyy_);
             id_ := id_ + 1;
          END LOOP;
          addtxt2utf8blob ('</hyperlinks>', yyy_);
       END IF;
       addtxt2utf8blob( '<pageMargins left="0.7" right="0.7" top="0.75" bottom="0.75" header="0.3" footer="0.3"/>', yyy_);
-      IF workbook.sheets(s_).drawings.count > 0 THEN
+      IF wb_.sheets(s_).drawings.count > 0 THEN
          addtxt2utf8blob ( '<drawing r:id="rId' || id_ || '"/>', yyy_);
          id_ := id_ + 1;
       END IF;
-      IF workbook.sheets(s_).comments.count > 0 THEN
+      IF wb_.sheets(s_).comments.count > 0 THEN
          addtxt2utf8blob( '<legacyDrawing r:id="rId' || id_ || '"/>', yyy_);
       END IF;
-
       addtxt2utf8blob( '</worksheet>', yyy_);
+
       addtxt2utf8blob_finish(yyy_);
       add1file (excel_, rep('xl/worksheets/sheet:P1.xml',s_), yyy_);
+else
+      Finish_Worksheet (excel_, s_);        -- xl/worksheets/sheet:P1.xml
+end if;
+      Finish_Ws_Relationships (excel_, s_); -- xl/worksheets/_rels/sheet:P1.xml.rels
+      Finish_Ws_Drawings (excel_, s_);      -- xl/drawings/drawing:P1.xml
+      Finish_Ws_Comments (excel_, s_);      -- xl/drawings/vmlDrawing:P1.vml
 
-      Finish_Ws_Relationships (excel_, s_);
-      Finish_Ws_Drawings (excel_, s_);
-      Finish_Ws_Comments (excel_, s_);
-
-      s_ := workbook.sheets.next(s_);
+      s_ := wb_.sheets.next(s_);
 
    END LOOP;
    -- END Loop for each worksheet
@@ -4720,7 +4940,7 @@ PROCEDURE Create_Params_Sheet (
    sheet_       IN PLS_INTEGER := null )
 IS
    row_ NUMBER := 2;
-   sh_  PLS_INTEGER := nvl(sheet_, workbook.sheets.count);
+   sh_  PLS_INTEGER := nvl(sheet_, wb_.sheets.count);
 BEGIN
 
    -- Information about the report is static, with the only option being as to
