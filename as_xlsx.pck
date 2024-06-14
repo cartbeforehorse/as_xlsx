@@ -127,14 +127,20 @@ PROCEDURE Add_NumFmt (
 --  when external code is trying to generate formulas.
 --
 FUNCTION Alfan_Cell (
-   col_ IN PLS_INTEGER,
-   row_ IN PLS_INTEGER ) RETURN VARCHAR2;
+   col_  IN PLS_INTEGER,
+   row_  IN PLS_INTEGER,
+   fix1_ IN BOOLEAN := false,
+   fix2_ IN BOOLEAN := false ) RETURN VARCHAR2;
 
 FUNCTION Alfan_Range (
    col_tl_ IN PLS_INTEGER,
    row_tl_ IN PLS_INTEGER,
    col_br_ IN PLS_INTEGER,
-   row_br_ IN PLS_INTEGER ) RETURN VARCHAR2;
+   row_br_ IN PLS_INTEGER,
+   fix1_   IN BOOLEAN := false,
+   fix2_   IN BOOLEAN := false,
+   fix3_   IN BOOLEAN := false,
+   fix4_   IN BOOLEAN := false ) RETURN VARCHAR2;
 
 
 ---------------------------------------
@@ -370,31 +376,31 @@ PROCEDURE Mergecells (
    sheet_  IN PLS_INTEGER := null );
 
 PROCEDURE List_Validation (
-   p_sqref_col    IN PLS_INTEGER,
-   p_sqref_row    IN PLS_INTEGER,
-   p_tl_col       IN PLS_INTEGER, -- top left
-   p_tl_row       IN PLS_INTEGER,
-   p_br_col       IN PLS_INTEGER, -- bottom right
-   p_br_row       IN PLS_INTEGER,
-   p_style        IN VARCHAR2    := 'stop', -- stop, warning, information
-   p_title        IN VARCHAR2    := null,
-   p_prompt       IN VARCHAR     := null,
-   p_show_error   IN BOOLEAN     := false,
-   p_error_title  IN VARCHAR2    := null,
-   p_error_txt    IN VARCHAR2    := null,
-   sheet_         IN PLS_INTEGER := null );
+   sqref_col_   IN PLS_INTEGER,
+   sqref_row_   IN PLS_INTEGER,
+   tl_col_      IN PLS_INTEGER, -- top left
+   tl_row_      IN PLS_INTEGER,
+   br_col_      IN PLS_INTEGER, -- bottom right
+   br_row_      IN PLS_INTEGER,
+   style_       IN VARCHAR2    := 'stop', -- stop, warning, information
+   title_       IN VARCHAR2    := null,
+   prompt_      IN VARCHAR     := null,
+   show_error_  IN BOOLEAN     := false,
+   error_title_ IN VARCHAR2    := null,
+   error_txt_   IN VARCHAR2    := null,
+   sheet_       IN PLS_INTEGER := null );
 
 PROCEDURE List_Validation (
-   p_sqref_col    IN PLS_INTEGER,
-   p_sqref_row    IN PLS_INTEGER,
-   p_defined_name IN VARCHAR2,
-   p_style        IN VARCHAR2    := 'stop', -- stop, warning, information
-   p_title        IN VARCHAR2    := null,
-   p_prompt       IN VARCHAR     := null,
-   p_show_error   IN BOOLEAN     := false,
-   p_error_title  IN VARCHAR2    := null,
-   p_error_txt    IN VARCHAR2    := null,
-   sheet_         IN PLS_INTEGER := null );
+   sqref_col_    IN PLS_INTEGER,
+   sqref_row_    IN PLS_INTEGER,
+   defined_name_ IN VARCHAR2,
+   style_        IN VARCHAR2    := 'stop', -- stop, warning, information
+   title_        IN VARCHAR2    := null,
+   prompt_       IN VARCHAR     := null,
+   show_error_   IN BOOLEAN     := false,
+   error_title_  IN VARCHAR2    := null,
+   error_txt_    IN VARCHAR2    := null,
+   sheet_        IN PLS_INTEGER := null );
 
 PROCEDURE Add_Image (
    col_         IN PLS_INTEGER,
@@ -594,6 +600,12 @@ VERSION_ CONSTANT VARCHAR2(20) := 'as_xlsx20';
 LOCAL_FILE_HEADER_        CONSTANT RAW(4) := hextoraw('504B0304'); -- Local file header signature
 END_OF_CENTRAL_DIRECTORY_ CONSTANT RAW(4) := hextoraw('504B0506'); -- End of central directory signature
 
+CELL_DT_STRING_           CONSTANT VARCHAR2(10) := 'string';
+CELL_DT_NUMBER_           CONSTANT VARCHAR2(10) := 'number';
+CELL_DT_DATE_             CONSTANT VARCHAR2(10) := 'date';
+CELL_DT_HYPERLINK_        CONSTANT VARCHAR2(10) := 'hyperlink';
+
+
 
 ---------------------------------------
 ---------------------------------------
@@ -621,7 +633,7 @@ TYPE tp_cell IS RECORD (
    datatype    VARCHAR2(30), -- string|number|date
    ora_value   tp_cell_value,
    value       NUMBER,
-   style       VARCHAR2(50),
+   style       PLS_INTEGER,
    formula_idx PLS_INTEGER
 );
 TYPE tp_cells is table of tp_cell index by PLS_INTEGER;
@@ -748,8 +760,8 @@ TYPE tp_numFmtIndexes is table of PLS_INTEGER index by PLS_INTEGER;
 TYPE tp_strings is table of PLS_INTEGER index by VARCHAR2(32767 char);
 TYPE tp_str_ind is table of VARCHAR2(32767 char) index by PLS_INTEGER;
 TYPE tp_defined_name is record (
-   name VARCHAR2(32767 char),
-   ref VARCHAR2(32767 char),
+   name  VARCHAR2(32767 char),
+   ref   VARCHAR2(32767 char),
    sheet PLS_INTEGER
 );
 TYPE tp_defined_names IS TABLE OF tp_defined_name index by PLS_INTEGER;
@@ -1242,24 +1254,66 @@ IS BEGIN
 END Alfan_Col;
 
 FUNCTION Alfan_Cell (
-   col_ IN PLS_INTEGER,
-   row_ IN PLS_INTEGER ) RETURN VARCHAR2
+   col_  IN PLS_INTEGER,
+   row_  IN PLS_INTEGER,
+   fix1_ IN BOOLEAN := false,
+   fix2_ IN BOOLEAN := false ) RETURN VARCHAR2
 IS
+   d1_  VARCHAR2(1) := CASE WHEN fix1_ THEN '$' END;
+   d2_  VARCHAR2(1) := CASE WHEN fix2_ THEN '$' END;
 BEGIN
-   RETURN Alfan_Col (col_) || to_char(row_);
+   RETURN d1_ || Alfan_Col (col_) || d2_ || to_char(row_);
 END Alfan_Cell;
 
 FUNCTION Alfan_Range (
    col_tl_ IN PLS_INTEGER,
    row_tl_ IN PLS_INTEGER,
    col_br_ IN PLS_INTEGER,
-   row_br_ IN PLS_INTEGER ) RETURN VARCHAR2
+   row_br_ IN PLS_INTEGER,
+   fix1_   IN BOOLEAN := false,
+   fix2_   IN BOOLEAN := false,
+   fix3_   IN BOOLEAN := false,
+   fix4_   IN BOOLEAN := false ) RETURN VARCHAR2
 IS BEGIN
    IF col_tl_ IS null OR row_tl_ IS null OR col_br_ IS null OR row_br_ IS null THEN
       RETURN 'A1';
    END IF;
-   RETURN Alfan_Cell (col_tl_, row_tl_) || ':' || Alfan_Cell (col_br_, row_br_);
+   RETURN Alfan_Cell (col_tl_, row_tl_, fix1_, fix2_) || ':' ||
+          Alfan_Cell (col_br_, row_br_, fix3_, fix4_);
 END Alfan_Range;
+
+FUNCTION Alfan_Sheet_Range (
+   sheet_name_ IN VARCHAR2,
+   col_tl_     IN PLS_INTEGER,
+   row_tl_     IN PLS_INTEGER,
+   col_br_     IN PLS_INTEGER,
+   row_br_     IN PLS_INTEGER,
+   fix1_       IN BOOLEAN := true,
+   fix2_       IN BOOLEAN := true,
+   fix3_       IN BOOLEAN := true,
+   fix4_       IN BOOLEAN := true ) RETURN VARCHAR2
+IS BEGIN
+   RETURN '''' || sheet_name_ || '''!' ||
+      Alfan_Range (col_tl_, row_tl_, col_br_, row_br_, fix1_, fix2_, fix3_, fix4_);
+END Alfan_Sheet_Range;
+
+FUNCTION Alfan_Sheet_Range (
+   sheet_  IN PLS_INTEGER,
+   col_tl_ IN PLS_INTEGER,
+   row_tl_ IN PLS_INTEGER,
+   col_br_ IN PLS_INTEGER,
+   row_br_ IN PLS_INTEGER,
+   fix1_   IN BOOLEAN := true,
+   fix2_   IN BOOLEAN := true,
+   fix3_   IN BOOLEAN := true,
+   fix4_   IN BOOLEAN := true ) RETURN VARCHAR2
+IS BEGIN
+   RETURN Alfan_Sheet_Range (
+      wb_.sheets(sheet_).name, col_tl_, row_tl_, col_br_, row_br_,
+      fix1_, fix2_, fix3_, fix4_
+   );
+END Alfan_Sheet_Range;
+
 
 FUNCTION Col_Alfan(
    col_ IN VARCHAR2 ) RETURN PLS_INTEGER
@@ -1313,11 +1367,11 @@ FUNCTION Get_Cell_Value (
 IS
    sh_ PLS_INTEGER := nvl(sheet_, wb_.sheets.count);
 BEGIN
-   IF wb_.sheets(sh_).rows(row_)(col_).datatype = 'string' THEN
+   IF wb_.sheets(sh_).rows(row_)(col_).datatype = CELL_DT_STRING_ THEN
       RETURN Get_Cell_Value_Str (col_, row_, sheet_);
-   ELSIF wb_.sheets(sh_).rows(row_)(col_).datatype = 'number' THEN
+   ELSIF wb_.sheets(sh_).rows(row_)(col_).datatype = CELL_DT_NUMBER_ THEN
       RETURN to_char(Get_Cell_VAlue_Num (col_, row_, sheet_));
-   ELSIF wb_.sheets(sh_).rows(row_)(col_).datatype = 'date' THEN
+   ELSIF wb_.sheets(sh_).rows(row_)(col_).datatype = CELL_DT_DATE_ THEN
       RETURN to_char (Get_Cell_Value_Date (col_, row_, sheet_), 'YYYY-MM-DD-HH24:MI');
    END IF;
 END Get_Cell_Value;
@@ -1382,7 +1436,10 @@ FUNCTION New_Sheet (
 IS
    s_ PLS_INTEGER := wb_.sheets.count + 1;
 BEGIN
-   wb_.sheets(s_).name := nvl(dbms_xmlgen.convert(translate(sheetname_, 'a/\[]*:?', 'a')), 'Sheet'||s_);
+   wb_.sheets(s_).name := nvl (
+      Dbms_XmlGen.Convert(translate(sheetname_, 'a/\[]*:?', 'a')),
+      'Sheet' || s_
+   );
    IF wb_.strings.count = 0 THEN
       wb_.str_cnt := 0;
    END IF;
@@ -1414,7 +1471,10 @@ PROCEDURE Set_Sheet_Name (
    sheet_  IN PLS_INTEGER,
    name_   IN VARCHAR2 )
 IS BEGIN
-   wb_.sheets(sheet_).name := nvl(dbms_xmlgen.convert(translate(name_, 'a/\[]*:?', 'a')), 'Sheet'||sheet_);
+   wb_.sheets(sheet_).name := nvl (
+      Dbms_xmlgen.Convert (translate(name_, 'a/\[]*:?', 'a')),
+      'Sheet'  || sheet_
+   );
 END Set_Sheet_Name;
 
 PROCEDURE Set_Col_Width (
@@ -1674,17 +1734,17 @@ BEGIN
       cell_border_.top, cell_border_.bottom, cell_border_.left, cell_border_.right
    );
 
-   IF cell_dt_ = 'number' THEN
+   IF cell_dt_ = CELL_DT_NUMBER_ THEN
       Cell (
          col_, row_, Get_Cell_Value_Num (col_, row_, sh_), --wb_.sheets(sh_).rows(row_)(col_).ora_value.num_val,
          Xf_.numFmtId, Xf_.fontId, Xf_.fillId, border_id_, Xf_.alignment, sh_
       );
-   ELSIF cell_dt_ = 'string' THEN
+   ELSIF cell_dt_ = CELL_DT_STRING_ THEN
       Cell (
          col_, row_, Get_Cell_Value_Str (col_, row_, sh_), --wb_.sheets(sh_).rows(row_)(col_).ora_value.str_val,
          Xf_.numFmtId, Xf_.fontId, Xf_.fillId, border_id_, Xf_.alignment, sh_
       );
-   ELSIF cell_dt_ = 'date' THEN
+   ELSIF cell_dt_ = CELL_DT_DATE_ THEN
       Cell (
          col_, row_, Get_Cell_Value_Date (col_, row_, sh_), --wb_.sheets(sh_).rows(row_)(col_).ora_value.dt_val,
          Xf_.numFmtId, Xf_.fontId, Xf_.fillId, border_id_, Xf_.alignment, sh_
@@ -1818,9 +1878,8 @@ FUNCTION Get_XfId (
    fontId_    IN PLS_INTEGER  := null,
    fillId_    IN PLS_INTEGER  := null,
    borderId_  IN PLS_INTEGER  := null,
-   alignment_ IN tp_alignment := null ) RETURN VARCHAR2
+   alignment_ IN tp_alignment := null ) RETURN PLS_INTEGER
 IS
-   XfId_   PLS_INTEGER;
    Xf_     tp_Xf_fmt;
    col_Xf_ tp_Xf_fmt;
    row_Xf_ tp_Xf_fmt;
@@ -1858,41 +1917,29 @@ BEGIN
       Set_Col_Width (sheet_, col_, wb_.numFmts(wb_.numFmtIndexes(Xf_.numFmtId)).formatCode);
    END IF;
 
-   XfId_ := Get_Or_Create_XfId (Xf_);
-   RETURN 's="' || XfId_ || '"';
+   RETURN Get_Or_Create_XfId (Xf_);
 
 END Get_XfId;
-
-FUNCTION Extract_Id_From_Style (
-   style_ IN VARCHAR2 ) RETURN PLS_INTEGER
-IS BEGIN
-   RETURN CASE
-      WHEN style_ IS null OR style_ = 't="s" ' THEN to_number(null)
-      ELSE to_number(regexp_replace (style_, '.*s="(\d+)".*', '\1'))
-   END;
-END Extract_Id_From_Style;
 
 FUNCTION Get_Cell_XfId (
    sheet_ IN PLS_INTEGER,
    col_   IN PLS_INTEGER,
    row_   IN PLS_INTEGER ) RETURN PLS_INTEGER
 IS
-   style_tag_ VARCHAR2(50);
+   style_ PLS_INTEGER;
 BEGIN
    IF wb_.sheets(sheet_).rows.exists(row_) AND
       wb_.sheets(sheet_).rows(row_).exists(col_)
    THEN
-      style_tag_ := wb_.sheets(sheet_).rows(row_)(col_).style;
+      style_ := wb_.sheets(sheet_).rows(row_)(col_).style;
    ELSE
       -- We need to create the cell in the PlSql model so that later functions
       -- can manipulate it
       CellB (col_, row_, sheet_ => sheet_);
    END IF;
 
-   RETURN CASE
-      WHEN style_tag_ IS null OR style_tag_ = 't="s"' THEN null
-      ELSE Extract_Id_From_Style (style_tag_)
-   END;
+   RETURN style_;
+
 END Get_Cell_XfId;
 
 -----
@@ -1982,7 +2029,7 @@ PROCEDURE Cell ( -- num version
 IS
    sh_ PLS_INTEGER := nvl(sheet_, wb_.sheets.count);
 BEGIN
-   wb_.sheets(sh_).rows(row_)(col_).datatype  := 'number';
+   wb_.sheets(sh_).rows(row_)(col_).datatype  := CELL_DT_NUMBER_;
    wb_.sheets(sh_).rows(row_)(col_).ora_value := tp_cell_value (
       str_val => '', num_val => value_, dt_val => null
    );
@@ -2071,7 +2118,7 @@ IS
    sh_    PLS_INTEGER  := nvl(sheet_, wb_.sheets.count);
    align_ tp_alignment := alignment_;
 BEGIN
-   wb_.sheets(sh_).rows(row_)(col_).datatype  := 'string';
+   wb_.sheets(sh_).rows(row_)(col_).datatype  := CELL_DT_STRING_;
    wb_.sheets(sh_).rows(row_)(col_).ora_value := tp_cell_value (
       str_val => value_, num_val => null, dt_val => null
    );
@@ -2079,7 +2126,7 @@ BEGIN
    IF align_.wrapText IS null AND instr(value_, chr(13)) > 0 THEN
       align_.wrapText := true;
    END IF;
-   wb_.sheets(sh_).rows(row_)(col_).style := 't="s" ' || get_XfId (
+   wb_.sheets(sh_).rows(row_)(col_).style := get_XfId (
       sh_, col_, row_, numFmtId_, fontId_, fillId_, borderId_, align_
    );
 END Cell;
@@ -2147,7 +2194,7 @@ IS
    num_fmt_id_ PLS_INTEGER := numFmtId_;
    sh_         PLS_INTEGER := nvl(sheet_, wb_.sheets.count);
 BEGIN
-   wb_.sheets(sh_).rows(row_)(col_).datatype  := 'date';
+   wb_.sheets(sh_).rows(row_)(col_).datatype  := CELL_DT_DATE_;
    wb_.sheets(sh_).rows(row_)(col_).ora_value := tp_cell_value (
       str_val => '', num_val => null, dt_val => value_
    );
@@ -2245,6 +2292,8 @@ BEGIN
    wb_.sheets(sh_).rows(row_)(col_).style := XfId_;
 END Query_Date_Cell;
 
+--- This function assumes a string value;  perhaps it could be improved...
+--- todo
 PROCEDURE Condition_Color_Col (
    col_   IN PLS_INTEGER,
    sheet_ IN PLS_INTEGER := null )
@@ -2272,7 +2321,7 @@ BEGIN
          XfId_ := Get_Cell_XfId (sh_, col_, r_);
 
          IF XfId_ IS null THEN
-            wb_.sheets(sh_).rows(r_)(col_).style := 't="s" ' || get_XfId (
+            wb_.sheets(sh_).rows(r_)(col_).style := get_XfId (
                sh_, col_, r_, fillId_ => fills_(str_val_)
             );
          ELSE
@@ -2282,7 +2331,7 @@ BEGIN
             align_.vertical   := wb_.cellXfs(XfId_).alignment.vertical;
             align_.horizontal := wb_.cellXfs(XfId_).alignment.horizontal;
             align_.wrapText   := wb_.cellXfs(XfId_).alignment.wrapText;
-            wb_.sheets(sh_).rows(r_)(col_).style := 't="s" ' || get_XfId (
+            wb_.sheets(sh_).rows(r_)(col_).style := get_XfId (
                sh_, col_, r_, num_fmt_, font_id_, fills_(str_val_), border_id_, align_
             );
          END IF;
@@ -2300,15 +2349,21 @@ PROCEDURE Hyperlink (
    value_ IN VARCHAR2    := null,
    sheet_ IN PLS_INTEGER := null )
 IS
-   ix_ PLS_INTEGER;
-   sh_ PLS_INTEGER := nvl(sheet_, wb_.sheets.count);
+   ix_  PLS_INTEGER;
+   sh_  PLS_INTEGER   := nvl (sheet_, wb_.sheets.count);
+   val_ VARCHAR2(200) := nvl (value_, url_);
 BEGIN
-   wb_.sheets(sh_).rows(row_)(col_).value := add_string(nvl(value_, url_));
-   wb_.sheets(sh_).rows(row_)(col_).style := 't="s" ' || get_XfId(sh_, col_, row_, '', Get_Font('Calibri', theme_ => 10, underline_ => true));
+   wb_.sheets(sh_).rows(row_)(col_).datatype  := CELL_DT_HYPERLINK_;
+   wb_.sheets(sh_).rows(row_)(col_).ora_value := tp_cell_value (
+      str_val => val_, num_val => null, dt_val => null
+   );
+   wb_.sheets(sh_).rows(row_)(col_).value     := Add_String(val_);
+   wb_.sheets(sh_).rows(row_)(col_).style     := get_XfId(sh_, col_, row_, '', Get_Font('Calibri', theme_ => 10, underline_ => true));
    ix_ := wb_.sheets(sh_).hyperlinks.count + 1;
-   wb_.sheets(sh_).hyperlinks(ix_).cell := alfan_col(col_) || row_;
+   wb_.sheets(sh_).hyperlinks(ix_).cell := Alfan_Cell (col_, row_);
    wb_.sheets(sh_).hyperlinks(ix_).url := url_;
 END Hyperlink;
+
 
 PROCEDURE Comment (
    col_    IN PLS_INTEGER,
@@ -2427,91 +2482,90 @@ IS
    sh_ PLS_INTEGER := nvl (sheet_, wb_.sheets.count);
 BEGIN
    ix_ := wb_.sheets(sh_).mergecells.count + 1;
-   wb_.sheets(sh_).mergecells(ix_) :=
-      alfan_col(tl_col_) || tl_row_ || ':' || alfan_col(br_col_) || br_row_;
+   wb_.sheets(sh_).mergecells(ix_) := Alfan_Range (tl_col_, tl_row_, br_col_, br_row_);
 END Mergecells;
 
 PROCEDURE Add_Validation (
-   p_type        IN VARCHAR2,
-   p_sqref       IN VARCHAR2,
-   p_style       IN VARCHAR2    := 'stop', -- stop, warning, information
-   p_formula1    IN VARCHAR2    := null,
-   p_formula2    IN VARCHAR2    := null,
-   p_title       IN VARCHAR2    := null,
-   p_prompt      IN VARCHAR     := null,
-   p_show_error  IN BOOLEAN     := false,
-   p_error_title IN VARCHAR2    := null,
-   p_error_txt   IN VARCHAR2    := null,
+   type_        IN VARCHAR2,
+   sqref_       IN VARCHAR2,
+   style_       IN VARCHAR2    := 'stop', -- stop, warning, information
+   formula1_    IN VARCHAR2    := null,
+   formula2_    IN VARCHAR2    := null,
+   title_       IN VARCHAR2    := null,
+   prompt_      IN VARCHAR     := null,
+   show_error_  IN BOOLEAN     := false,
+   error_title_ IN VARCHAR2    := null,
+   error_txt_   IN VARCHAR2    := null,
    sheet_       IN PLS_INTEGER := null )
 IS
    ix_     PLS_INTEGER;
    sh_ PLS_INTEGER := nvl(sheet_, wb_.sheets.count);
 BEGIN
    ix_ := wb_.sheets(sh_).validations.count + 1;
-   wb_.sheets(sh_).validations(ix_).type        := p_type;
-   wb_.sheets(sh_).validations(ix_).errorstyle  := p_style;
-   wb_.sheets(sh_).validations(ix_).sqref       := p_sqref;
-   wb_.sheets(sh_).validations(ix_).formula1    := p_formula1;
-   wb_.sheets(sh_).validations(ix_).formula2    := p_formula2;
-   wb_.sheets(sh_).validations(ix_).error_title := p_error_title;
-   wb_.sheets(sh_).validations(ix_).error_txt   := p_error_txt;
-   wb_.sheets(sh_).validations(ix_).title       := p_title;
-   wb_.sheets(sh_).validations(ix_).prompt      := p_prompt;
-   wb_.sheets(sh_).validations(ix_).showerrormessage := p_show_error;
+   wb_.sheets(sh_).validations(ix_).type        := type_;
+   wb_.sheets(sh_).validations(ix_).errorstyle  := style_;
+   wb_.sheets(sh_).validations(ix_).sqref       := sqref_;
+   wb_.sheets(sh_).validations(ix_).formula1    := formula1_;
+   wb_.sheets(sh_).validations(ix_).formula2    := formula2_;
+   wb_.sheets(sh_).validations(ix_).error_title := error_title_;
+   wb_.sheets(sh_).validations(ix_).error_txt   := error_txt_;
+   wb_.sheets(sh_).validations(ix_).title       := title_;
+   wb_.sheets(sh_).validations(ix_).prompt      := prompt_;
+   wb_.sheets(sh_).validations(ix_).showerrormessage := show_error_;
 END Add_Validation;
 
 PROCEDURE List_Validation (
-   p_sqref_col    IN PLS_INTEGER,
-   p_sqref_row    IN PLS_INTEGER,
-   p_tl_col       IN PLS_INTEGER, -- top left
-   p_tl_row       IN PLS_INTEGER,
-   p_br_col       IN PLS_INTEGER, -- bottom right
-   p_br_row       IN PLS_INTEGER,
-   p_style        IN VARCHAR2    := 'stop', -- stop, warning, information
-   p_title        IN VARCHAR2    := null,
-   p_prompt       IN VARCHAR     := null,
-   p_show_error   IN BOOLEAN     := false,
-   p_error_title  IN VARCHAR2    := null,
-   p_error_txt    IN VARCHAR2    := null,
+   sqref_col_    IN PLS_INTEGER,
+   sqref_row_    IN PLS_INTEGER,
+   tl_col_       IN PLS_INTEGER, -- top left
+   tl_row_       IN PLS_INTEGER,
+   br_col_       IN PLS_INTEGER, -- bottom right
+   br_row_       IN PLS_INTEGER,
+   style_        IN VARCHAR2    := 'stop', -- stop, warning, information
+   title_        IN VARCHAR2    := null,
+   prompt_       IN VARCHAR     := null,
+   show_error_   IN BOOLEAN     := false,
+   error_title_  IN VARCHAR2    := null,
+   error_txt_    IN VARCHAR2    := null,
    sheet_        IN PLS_INTEGER := null )
 IS BEGIN
    Add_Validation (
-      p_type        => 'list',
-      p_sqref       => alfan_col(p_sqref_col) || p_sqref_row,
-      p_style       => lower(p_style),
-      p_formula1    => '$' || alfan_col(p_tl_col) || '$' || p_tl_row || ':$' || alfan_col(p_br_col) || '$' || p_br_row,
-      p_title       => p_title,
-      p_prompt      => p_prompt,
-      p_show_error  => p_show_error,
-      p_error_title => p_error_title,
-      p_error_txt   => p_error_txt,
+      type_        => 'list',
+      sqref_       => Alfan_Cell (sqref_col_, sqref_row_),
+      style_       => lower(style_),
+      formula1_    => Alfan_Range (tl_col_, tl_row_, br_col_, br_row_, true, true, true, true),
+      title_       => title_,
+      prompt_      => prompt_,
+      show_error_  => show_error_,
+      error_title_ => error_title_,
+      error_txt_   => error_txt_,
       sheet_       => sheet_
    );
 END List_Validation;
 
 PROCEDURE List_Validation (
-   p_sqref_col    IN PLS_INTEGER,
-   p_sqref_row    IN PLS_INTEGER,
-   p_defined_name IN VARCHAR2,
-   p_style        IN VARCHAR2    := 'stop', -- stop, warning, information
-   p_title        IN VARCHAR2    := null,
-   p_prompt       IN VARCHAR     := null,
-   p_show_error   IN BOOLEAN     := false,
-   p_error_title  IN VARCHAR2    := null,
-   p_error_txt    IN VARCHAR2    := null,
+   sqref_col_    IN PLS_INTEGER,
+   sqref_row_    IN PLS_INTEGER,
+   defined_name_ IN VARCHAR2,
+   style_        IN VARCHAR2    := 'stop', -- stop, warning, information
+   title_        IN VARCHAR2    := null,
+   prompt_       IN VARCHAR     := null,
+   show_error_   IN BOOLEAN     := false,
+   error_title_  IN VARCHAR2    := null,
+   error_txt_    IN VARCHAR2    := null,
    sheet_        IN PLS_INTEGER := null )
 IS BEGIN
    Add_Validation (
-      p_type        => 'list',
-      p_sqref       => alfan_col(p_sqref_col) || p_sqref_row,
-      p_style       => lower(p_style),
-      p_formula1    => p_defined_name,
-      p_title       => p_title,
-      p_prompt      => p_prompt,
-      p_show_error  => p_show_error,
-      p_error_title => p_error_title,
-      p_error_txt   => p_error_txt,
-      sheet_        => sheet_
+      type_        => 'list',
+      sqref_       => Alfan_Cell (sqref_col_, sqref_row_),
+      style_       => lower(style_),
+      formula1_    => defined_name_,
+      title_       => title_,
+      prompt_      => prompt_,
+      show_error_  => show_error_,
+      error_title_ => error_title_,
+      error_txt_   => error_txt_,
+      sheet_       => sheet_
    );
 END List_Validation;
 
@@ -2705,8 +2759,8 @@ IS
    sh_ PLS_INTEGER := nvl(sheet_, wb_.sheets.count);
 BEGIN
    ix_ := wb_.defined_names.count + 1;
-   wb_.defined_names(ix_).name := name_;
-   wb_.defined_names(ix_).ref := 'Sheet' || sh_ || '!$' || alfan_col(tl_col_) || '$' || tl_row_ || ':$' || alfan_col(br_col_) || '$' || br_row_;
+   wb_.defined_names(ix_).name  := name_;
+   wb_.defined_names(ix_).ref   := Alfan_Sheet_Range (sh_, tl_col_, tl_row_, br_col_, br_row_);
    wb_.defined_names(ix_).sheet := localsheet_;
 END Defined_Name;
 
@@ -3513,13 +3567,13 @@ BEGIN
 
    IF wb_.defined_names.count > 0 THEN
       nd_dnm_ := Xml_Node (doc_, nd_wb_, 'definedNames');
-      FOR s_ IN 1 .. wb_.defined_names.count LOOP
+      FOR dn_ IN 1 .. wb_.defined_names.count LOOP
          attrs_.delete;
-         attrs_('name') := wb_.defined_names(s_).name;
-         IF wb_.defined_names(s_).sheet IS NOT null THEN
-            attrs_('localSheetId') := to_char(wb_.defined_names(s_).sheet);
+         attrs_('name') := wb_.defined_names(dn_).name;
+         IF wb_.defined_names(dn_).sheet IS NOT null THEN
+            attrs_('localSheetId') := to_char(wb_.defined_names(dn_).sheet);
          END IF;
-         Xml_Node (doc_, nd_dnm_, 'definedName', attrs_);
+         Xml_Text_Node (doc_, nd_dnm_, 'definedName', wb_.defined_names(dn_).ref, attrs_);
       END LOOP;
    END IF;
    attrs_.delete;
@@ -3632,17 +3686,17 @@ IS
    nd_dvs_  dbms_XmlDom.DomNode;
    nd_dv_   dbms_XmlDom.DomNode;
    nd_h_    dbms_XmlDom.DomNode;
-   row_ix_  PLS_INTEGER := wb_.sheets(s_).rows.first;
-   col_ix_  PLS_INTEGER;
+   row_     PLS_INTEGER := wb_.sheets(s_).rows.first;
+   col_     PLS_INTEGER;
    col_min_ PLS_INTEGER := 16384;
    col_max_ PLS_INTEGER := 1;
    id_      PLS_INTEGER := 1;
 BEGIN
 
-   WHILE row_ix_ IS not null LOOP
-      col_min_ := least (col_min_, wb_.sheets(s_).rows(row_ix_).first);
-      col_max_ := greatest (col_max_, wb_.sheets(s_).rows(row_ix_).last);
-      row_ix_  := wb_.sheets(s_).rows.next(row_ix_);
+   WHILE row_ IS not null LOOP
+      col_min_ := least (col_min_, wb_.sheets(s_).rows(row_).first);
+      col_max_ := greatest (col_max_, wb_.sheets(s_).rows(row_).last);
+      row_  := wb_.sheets(s_).rows.next(row_);
    END LOOP;
 
    Dbms_XmlDom.setVersion (doc_, '1.0" encoding="UTF-8" standalone="yes');
@@ -3698,44 +3752,47 @@ BEGIN
    IF wb_.sheets(s_).widths.count > 0 THEN
       nd_cls_ := Xml_Node (doc_, nd_ws_, 'cols');
       attrs_.delete;
-      col_ix_ := wb_.sheets(s_).widths.first;
-      WHILE col_ix_ IS NOT null LOOP
-         attrs_('min')         := col_ix_;
-         attrs_('max')         := col_ix_;
-         attrs_('width')       := to_char (wb_.sheets(s_).widths(col_ix_), 'TM9', 'NLS_NUMERIC_CHARACTERS=.,');
+      col_ := wb_.sheets(s_).widths.first;
+      WHILE col_ IS NOT null LOOP
+         attrs_('min')         := col_;
+         attrs_('max')         := col_;
+         attrs_('width')       := to_char (wb_.sheets(s_).widths(col_), 'TM9', 'NLS_NUMERIC_CHARACTERS=.,');
          attrs_('customWidth') := '1';
          Xml_Node (doc_, nd_cls_, 'col', attrs_);
-         col_ix_ := wb_.sheets(s_).widths.next(col_ix_);
+         col_ := wb_.sheets(s_).widths.next(col_);
       END LOOP;
    END IF;
 
    nd_sd_ := Xml_Node (doc_, nd_ws_, 'sheetData');
-   row_ix_ := wb_.sheets(s_).rows.first;
-   WHILE row_ix_ IS NOT null LOOP
+   row_   := wb_.sheets(s_).rows.first;
+   WHILE row_ IS NOT null LOOP
       attrs_.delete;
-      attrs_('r')     := to_char(row_ix_);
+      attrs_('r')     := to_char(row_);
       attrs_('spans') := to_char(col_min_) || ':' || to_char(col_max_);
-      IF wb_.sheets(s_).row_fmts.exists(row_ix_) AND wb_.sheets(s_).row_fmts(row_ix_).height IS NOT null THEN
+      IF wb_.sheets(s_).row_fmts.exists(row_) AND wb_.sheets(s_).row_fmts(row_).height IS NOT null THEN
          attrs_('customHeight') := '1';
-         attrs_('ht')           := to_char (wb_.sheets(s_).row_fmts(row_ix_).height, 'TM9', 'NLS_NUMERIC_CHARACTERS=.,');
+         attrs_('ht')           := to_char (wb_.sheets(s_).row_fmts(row_).height, 'TM9', 'NLS_NUMERIC_CHARACTERS=.,');
       END IF;
       nd_r_ := Xml_Node (doc_, nd_sd_, 'row', attrs_);
 
-      col_ix_ := wb_.sheets(s_).rows(row_ix_).first;
-      WHILE col_ix_ IS NOT null LOOP
+      col_ := wb_.sheets(s_).rows(row_).first;
+      WHILE col_ IS NOT null LOOP
          attrs_.delete;
-         attrs_('r') := Alfan_Cell (col_ix_, row_ix_);
-         -- osian
-         -- this is complicated, because the string gets built differently for the style
-         -- style must be added here, including `t=""` attrs_('t') := '';
-         nd_c_ := Xml_Node (doc_, nd_r_, 'c', attrs_);
-         IF wb_.sheets(s_).rows(row_ix_)(col_ix_).formula_idx IS NOT null THEN
-            Xml_Text_Node (doc_, nd_c_, 'f', wb_.formulas(wb_.sheets(s_).rows(row_ix_)(col_ix_).formula_idx));
+         attrs_('r') := Alfan_Cell (col_, row_);
+         IF wb_.sheets(s_).rows(row_)(col_).datatype IN (CELL_DT_STRING_, CELL_DT_HYPERLINK_) THEN
+            attrs_('t') := 's';
          END IF;
-         Xml_Text_Node (doc_, nd_c_, 'v', to_char(wb_.sheets(s_).rows(row_ix_)(col_ix_).value, 'TM9', 'NLS_NUMERIC_CHARACTERS=.,'));
-         col_ix_ := wb_.sheets(s_).rows(row_ix_).next(col_ix_);
+         IF wb_.sheets(s_).rows(row_)(col_).style IS NOT null THEN
+            attrs_('s') := to_char(wb_.sheets(s_).rows(row_)(col_).style);
+         END IF;
+         nd_c_ := Xml_Node (doc_, nd_r_, 'c', attrs_);
+         IF wb_.sheets(s_).rows(row_)(col_).formula_idx IS NOT null THEN
+            Xml_Text_Node (doc_, nd_c_, 'f', wb_.formulas(wb_.sheets(s_).rows(row_)(col_).formula_idx));
+         END IF;
+         Xml_Text_Node (doc_, nd_c_, 'v', to_char(wb_.sheets(s_).rows(row_)(col_).value, 'TM9', 'NLS_NUMERIC_CHARACTERS=.,'));
+         col_ := wb_.sheets(s_).rows(row_).next(col_);
       END LOOP;
-      row_ix_ := wb_.sheets(s_).rows.next(row_ix_);
+      row_ := wb_.sheets(s_).rows.next(row_);
    END LOOP;
 
    FOR af_ IN 1 .. wb_.sheets(s_).autofilters.count LOOP
