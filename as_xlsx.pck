@@ -613,6 +613,10 @@ CELL_DT_HYPERLINK_        CONSTANT VARCHAR2(10) := 'hyperlink';
 -- Type Definitions
 --
 --
+
+-----
+-- formatting types
+--
 TYPE tp_XF_fmt IS RECORD (
    numFmtId  PLS_INTEGER,
    fontId    PLS_INTEGER,
@@ -621,54 +625,50 @@ TYPE tp_XF_fmt IS RECORD (
    alignment tp_alignment,
    height    NUMBER
 );
-TYPE tp_col_fmts is table of tp_XF_fmt index by PLS_INTEGER;
-TYPE tp_row_fmts is table of tp_XF_fmt index by PLS_INTEGER;
-TYPE tp_widths is table of NUMBER index by PLS_INTEGER;
+TYPE tp_col_fmts IS TABLE OF tp_XF_fmt INDEX BY PLS_INTEGER;
+TYPE tp_row_fmts IS TABLE OF tp_XF_fmt INDEX BY PLS_INTEGER;
+TYPE tp_widths IS TABLE OF NUMBER INDEX BY PLS_INTEGER;
+-- Cell properties
 TYPE tp_cell_value IS RECORD (
    str_val  VARCHAR2(32000),
    num_val  NUMBER,
-   dt_val   DATE
-);
+   dt_val   DATE );
 TYPE tp_cell IS RECORD (
    datatype    VARCHAR2(30), -- string|number|date
    ora_value   tp_cell_value,
    value       NUMBER,
    style       PLS_INTEGER,
-   formula_idx PLS_INTEGER
-);
-TYPE tp_cells is table of tp_cell index by PLS_INTEGER;
-TYPE tp_rows is table of tp_cells index by PLS_INTEGER;
+   formula_idx PLS_INTEGER );
+TYPE tp_cells IS TABLE OF tp_cell INDEX BY PLS_INTEGER;
+TYPE tp_rows IS TABLE OF tp_cells INDEX BY PLS_INTEGER;
 
-TYPE tp_autofilter is record (
+TYPE tp_autofilter IS RECORD (
    column_start PLS_INTEGER,
    column_end   PLS_INTEGER,
    row_start    PLS_INTEGER,
-   row_end PLS_INTEGER
-);
-TYPE tp_autofilters is table of tp_autofilter index by PLS_INTEGER;
+   row_end PLS_INTEGER );
+TYPE tp_autofilters IS TABLE OF tp_autofilter INDEX BY PLS_INTEGER;
 
-TYPE tp_hyperlink is record (
+TYPE tp_hyperlink IS RECORD (
    cell VARCHAR2(10),
-   url  VARCHAR2(1000)
-);
-TYPE tp_hyperlinks is table of tp_hyperlink index by PLS_INTEGER;
+   url  VARCHAR2(1000) );
+TYPE tp_hyperlinks IS TABLE OF tp_hyperlink INDEX BY PLS_INTEGER;
 
-SUBTYPE tp_author is VARCHAR2(32767 char);
-TYPE tp_authors is table of PLS_INTEGER index by tp_author;
+-----
+-- comment types
+SUBTYPE tp_author IS VARCHAR2(32767 char);
+TYPE tp_authors IS TABLE OF PLS_INTEGER INDEX BY tp_author;
 
-TYPE tp_formulas is table of VARCHAR2(32767) index by PLS_INTEGER;
-
-TYPE tp_comment is record (
+TYPE tp_comment IS RECORD (
    text   VARCHAR2(32767 char),
    author tp_author,
    row    PLS_INTEGER,
    column PLS_INTEGER,
    width  PLS_INTEGER,
-   height PLS_INTEGER
-);
-TYPE tp_comments   is table of tp_comment index by PLS_INTEGER;
+   height PLS_INTEGER );
+TYPE tp_comments   IS TABLE OF tp_comment INDEX BY PLS_INTEGER;
 
-TYPE tp_mergecells is table of VARCHAR2(21) index by PLS_INTEGER;
+TYPE tp_mergecells IS TABLE OF VARCHAR2(21) INDEX BY PLS_INTEGER;
 
 TYPE tp_validation IS RECORD (
    type             VARCHAR2(10),
@@ -707,6 +707,9 @@ TYPE tp_drawing IS RECORD (
 );
 TYPE tp_drawings IS TABLE OF tp_drawing INDEX BY PLS_INTEGER;
 
+-----
+-- sheet type
+--
 TYPE tp_sheet IS RECORD (
    rows        tp_rows,
    widths      tp_widths,
@@ -725,20 +728,24 @@ TYPE tp_sheet IS RECORD (
    pivots      tp_pivots,
    drawings    tp_drawings
 );
-TYPE tp_sheets is table of tp_sheet index by PLS_INTEGER;
+TYPE tp_sheets IS TABLE OF tp_sheet INDEX BY PLS_INTEGER;
+
+-----
+-- workbook types
+--
+TYPE tp_formulas IS TABLE OF VARCHAR2(32767) INDEX BY PLS_INTEGER;
+
 TYPE tp_numFmt IS RECORD (
    numFmtId   PLS_INTEGER,
-   formatCode VARCHAR2(100)
-);
-TYPE tp_numFmts is table of tp_numFmt index by PLS_INTEGER;
-TYPE tp_fill is record (
+   formatCode VARCHAR2(100) );
+TYPE tp_numFmts IS TABLE OF tp_numFmt INDEX BY PLS_INTEGER;
+TYPE tp_fill IS RECORD (
    patternType VARCHAR2(30),
    fgRGB VARCHAR2(8),
-   bgRGB VARCHAR2(8)
-);
-TYPE tp_fills is table of tp_fill index by PLS_INTEGER;
-TYPE tp_cellXfs is table of tp_xf_fmt index by PLS_INTEGER;
-TYPE tp_font is record (
+   bgRGB VARCHAR2(8) );
+TYPE tp_fills IS TABLE OF tp_fill INDEX BY PLS_INTEGER;
+TYPE tp_cellXfs IS TABLE OF tp_xf_fmt INDEX BY PLS_INTEGER;
+TYPE tp_font IS RECORD (
    name      VARCHAR2(100),
    family    PLS_INTEGER,
    fontsize  NUMBER,
@@ -746,34 +753,32 @@ TYPE tp_font is record (
    RGB       VARCHAR2(8),
    underline BOOLEAN,
    italic    BOOLEAN,
-   bold BOOLEAN
-);
-TYPE tp_fonts is table of tp_font index by PLS_INTEGER;
-TYPE tp_border is record (
+   bold      BOOLEAN );
+TYPE tp_fonts IS TABLE OF tp_font INDEX BY PLS_INTEGER;
+TYPE tp_border IS RECORD (
    top    VARCHAR2(17),
    bottom VARCHAR2(17),
    left   VARCHAR2(17),
-   right  VARCHAR2(17)
-);
-TYPE tp_borders is table of tp_border index by PLS_INTEGER;
-TYPE tp_numFmtIndexes is table of PLS_INTEGER index by PLS_INTEGER;
-TYPE tp_strings is table of PLS_INTEGER index by VARCHAR2(32767 char);
-TYPE tp_str_ind is table of VARCHAR2(32767 char) index by PLS_INTEGER;
-TYPE tp_defined_name is record (
+   right  VARCHAR2(17) );
+
+TYPE tp_borders IS TABLE OF tp_border INDEX BY PLS_INTEGER;
+TYPE tp_numFmtIndexes IS TABLE OF PLS_INTEGER INDEX BY PLS_INTEGER;
+TYPE tp_strings IS TABLE OF PLS_INTEGER INDEX BY VARCHAR2(32767 char);
+TYPE tp_str_ind IS TABLE OF VARCHAR2(32767 char) INDEX BY PLS_INTEGER;
+TYPE tp_defined_name IS RECORD (
    name  VARCHAR2(32767 char),
    ref   VARCHAR2(32767 char),
-   sheet PLS_INTEGER
-);
-TYPE tp_defined_names IS TABLE OF tp_defined_name index by PLS_INTEGER;
+   sheet PLS_INTEGER );
+TYPE tp_defined_names IS TABLE OF tp_defined_name INDEX BY PLS_INTEGER;
 
 TYPE tp_image IS RECORD (
    img_blob    BLOB,
-   img_hash    RAW(128), --NUMBER,
+   img_hash    RAW(128),
    extension   VARCHAR2(5),
    width       PLS_INTEGER,
    height      PLS_INTEGER
 );
-TYPE tp_images IS TABLE OF tp_image index by PLS_INTEGER;
+TYPE tp_images IS TABLE OF tp_image INDEX BY PLS_INTEGER;
 
 TYPE tp_book IS RECORD (
    sheets        tp_sheets,
@@ -798,6 +803,39 @@ g_useXf_              BOOLEAN := true;
 g_addtxt2utf8blob_tmp VARCHAR2(32767);
 
 TYPE xml_attrs_arr IS TABLE OF VARCHAR2(2000) INDEX BY VARCHAR2(200);
+
+
+
+---------------------------------------
+---------------------------------------
+-- 
+-- Exception handling
+--
+--
+-- Raise_App_Error()
+--   Written as a wrapper function to make it easier to enter your own code if
+--   you'd like to add some logging functionality or whatnot.
+--
+PROCEDURE Raise_App_Error (
+   err_text_ IN VARCHAR2,
+   p1_       IN VARCHAR2 := null,
+   p2_       IN VARCHAR2 := null,
+   p3_       IN VARCHAR2 := null,
+   p4_       IN VARCHAR2 := null,
+   p5_       IN VARCHAR2 := null,
+   p6_       IN VARCHAR2 := null,
+   p7_       IN VARCHAR2 := null,
+   p8_       IN VARCHAR2 := null,
+   p9_       IN VARCHAR2 := null,
+   p0_       IN VARCHAR2 := null,
+   repl_nl_  IN BOOLEAN  := true )
+IS
+BEGIN
+   Cbh_Utils_API.Raise_App_Error (
+      err_text_, p1_, p2_, p3_, p4_, p5_, p6_, p7_, p8_, p9_, p0_, repl_nl_
+   );
+END Raise_App_Error;
+
 
 ---------------------------------------
 ---------------------------------------
@@ -1757,7 +1795,10 @@ END Add_Border_To_Cell;
 -- Add_Border_To_Range()
 --   Take a range of cells and put a border around it!  The procedure will not
 --   override other settings in that that range of cells even if some of those
---   other settings have set borders on some of the internal cells
+--   other settings have set borders on some of the internal cells.
+--   The parameters of this function need to be changed to accept tl/br combos
+--   rather than height and width, in order for it to be consistent with other
+--   range management functions.
 --
 PROCEDURE Add_Border_To_Range (
    cell_left_ IN PLS_INTEGER,
@@ -1774,8 +1815,12 @@ IS
    row_end_    PLS_INTEGER := cell_top_ + height_ - 1;
 BEGIN
 
+   -- first we should catch any invalid parameter combinations
+   IF width_ < 1 OR height_ < 1 THEN
+      Raise_App_Error ('Width and height of a border-range must be greater than zero');
+
    -- for a 1 x 1 span...
-   IF width_ = 1 AND height_ = 1 THEN
+   ELSIF width_ = 1 AND height_ = 1 THEN
       Add_Border_To_Cell (cell_left_, cell_top_, style_, style_, style_, style_, sh_);
 
    -- for a n x 1 span...
@@ -2755,10 +2800,9 @@ PROCEDURE Defined_Name (
    sheet_      PLS_INTEGER := null,
    localsheet_ PLS_INTEGER := null )
 IS
-   ix_ PLS_INTEGER;
+   ix_ PLS_INTEGER := wb_.defined_names.count + 1;
    sh_ PLS_INTEGER := nvl(sheet_, wb_.sheets.count);
 BEGIN
-   ix_ := wb_.defined_names.count + 1;
    wb_.defined_names(ix_).name  := name_;
    wb_.defined_names(ix_).ref   := Alfan_Sheet_Range (sh_, tl_col_, tl_row_, br_col_, br_row_);
    wb_.defined_names(ix_).sheet := localsheet_;
@@ -2982,6 +3026,7 @@ IS
    attrs_    xml_attrs_arr;
 BEGIN
 
+   -- _rels/.rels
    Dbms_XmlDom.setVersion (doc_, '1.0" encoding="UTF-8" standalone="yes');
    attrs_('xmlns') := 'http://schemas.openxmlformats.org/package/2006/relationships';
    nd_rels_ := Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'Relationships', attrs_);
@@ -3284,6 +3329,7 @@ END Finish_Styles;
 PROCEDURE Finish_Theme (
    excel_ IN OUT NOCOPY BLOB )
 IS BEGIN
+   -- xl/theme/theme1.xml
    Add1Xml (excel_, 'xl/theme/theme1.xml',
 '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" name="Office Theme">
@@ -3527,6 +3573,7 @@ IS
    nd_dnm_ dbms_XmlDom.DomNode;
    attrs_  xml_attrs_arr;
    s_      PLS_INTEGER;
+   rel_      PLS_INTEGER := 4; -- see hard-coded rels in Finish_Workbook_Rels()
 BEGIN
 
    -- xl/workbook.xml
@@ -3560,9 +3607,11 @@ BEGIN
    WHILE s_ IS NOT null LOOP
       attrs_('name')    := wb_.sheets(s_).name;
       attrs_('sheetId') := to_char(s_);
-      attrs_('r:id')    := rep ('rId:P1', to_char (9 + s_));
+      attrs_('r:id')    := rep ('rId:P1', to_char(rel_));
       Xml_Node (doc_, nd_shs_, 'sheet', attrs_);
-      s_ := wb_.sheets.next(s_);
+      wb_.sheets(s_).wb_rel := rel_;
+      rel_ := rel_ + 1;
+      s_   := wb_.sheets.next(s_);
    END LOOP;
 
    IF wb_.defined_names.count > 0 THEN
@@ -3618,7 +3667,8 @@ BEGIN
 
    s_ := wb_.sheets.first;
    WHILE s_ IS NOT null LOOP
-      attrs_('Id')     := 'rId' || to_char(9+s_);
+
+      attrs_('Id')     := 'rId' || to_char(wb_.sheets(s_).wb_rel);
       attrs_('Type')   := 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet';
       attrs_('Target') := rep ('worksheets/sheet:P1.xml', s_);
       Xml_Node (doc_, nd_rls_, 'Relationship', attrs_);
@@ -4325,16 +4375,9 @@ end Finish_Ws_Comments;
 FUNCTION Finish RETURN BLOB
 IS
    excel_        BLOB;
-   yyy_          BLOB;
-   formula_expr_ VARCHAR2(32767 char);
    s_            PLS_INTEGER;
-   row_ix_       PLS_INTEGER;
-   col_ix_       PLS_INTEGER;
-   col_min_      PLS_INTEGER;
-   col_max_      PLS_INTEGER;
-   id_           PLS_INTEGER := 1;
-
 BEGIN
+
    Dbms_Lob.createTemporary (excel_, true);
 
    Finish_Content_Types (excel_);
@@ -4347,179 +4390,14 @@ BEGIN
    Finish_Workbook_Rels (excel_);
    Finish_Drawings_Rels (excel_);
 
-   -- Loop for each worksheet
    s_ := wb_.sheets.first;
    WHILE s_ IS not null LOOP
-
-if false then
-      col_min_ := 16384;
-      col_max_ := 1;
-      row_ix_ := wb_.sheets(s_).rows.first();
-      WHILE row_ix_ IS not null LOOP
-         col_min_ := least (col_min_, wb_.sheets(s_).rows(row_ix_).first);
-         col_max_ := greatest (col_max_, wb_.sheets(s_).rows(row_ix_).last);
-         row_ix_  := wb_.sheets(s_).rows.next(row_ix_);
-      END LOOP;
-
-      addtxt2utf8blob_init(yyy_);
-      addtxt2utf8blob ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" xmlns:x14="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" mc:Ignorable="x14ac" xmlns:x14ac="http://schemas.microsoft.com/office/spreadsheetml/2009/9/ac">' ||
-CASE WHEN wb_.sheets(s_).tabcolor IS not null THEN '<sheetPr><tabColor rgb="' || wb_.sheets(s_).tabcolor || '"/></sheetPr>' end ||
-'<dimension ref="' || alfan_col(col_min_) || wb_.sheets(s_).rows.first() || ':' || alfan_col(col_max_) || wb_.sheets(s_).rows.last() || '"/>
-<sheetViews>
-<sheetView' || CASE WHEN s_ = 1 THEN ' tabSelected="1"' END || ' workbookViewId="0">', yyy_);
-      IF wb_.sheets(s_).freeze_rows > 0 AND wb_.sheets(s_).freeze_cols > 0 THEN
-         addtxt2utf8blob (
-            '<pane xSplit="' || wb_.sheets(s_).freeze_cols || '" '
-            || 'ySplit="' || wb_.sheets(s_).freeze_rows || '" '
-            || 'topLeftCell="' || alfan_col(wb_.sheets(s_).freeze_cols+1) || (wb_.sheets(s_).freeze_rows+1) || '" '
-            || 'activePane="bottomLeft" state="frozen"/>',
-            yyy_
-         );
-      ELSE
-         IF wb_.sheets(s_).freeze_rows > 0 THEN
-            addtxt2utf8blob (
-               '<pane ySplit="' || wb_.sheets(s_).freeze_rows || '" topLeftCell="A' ||
-                  (wb_.sheets(s_).freeze_rows+1) || '" activePane="bottomLeft" state="frozen"/>',
-               yyy_
-            );
-         END IF;
-         IF wb_.sheets(s_).freeze_cols > 0 THEN
-            addtxt2utf8blob (
-               '<pane xSplit="' || wb_.sheets(s_).freeze_cols || '" topLeftCell="' ||
-               alfan_col(wb_.sheets(s_).freeze_cols+1) ||
-               '1" activePane="bottomLeft" state="frozen"/>',
-               yyy_
-            );
-         END IF;
-      END IF;
-      addtxt2utf8blob ('</sheetView></sheetViews><sheetFormatPr defaultRowHeight="15" x14ac:dyDescent="0.25"/>', yyy_);
-      IF wb_.sheets(s_).widths.count > 0 THEN
-         addtxt2utf8blob ('<cols>', yyy_);
-         col_ix_ := wb_.sheets(s_).widths.first();
-         WHILE col_ix_ IS not null LOOP
-            addtxt2utf8blob ('<col min="' || col_ix_ || '" max="' || col_ix_ || '" width="' || to_char(wb_.sheets(s_).widths(col_ix_), 'TM9', 'NLS_NUMERIC_CHARACTERS=.,' ) || '" customWidth="1"/>', yyy_);
-            col_ix_ := wb_.sheets(s_).widths.next(col_ix_);
-         END LOOP;
-         addtxt2utf8blob('</cols>', yyy_);
-      END IF;
-      addtxt2utf8blob('<sheetData>', yyy_);
-      row_ix_ := wb_.sheets(s_).rows.first();
-      WHILE row_ix_ IS not null LOOP
-         IF wb_.sheets(s_).row_fmts.exists(row_ix_) AND wb_.sheets(s_).row_fmts(row_ix_).height IS not null THEN
-             addtxt2utf8blob( '<row r="' || row_ix_ || '" spans="' || col_min_ || ':' || col_max_ || '" customHeight="1" ht="'
-                         || to_char( wb_.sheets(s_).row_fmts(row_ix_).height, 'TM9', 'NLS_NUMERIC_CHARACTERS=.,' ) || '" >', yyy_ );
-         ELSE
-            addtxt2utf8blob( '<row r="' || row_ix_ || '" spans="' || col_min_ || ':' || col_max_ || '">', yyy_ );
-         END IF;
-         col_ix_ := wb_.sheets(s_).rows(row_ix_).first();
-         WHILE col_ix_ IS not null LOOP
-            IF wb_.sheets(s_).rows(row_ix_)(col_ix_).formula_idx IS null THEN
-               formula_expr_ := null;
-            ELSE
-               formula_expr_ := '<f>' || wb_.formulas(wb_.sheets(s_).rows(row_ix_)(col_ix_).formula_idx) || '</f>';
-            END IF;
-            addtxt2utf8blob ('<c r="' || alfan_col(col_ix_) || row_ix_ || '"'
-               || ' ' || wb_.sheets(s_).rows(row_ix_)(col_ix_).style
-               || '>' || formula_expr_ || '<v>'
-               || to_char(wb_.sheets(s_).rows(row_ix_)(col_ix_).value, 'TM9', 'NLS_NUMERIC_CHARACTERS=.,' )
-               || '</v></c>', yyy_
-            );
-            col_ix_ := wb_.sheets(s_).rows(row_ix_).next(col_ix_);
-         END LOOP;
-         addtxt2utf8blob( '</row>', yyy_ );
-         row_ix_ := wb_.sheets(s_).rows.next(row_ix_);
-      END LOOP;
-      addtxt2utf8blob( '</sheetData>', yyy_ );
-      FOR a IN 1 ..  wb_.sheets(s_).autofilters.count LOOP
-         addtxt2utf8blob( '<autoFilter ref="' ||
-            alfan_col( nvl( wb_.sheets(s_).autofilters(a).column_start, col_min_ ) ) ||
-            nvl( wb_.sheets(s_).autofilters(a).row_start, wb_.sheets(s_).rows.first() ) || ':' ||
-            alfan_col(coalesce( wb_.sheets(s_).autofilters(a).column_end, wb_.sheets(s_).autofilters(a).column_start, col_max_)) ||
-            nvl(wb_.sheets(s_).autofilters(a).row_end, wb_.sheets(s_).rows.last()) || '"/>',
-            yyy_
-         );
-      END LOOP;
-      IF wb_.sheets(s_).mergecells.count > 0 THEN
-         addtxt2utf8blob( '<mergeCells count="' || to_char(wb_.sheets(s_).mergecells.count) || '">', yyy_);
-         FOR m IN 1 ..  wb_.sheets(s_).mergecells.count LOOP
-            addtxt2utf8blob( '<mergeCell ref="' || wb_.sheets(s_).mergecells( m ) || '"/>', yyy_);
-         END LOOP;
-         addtxt2utf8blob('</mergeCells>', yyy_);
-      END IF;
---
-      IF wb_.sheets(s_).validations.count > 0 THEN
-         addtxt2utf8blob (
-            '<dataValidations count="' || to_char( wb_.sheets(s_).validations.count ) || '">', yyy_
-         );
-         FOR m IN 1 ..  wb_.sheets(s_).validations.count LOOP
-            addtxt2utf8blob ('<dataValidation' ||
-               ' type="' || wb_.sheets(s_).validations(m).type || '"' ||
-               ' errorStyle="' || wb_.sheets(s_).validations(m).errorstyle || '"' ||
-               ' allowBlank="' || CASE WHEN nvl(wb_.sheets(s_).validations(m).allowBlank, true) THEN '1' ELSE '0' END || '"' ||
-               ' sqref="' || wb_.sheets(s_).validations(m).sqref || '"', yyy_ );
-            IF wb_.sheets(s_).validations(m).prompt IS not null THEN
-               addtxt2utf8blob(' showInputMessage="1" prompt="' || wb_.sheets(s_).validations(m).prompt || '"', yyy_);
-               IF wb_.sheets(s_).validations(m).title IS not null THEN
-                  addtxt2utf8blob( ' promptTitle="' || wb_.sheets(s_).validations(m).title || '"', yyy_);
-               END IF;
-            END IF;
-            IF wb_.sheets(s_).validations(m).showerrormessage THEN
-               addtxt2utf8blob (' showErrorMessage="1"', yyy_);
-               IF wb_.sheets(s_).validations(m).error_title IS not null THEN
-                  addtxt2utf8blob (
-                     ' errorTitle="' || wb_.sheets(s_).validations(m).error_title || '"', yyy_
-                  );
-               END IF;
-               IF wb_.sheets(s_).validations(m).error_txt IS not null THEN
-                  addtxt2utf8blob (
-                     ' error="' || wb_.sheets(s_).validations(m).error_txt || '"', yyy_
-                  );
-               END IF;
-            END IF;
-            addtxt2utf8blob( '>', yyy_ );
-            IF wb_.sheets(s_).validations(m).formula1 IS not null THEN
-               addtxt2utf8blob ('<formula1>' || wb_.sheets(s_).validations(m).formula1 || '</formula1>', yyy_);
-            END IF;
-            IF wb_.sheets(s_).validations(m).formula2 IS not null THEN
-               addtxt2utf8blob ('<formula2>' || wb_.sheets(s_).validations(m).formula2 || '</formula2>', yyy_);
-            END IF;
-            addtxt2utf8blob ('</dataValidation>', yyy_);
-         END LOOP;
-         addtxt2utf8blob ('</dataValidations>', yyy_);
-      END IF;
-
-      IF wb_.sheets(s_).hyperlinks.count > 0 THEN
-         addtxt2utf8blob ('<hyperlinks>', yyy_);
-         FOR h IN 1 ..  wb_.sheets(s_).hyperlinks.count LOOP
-            addtxt2utf8blob ('<hyperlink ref="' || wb_.sheets(s_).hyperlinks(h).cell || '" r:id="rId' || id_ || '"/>', yyy_);
-            id_ := id_ + 1;
-         END LOOP;
-         addtxt2utf8blob ('</hyperlinks>', yyy_);
-      END IF;
-      addtxt2utf8blob( '<pageMargins left="0.7" right="0.7" top="0.75" bottom="0.75" header="0.3" footer="0.3"/>', yyy_);
-      IF wb_.sheets(s_).drawings.count > 0 THEN
-         addtxt2utf8blob ( '<drawing r:id="rId' || id_ || '"/>', yyy_);
-         id_ := id_ + 1;
-      END IF;
-      IF wb_.sheets(s_).comments.count > 0 THEN
-         addtxt2utf8blob( '<legacyDrawing r:id="rId' || id_ || '"/>', yyy_);
-      END IF;
-      addtxt2utf8blob( '</worksheet>', yyy_);
-
-      addtxt2utf8blob_finish(yyy_);
-      add1file (excel_, rep('xl/worksheets/sheet:P1.xml',s_), yyy_);
-else
       Finish_Worksheet (excel_, s_);        -- xl/worksheets/sheet:P1.xml
-end if;
       Finish_Ws_Relationships (excel_, s_); -- xl/worksheets/_rels/sheet:P1.xml.rels
       Finish_Ws_Drawings (excel_, s_);      -- xl/drawings/drawing:P1.xml
       Finish_Ws_Comments (excel_, s_);      -- xl/drawings/vmlDrawing:P1.vml
-
       s_ := wb_.sheets.next(s_);
-
    END LOOP;
-   -- END Loop for each worksheet
 
    Finish_Zip (excel_);
    Clear_Workbook;
@@ -4568,7 +4446,7 @@ IS
    offset_       PLS_INTEGER;
    useXf_bkp_    BOOLEAN := g_useXf_;
    XfIds_        tp_XfIds;
-   widths_       tp_widths; --TYPE tp_widths is table of NUMBER index by PLS_INTEGER;
+   widths_       tp_widths; --TYPE tp_widths IS TABLE OF NUMBER INDEX BY PLS_INTEGER;
    ix_           NUMBER;
 
 BEGIN

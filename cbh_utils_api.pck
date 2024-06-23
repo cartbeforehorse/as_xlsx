@@ -19,21 +19,43 @@ CREATE OR REPLACE PACKAGE CBH_UTILS_API IS
    ---
    -- Author  : Osian ap Garth
    -- Created : 2020-01-14
-   -- Purpose : Nice to have functions that act as a backbone to facilitate
-   --           quicker development of often-used and general-purpose needs
-   --           while developting IFS-compatible APIs
+   -- Purpose :
+   --    Facility-package to assist with boring foundational tasks that PL/SQL
+   --    isn't so good at doing on its own
    -- 
    -- Developer Notes:
    -- Please observe coding conveitions:
    --   - 3-space indents
-   --   - uppercase oracle keywords
-   --   - camel-case underscored functions + procedures
-   --   - lowercase everything else
-   --   - trailing underscore for variables (none of this v_ or p_ silliness)
-   --   - try to indent in a way that gives the next person a chance to understand your code!
+   --   - Uppercase oracle keywords
+   --   - Camel-case underscored functions + procedures
+   --   - Lowercase everything else
+   --   - Trailing underscore for variables (none of this v_ or p_ silliness)
+   --   - Stacked variables to appear indented beneath function calls, and not
+   --     aligned with the end of a function; this avoids inconsistent indents
+   --     and horizontal scrolling
+   --   - Code with the next coder in mind.  Often, this will be you trying to
+   --     debug your own mistakes, so be nice
    --
 
    DBMS_OUTPUT_SIZE_          CONSTANT NUMBER      := 1000000;
+
+
+   ---------------------------
+   -- Error handling functions
+   --
+   PROCEDURE Raise_App_Error (
+      err_text_ IN VARCHAR2,
+      p1_       IN VARCHAR2 := null,
+      p2_       IN VARCHAR2 := null,
+      p3_       IN VARCHAR2 := null,
+      p4_       IN VARCHAR2 := null,
+      p5_       IN VARCHAR2 := null,
+      p6_       IN VARCHAR2 := null,
+      p7_       IN VARCHAR2 := null,
+      p8_       IN VARCHAR2 := null,
+      p9_       IN VARCHAR2 := null,
+      p0_       IN VARCHAR2 := null,
+      repl_nl_  IN BOOLEAN  := true );
 
    ---------------------------
    -- General Oracle and PL/SQL helpers
@@ -171,12 +193,6 @@ CREATE OR REPLACE PACKAGE CBH_UTILS_API IS
    --
    FUNCTION Env RETURN VARCHAR2;
    FUNCTION Is_Prod RETURN BOOLEAN;
-
-
-   -----------------------------------------------------
-   -- IFS Foundation Stuff
-   --
-   PROCEDURE Init;
 
 
 END CBH_UTILS_API;
@@ -359,7 +375,7 @@ IS BEGIN
    Trace (msg_, p1_, p2_, p3_, p4_, p5_, p6_, p7_, p8_, p9_, p0_, repl_nl_, true);
 END TraceQ;
 
--- Progress box on IFS background-job header
+-- Doesn't really do much.  Legacy function that may have a purpose later.
 PROCEDURE Log_Progress (
    msg_     IN CLOB,
    p1_      IN VARCHAR2 := null,
@@ -378,7 +394,7 @@ IS
    logmsg_ VARCHAR2(32000) := strlim(Rep(msg_, p1_, p2_, p3_, p4_, p5_, p6_, p7_, p8_, p9_, p0_, repl_nl_));
 BEGIN
    Dbms_Output.Put_Line('Progress: ' || logmsg_);
-   COMMIT;
+   commit;
 END Log_Progress;
 
 PROCEDURE Clear_Progress
@@ -406,7 +422,7 @@ IS
    logmsg_ VARCHAR2(32000) := strlim(Rep(msg_, p1_, p2_, p3_, p4_, p5_, p6_, p7_, p8_, p9_, p0_, repl_nl_));
 BEGIN
    Dbms_Output.Put_Line ('Info: ' || logmsg_);
-   COMMIT;
+   commit;
 END Log_Info;
 
 PROCEDURE Log_Progress_And_Info (
@@ -488,16 +504,5 @@ IS BEGIN
    RETURN Env = 'LIVE';
 END Is_Prod;
 
-
------------------------------------------------------
--- IFS Foundation Stuff
---
-PROCEDURE Init IS
-BEGIN
-   NULL;
-END Init;
-
-BEGIN
-   Init;
 END CBH_UTILS_API;
 /
