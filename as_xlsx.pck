@@ -17,6 +17,7 @@ CREATE OR REPLACE PACKAGE as_xlsx IS
  *****************************************************************************
  *****************************************************************************/
 
+
 --------------------------------------------------
 -- Public Types
 --
@@ -24,20 +25,28 @@ CREATE OR REPLACE PACKAGE as_xlsx IS
 -----
 -- Excel cell structure, cell and range locators
 --
-TYPE rollup_columns IS TABLE OF VARCHAR(20) INDEX BY PLS_INTEGER;
+TYPE tp_pivot_cols  IS TABLE OF PLS_INTEGER INDEX BY PLS_INTEGER;
+TYPE tp_col_agg_fns IS TABLE OF VARCHAR2(20) INDEX BY PLS_INTEGER; -- [sum,avg,count...]
+TYPE tp_pivot_axes IS RECORD (
+   vrollups    tp_pivot_cols,
+   hrollups    tp_pivot_cols,
+   filter_cols tp_pivot_cols,
+   col_agg_fns tp_col_agg_fns
+);
 TYPE tp_cell_loc IS RECORD (
    c     PLS_INTEGER,         -- 2
    r     PLS_INTEGER,         -- 3
    fixc  BOOLEAN  := false,
    fixr  BOOLEAN  := false ); -- true ==> B$3
 
+TYPE tp_column_names  IS TABLE OF VARCHAR2(2000) INDEX BY PLS_INTEGER;
 TYPE tp_cell_range IS RECORD (
    sheet_id     PLS_INTEGER,   -- sheet.name => My Perfect Sheet; nullable, a range doens't necessarily need a sheet
    tl           tp_cell_loc,   -- (2, 3, false, true)
    br           tp_cell_loc,   -- (6, 6, false, false) Alfan_Range() => 'My Perfect Sheet'!B$3:F6
    defined_name VARCHAR2(100), -- 'MyDatacells'
-   local_sheet  PLS_INTEGER ); -- not sure what this is
-
+   local_sheet  BOOLEAN,       -- sets the defined name accessible only on `sheet_id`
+   col_names    tp_column_names ); -- makes our lives easier in building pivots
 
 TYPE tp_alignment IS RECORD (
    vertical   VARCHAR2(11),
@@ -56,6 +65,7 @@ TYPE param_rec IS RECORD (
    param_value     VARCHAR2(100),
    additional_info VARCHAR2(300) );
 TYPE params_arr IS TABLE OF param_rec;
+
 
 --------------------------------------------------
 -- Fonts and fills stored by ID
@@ -459,7 +469,7 @@ PROCEDURE Defined_Name (
    fix_brc_    BOOLEAN     := true,
    fix_brr_    BOOLEAN     := true,
    sheet_      PLS_INTEGER := null,
-   localsheet_ PLS_INTEGER := null );
+   localsheet_ BOOLEAN     := false );
 
 PROCEDURE Defined_Name (
    range_ IN tp_cell_range );
@@ -468,12 +478,13 @@ FUNCTION Range_From_Defined_Name (
    defined_name_ IN VARCHAR2 ) RETURN tp_cell_range;
 
 PROCEDURE Add_Pivot_Table (
-   cache_id_       IN PLS_INTEGER,
-   data_range_     IN tp_cell_range  := null,
-   rollup_cols_    IN rollup_columns := rollup_columns(),
-   pivot_name_     IN VARCHAR2       := null,
-   add_to_sheet_   IN PLS_INTEGER    := null,
-   new_sheet_name_ IN VARCHAR2       := null );
+   cache_id_       IN OUT NOCOPY PLS_INTEGER,
+   src_data_range_ IN OUT NOCOPY tp_cell_range,
+   pivot_axes_     IN tp_pivot_axes,
+   location_tl_    IN tp_cell_loc,
+   pivot_name_     IN VARCHAR2    := null,
+   add_to_sheet_   IN PLS_INTEGER := null,
+   new_sheet_name_ IN VARCHAR2    := null );
 
 PROCEDURE Set_Column_Width (
    col_   IN PLS_INTEGER,
@@ -744,17 +755,47 @@ TYPE tp_validations IS TABLE OF tp_validation INDEX BY PLS_INTEGER;
 
 -----
 -- pivot types
-TYPE tp_pivot_collected_data IS TABLE OF VARCHAR2(2000) INDEX BY VARCHAR2(2000);
+
+-----
+-- tp_unique_data  =>
+-- tp_data_ix_ord =>
+--   Sometimes we want to store data indexed by a unique string value.  But as
+--   other times we need to keep that data ordered, which doesn't suit the way
+--   that plsql-table-types work.  We therefore hold the data in two different
+--   arrays, defined by these types.
+--
+TYPE tp_unique_data IS TABLE OF PLS_INTEGER INDEX BY VARCHAR2(32000);
+TYPE tp_data_ix_ord IS TABLE OF VARCHAR2(32000) INDEX BY PLS_INTEGER;
+TYPE tp_col_filters IS TABLE OF VARCHAR2(32000) INDEX BY PLS_INTEGER;
+
+TYPE tp_cache_field IS RECORD (
+   field_name   VARCHAR2(2000),
+   rollup_fn    VARCHAR2(20),
+   format_id    PLS_INTEGER,
+   shared_items tp_unique_data,
+   si_order     tp_data_ix_ord,
+   min_value    NUMBER,
+   max_value    NUMBER
+);
+TYPE tp_cache_fields IS TABLE OF tp_cache_field INDEX BY VARCHAR2(32000);
 TYPE tp_pivot_cache IS RECORD (
    cache_id       PLS_INTEGER,
-   wb_rel         PLS_INTEGER,
    ds_range       tp_cell_range,
-   aggregate_cols rollup_columns -- aggregate_cols(i_) := 'row', 'col', 'sum';
+   flds_to_cache  tp_col_agg_fns,  -- dynamically built from `pivot_axes` on the Pivot Table
+   cached_fields  tp_cache_fields, -- dynamically built, indexed by col-heading
+   cf_order       tp_data_ix_ord,
+   wb_rel         PLS_INTEGER
 );
 TYPE tp_pivot_caches IS TABLE OF tp_pivot_cache INDEX BY PLS_INTEGER;
 TYPE tp_pivot_table IS RECORD (
-   cache_id   PLS_INTEGER,
-   pivot_name VARCHAR2(200)
+   pivot_table_id PLS_INTEGER,
+   pivot_name     VARCHAR2(200),
+   cache_id       PLS_INTEGER,
+   on_sheet       PLS_INTEGER,
+   location_tl    tp_cell_loc,
+   pivot_axes     tp_pivot_axes,
+   pivot_height   PLS_INTEGER,
+   pivot_width    PLS_INTEGER
 );
 TYPE tp_pivot_tables IS TABLE OF tp_pivot_table INDEX BY PLS_INTEGER;
 
@@ -790,7 +831,7 @@ TYPE tp_sheet IS RECORD (
    validations  tp_validations,
    tabcolor     VARCHAR2(8),
    fontid       PLS_INTEGER,
-   pivot_tables tp_pivot_tables, -- non-contiguous on page; IDs match the wb ID
+   --pivot_tables tp_pivot_tables, -- non-contiguous on page; IDs match the wb ID
    drawings     tp_drawings
 );
 TYPE tp_sheets IS TABLE OF tp_sheet INDEX BY PLS_INTEGER;
@@ -838,11 +879,6 @@ TYPE tp_image IS RECORD (
 );
 TYPE tp_images IS TABLE OF tp_image INDEX BY PLS_INTEGER;
 
-TYPE tp_pivot_pointer IS RECORD (
-   on_sheet   PLS_INTEGER
-);
-TYPE tp_pivots_dir IS TABLE OF tp_pivot_pointer INDEX BY PLS_INTEGER;
-
 TYPE tp_book IS RECORD (
    sheets        tp_sheets,
    strings       tp_strings,
@@ -857,7 +893,7 @@ TYPE tp_book IS RECORD (
    formulas      tp_formulas,
    fontid        PLS_INTEGER,
    pivot_caches  tp_pivot_caches,
-   pivots_list   tp_pivots_dir, -- a list of ALL pivots on the wb
+   pivot_tables  tp_pivot_tables,
    images        tp_images
 );
 
@@ -866,7 +902,12 @@ wb_                   tp_book;
 g_useXf_              BOOLEAN := true;
 g_addtxt2utf8blob_tmp VARCHAR2(32767);
 
-TYPE xml_attrs_arr IS TABLE OF VARCHAR2(2000) INDEX BY VARCHAR2(200);
+TYPE xml_attr IS RECORD (
+   key   VARCHAR2(200),
+   val   VARCHAR2(2000)
+);
+TYPE xml_attrs_arr IS TABLE OF xml_attr INDEX BY PLS_INTEGER;
+--TYPE xml_attrs_arr IS TABLE OF VARCHAR2(2000) INDEX BY VARCHAR2(200);
 
 
 
@@ -919,6 +960,11 @@ FUNCTION Get_Shared_String_Ix (
    string_ IN VARCHAR2 ) RETURN PLS_INTEGER;
 FUNCTION Date_To_Xl_Nr (
    date_ IN DATE ) RETURN NUMBER;
+FUNCTION Get_Cell_Value_Raw (
+   col_    IN PLS_INTEGER,
+   row_    IN PLS_INTEGER,
+   sh_     IN PLS_INTEGER,
+   ss_ref_ IN BOOLEAN := true ) RETURN VARCHAR2;
 
 
 ---------------------------------------
@@ -1000,6 +1046,26 @@ BEGIN
    RETURN rtrim (to_char (num_, mask_), '.');
 END Xml_Number;
 
+PROCEDURE Attr (
+   key_   IN VARCHAR2,
+   val_   IN VARCHAR2,
+   attrs_ IN OUT NOCOPY xml_attrs_arr )
+IS
+   next_ix_ PLS_INTEGER := attrs_.count + 1;
+BEGIN
+   attrs_(next_ix_) := xml_attr ( key => key_, val => val_);
+END Attr;
+
+PROCEDURE nAtr (
+   key_   IN VARCHAR2,
+   val_   IN VARCHAR2,
+   attrs_ IN OUT NOCOPY xml_attrs_arr )
+IS
+BEGIN
+   attrs_.delete;
+   Attr (key_, val_, attrs_);
+END nAtr;
+
 FUNCTION Make_Tag (
    doc_      IN OUT NOCOPY dbms_XmlDom.DomDocument,
    tag_name_ IN VARCHAR2,
@@ -1013,9 +1079,8 @@ BEGIN
       WHEN ns_ IS NOT null THEN Dbms_XmlDom.createElement (doc_, tag_name_, ns_)
       ELSE Dbms_XmlDom.createElement (doc_, tag_name_)
    END;
-   WHILE ix_ IS NOT null LOOP
-      Dbms_XmlDom.setAttribute (el_, ix_, attrs_(ix_));
-      ix_ := attrs_.NEXT(ix_);
+   FOR ix_ IN 1 .. attrs_.count LOOP
+      Dbms_XmlDom.setAttribute (el_, attrs_(ix_).key, attrs_(ix_).val);
    END LOOP;
    RETURN el_;
 END Make_Tag;
@@ -1532,6 +1597,22 @@ IS BEGIN
    RETURN range_.br.c - range_.tl.c + 1;
 END Range_Width;
 
+PROCEDURE Add_Col_Headings_To_Range (
+   range_ IN OUT NOCOPY tp_cell_range,
+   sheet_ IN PLS_INTEGER := null )
+IS
+   i_   PLS_INTEGER := 1;
+   row_ PLS_INTEGER := range_.tl.r;
+   sh_  PLS_INTEGER := coalesce (range_.sheet_id, sheet_, wb_.sheets.count);
+BEGIN
+   IF range_.col_names.count = 0 THEN -- else assume `col_names` is correctly filled out
+      FOR c_ IN range_.tl.c .. range_.br.c LOOP
+         range_.col_names(i_) := wb_.sheets(sh_).rows(row_)(c_).ora_value.str_val;
+         i_ := i_ + 1;
+      END LOOP;
+   END IF;
+END Add_Col_Headings_To_Range;
+
 FUNCTION Range_Col_Head_Name (
    range_    IN tp_cell_range,
    col_offs_ IN PLS_INTEGER,
@@ -1541,7 +1622,11 @@ IS
    row_ PLS_INTEGER := range_.tl.r;
    sh_  PLS_INTEGER := coalesce (range_.sheet_id, sheet_, wb_.sheets.count);
 BEGIN
-   RETURN wb_.sheets(sh_).rows(row_)(col_).ora_value.str_val;
+   IF range_.col_names.exists(col_offs_) THEN
+      RETURN range_.col_names(col_offs_);
+   ELSE
+      RETURN wb_.sheets(sh_).rows(row_)(col_).ora_value.str_val; -- assume the column headre is a chr-value
+   END IF;
 END Range_Col_Head_Name;
 
 FUNCTION Range_Col_NumFmtId (
@@ -1556,29 +1641,44 @@ BEGIN
    RETURN Get_Cell_Xff (sh_, col_, row_).numFmtId;
 END Range_Col_NumFmtId;
 
-FUNCTION Range_Unique_Data (
+FUNCTION Range_Unique_Data_Ord (
    range_    IN tp_cell_range,
    col_offs_ IN PLS_INTEGER,
-   sheet_    IN PLS_INTEGER := null ) RETURN tp_pivot_collected_data
+   sheet_    IN PLS_INTEGER := null ) RETURN tp_data_ix_ord
 IS
    col_       PLS_INTEGER := range_.tl.c + col_offs_ - 1;
    row_start_ PLS_INTEGER := range_.tl.r + 1; -- allow for header row
    row_end_   PLS_INTEGER := range_.br.r;
    sh_        PLS_INTEGER := coalesce (range_.sheet_id, sheet_, wb_.sheets.count);
    val_       VARCHAR2(2000);
-   data_      tp_pivot_collected_data;
+   unq_data_  tp_unique_data;
+   ord_data_  tp_data_ix_ord;
+   new_ix_    PLS_INTEGER := 0; -- pivotCacheRecord uses a base of zero
 BEGIN
    IF sh_ IS null THEN
-      Raise_App_Error ('A dataset range must have a Sheet Id, in Range_Unique_Data()');
+      Raise_App_Error ('A dataset range must have a Sheet Id, in Range_Unique_Data_Ord()');
    END IF;
    FOR r_ IN row_start_ .. row_end_ LOOP
-      val_ := substr (wb_.sheets(sh_).rows(r_)(col_).ora_value.str_val, 1, 2000);
-      IF not data_.exists(val_) THEN
-         data_(val_) := val_;
+      val_ := Get_Cell_Value_Raw (col_, r_, sh_, false);
+      IF not unq_data_.exists(val_) THEN
+         unq_data_(val_)    := new_ix_;
+         ord_data_(new_ix_) := val_;
+         new_ix_ := new_ix_ + 1;
       END IF;
    END LOOP;
-   RETURN data_;
-END Range_Unique_Data;
+   RETURN ord_data_;
+END Range_Unique_Data_Ord;
+
+FUNCTION Ord_Data_To_Unique (
+   ixs_ordered_ IN tp_data_ix_ord ) RETURN tp_unique_data
+IS
+   data_uq_ tp_unique_data;
+BEGIN
+   FOR ix_ IN ixs_ordered_.first .. ixs_ordered_.last LOOP
+      data_uq_(ixs_ordered_(ix_)) := ix_;
+   END LOOP;
+   RETURN data_uq_;
+END Ord_Data_To_Unique;
 
 PROCEDURE Range_Col_Min_Max_Values (
    range_    IN     tp_cell_range,
@@ -1671,20 +1771,34 @@ BEGIN
    END IF;
 END Get_Cell_Value_Raw;
 
+FUNCTION Get_Cell_Cache_Value (
+   col_          IN PLS_INTEGER,
+   row_          IN PLS_INTEGER,
+   sheet_        IN PLS_INTEGER,
+   shared_items_ IN tp_unique_data ) RETURN VARCHAR2
+IS
+   value_ VARCHAR2(32000) := Get_Cell_Value_Raw (col_, row_, sheet_, false);
+BEGIN
+   RETURN CASE
+      WHEN not shared_items_.exists(value_) THEN value_
+      ELSE to_char(shared_items_(value_))
+   END;
+END Get_Cell_Cache_Value;
+
 -----
 -- Get_Cell_Cache_Tag()
 --   Useful in the pivotCacheRecords.xml files
 --
 FUNCTION Get_Cell_Cache_Tag (
-   col_   IN PLS_INTEGER,
-   row_   IN PLS_INTEGER,
-   sheet_ IN PLS_INTEGER ) RETURN VARCHAR2
-IS
-   ss_id_ PLS_INTEGER;
-BEGIN
-   IF wb_.sheets(sheet_).rows(row_)(col_).datatype = CELL_DT_STRING_ THEN
-      ss_id_ := Get_Shared_String_Ix (Get_Cell_Value_Str(col_,row_,sheet_));
-      RETURN CASE WHEN ss_id_ = -1 THEN 's' ELSE 'x' END;
+   col_      IN PLS_INTEGER,
+   row_      IN PLS_INTEGER,
+   sheet_    IN PLS_INTEGER,
+   agg_type_ IN VARCHAR2 ) RETURN VARCHAR2
+IS BEGIN
+   IF agg_type_ IN ('col','row','filter') THEN
+      RETURN 'x';
+   ELSIF wb_.sheets(sheet_).rows(row_)(col_).datatype = CELL_DT_STRING_ THEN
+      RETURN 's';
    ELSIF wb_.sheets(sheet_).rows(row_)(col_).datatype = CELL_DT_NUMBER_ THEN
       RETURN 'n';
    ELSIF wb_.sheets(sheet_).rows(row_)(col_).datatype = CELL_DT_DATE_ THEN
@@ -3216,7 +3330,7 @@ PROCEDURE Defined_Name (
    fix_brc_    BOOLEAN     := true,
    fix_brr_    BOOLEAN     := true,
    sheet_      PLS_INTEGER := null,
-   localsheet_ PLS_INTEGER := null )
+   localsheet_ BOOLEAN     := false )
 IS BEGIN
    wb_.defined_names(name_) := tp_cell_range (
       sheet_id     => sheet_,
@@ -3242,54 +3356,88 @@ IS BEGIN
    RETURN wb_.defined_names(defined_name_);
 END Range_From_Defined_Name;
 
--- osian: pivot caches are built here.... still in progress...
+
 FUNCTION Create_Pivot_Cache (
-   range_       IN tp_cell_range,
-   rollup_cols_ IN rollup_columns ) RETURN PLS_INTEGER
+   range_    IN tp_cell_range,
+   agg_cols_ IN tp_col_agg_fns ) RETURN PLS_INTEGER
 IS
-   pivot_no_ PLS_INTEGER := wb_.pivot_caches.count + 1;
+   cache_id_ PLS_INTEGER := wb_.pivot_caches.count + 1;
 BEGIN
-   wb_.pivot_caches(pivot_no_) := tp_pivot_cache (
-      cache_id       => pivot_no_,
-      ds_range       => range_,
-      aggregate_cols => rollup_cols_
+   wb_.pivot_caches(cache_id_) := tp_pivot_cache (
+      cache_id      => cache_id_,
+      ds_range      => range_,
+      flds_to_cache => agg_cols_
    );
-   Dbms_Output.Put_Line ('Rollup count: ' || rollup_cols_.count);
-   Dbms_Output.Put_Line ('Rollup last: ' || rollup_cols_.last);
-   Dbms_Output.Put_Line ('Range Width: ' || Range_Width (range_));
-   IF rollup_cols_.last > Range_Width (range_) THEN
-      Raise_App_Error ('Rollup columns extend beyond the extent of the defined Range');
-   END IF;
-   RETURN pivot_no_;
+   RETURN cache_id_;
 END Create_Pivot_Cache;
 
-PROCEDURE Add_Pivot_Table (
-   cache_id_       IN PLS_INTEGER,
-   data_range_     IN tp_cell_range  := null,
-   rollup_cols_    IN rollup_columns := rollup_columns(),
-   pivot_name_     IN VARCHAR2       := null,
-   add_to_sheet_   IN PLS_INTEGER    := null,
-   new_sheet_name_ IN VARCHAR2       := null ) -- when null, create new sheet + put pivot on it
+FUNCTION Get_Agg_Fn_From_Axes (
+   pivot_axes_ IN tp_pivot_axes,
+   col_ix_     IN PLS_INTEGER ) RETURN VARCHAR2
 IS
-   cache_ PLS_INTEGER := cache_id_;
-   pv_id_ PLS_INTEGER := wb_.pivots_list.count + 1;
-   sh_    PLS_INTEGER := CASE
+   rtn_ VARCHAR2(20);
+   ix_  PLS_INTEGER;
+BEGIN
+   rtn_ := CASE WHEN pivot_axes_.col_agg_fns.exists(col_ix_) THEN pivot_axes_.col_agg_fns(col_ix_) END;
+   ix_ := pivot_axes_.vrollups.first;
+   WHILE ix_ IS NOT null AND rtn_ IS null LOOP
+      rtn_ := CASE WHEN pivot_axes_.vrollups(ix_) = col_ix_ THEN 'row' END;
+      ix_  := pivot_axes_.vrollups.next(ix_);
+   END LOOP;
+   ix_ := pivot_axes_.hrollups.first;
+   WHILE ix_ IS NOT null AND rtn_ IS null LOOP
+      rtn_ := CASE WHEN pivot_axes_.hrollups(ix_) = col_ix_ THEN 'col' END;
+      ix_  := pivot_axes_.hrollups.next(ix_);
+   END LOOP;
+   ix_ := pivot_axes_.filter_cols.first;
+   WHILE ix_ IS NOT null AND rtn_ IS null LOOP
+      rtn_ := CASE WHEN pivot_axes_.filter_cols(ix_) = col_ix_ THEN 'filter' END;
+      ix_  := pivot_axes_.filter_cols.next(ix_);
+   END LOOP;
+   RETURN rtn_;
+END Get_Agg_Fn_From_Axes;
+
+PROCEDURE Add_Pivot_Table (
+   cache_id_       IN OUT NOCOPY PLS_INTEGER,
+   src_data_range_ IN OUT NOCOPY tp_cell_range,
+   pivot_axes_     IN tp_pivot_axes,
+   location_tl_    IN tp_cell_loc,
+   pivot_name_     IN VARCHAR2    := null,
+   add_to_sheet_   IN PLS_INTEGER := null,
+   new_sheet_name_ IN VARCHAR2    := null )
+IS
+   pv_id_         PLS_INTEGER := wb_.pivot_tables.count + 1;
+   cols_to_cache_ tp_col_agg_fns;
+   sh_            PLS_INTEGER := CASE
       WHEN add_to_sheet_ IS NOT null THEN add_to_sheet_
       ELSE New_Sheet (nvl (new_sheet_name_, rep('Pivot:P1', pv_id_)))
    END;
 BEGIN
 
-   IF cache_id_ IS null THEN
-      cache_ := Create_Pivot_Cache (data_range_, rollup_cols_);
-      Trace ('Adding cache Id: ' || cache_);
-   ELSIF not wb_.pivot_caches.exists(cache_id_) THEN
+   IF cache_id_ IS NOT null AND not wb_.pivot_caches.exists(cache_id_) THEN
       Raise_App_Error ('Cache Id :P1 does not exist in the workbook', cache_id_);
    END IF;
 
-   wb_.pivots_list(pv_id_).on_sheet                := sh_;
-   wb_.sheets(sh_).pivot_tables(pv_id_).cache_id   := cache_;
-   wb_.sheets(sh_).pivot_tables(pv_id_).pivot_name := nvl (pivot_name_, 'Pivot' || to_char(pv_id_));
+   Add_Col_Headings_To_Range (src_data_range_);
 
+   IF cache_id_ IS null THEN
+      FOR c_ IN src_data_range_.col_names.first .. src_data_range_.col_names.last LOOP
+         cols_to_cache_(c_) := Get_Agg_Fn_From_Axes (pivot_axes_, c_);
+      END LOOP;
+      cache_id_ := Create_Pivot_Cache (src_data_range_, cols_to_cache_);
+   -- ELSE???
+   --   if the cache already exists, it implies that multiple PTs are using the
+   --   same cache.  Should we be updating the `cols_to_cache_` list in this scenario?
+   END IF;
+
+   wb_.pivot_tables(pv_id_) := tp_pivot_table (
+      pivot_table_id => pv_id_,
+      pivot_name     => nvl (pivot_name_, 'Pivot' || to_char(pv_id_)),
+      cache_id       => cache_id_,
+      on_sheet       => sh_,
+      location_tl    => location_tl_,
+      pivot_axes     => pivot_axes_
+   );
 END Add_Pivot_Table;
 
 PROCEDURE Freeze_Rows (
@@ -3339,7 +3487,7 @@ BEGIN
    wb_.sheets(sh_).autofilters(ix_).row_end      := row_end_;
    Defined_Name (
       '_xlnm._FilterDatabase', col_start_, row_start_, col_end_, row_end_,
-      false, false, false, false, sh_, sh_-1
+      false, false, false, false, sh_
    );
 END Set_Autofilter;
 
@@ -3364,87 +3512,84 @@ BEGIN
 
    -- [Content_Types].xml
    Dbms_XmlDom.setVersion (doc_, '1.0" encoding="UTF-8" standalone="yes');
-   attrs_('xmlns') := 'http://schemas.openxmlformats.org/package/2006/content-types';
+   natr ('xmlns', 'http://schemas.openxmlformats.org/package/2006/content-types', attrs_);
    nd_types_ := Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'Types', attrs_);
 
    IF wb_.images.count > 0 THEN
       FOR img_ IN wb_.images.first .. wb_.images.last LOOP
          ext_ := wb_.images(img_).extension;
          IF ext_ IS NOT null AND not img_exts_.exists(ext_) THEN
-            attrs_.delete;
-            attrs_('ContentType') := 'image/' || ext_;
-            attrs_('Extension')   := ext_;
+            natr ('ContentType', 'image/' || ext_, attrs_);
+            attr ('Extension', ext_, attrs_);
             Xml_Node (doc_, nd_types_, 'Default', attrs_);
             img_exts_(ext_) := 1;
          END IF;
       END LOOP;
    END IF;
 
-   attrs_.delete;
-   attrs_('ContentType') := 'application/vnd.openxmlformats-package.relationships+xml';
-   attrs_('Extension')   := 'rels';
+   natr ('ContentType', 'application/vnd.openxmlformats-package.relationships+xml', attrs_);
+   attr ('Extension',   'rels', attrs_);
    Xml_Node (doc_, nd_types_, 'Default', attrs_);
-   attrs_('ContentType') := 'application/xml';
-   attrs_('Extension')   := 'xml';
+   natr ('ContentType', 'application/xml', attrs_);
+   attr ('Extension',   'xml', attrs_);
    Xml_Node (doc_, nd_types_, 'Default', attrs_);
-   attrs_('ContentType') := 'application/vnd.openxmlformats-officedocument.vmlDrawing';
-   attrs_('Extension')   := 'vml';
+   natr ('ContentType', 'application/vnd.openxmlformats-officedocument.vmlDrawing', attrs_);
+   attr ('Extension',   'vml', attrs_);
    Xml_Node (doc_, nd_types_, 'Default', attrs_);
 
-   attrs_.delete;
-   attrs_('PartName')    := '/xl/workbook.xml';
-   attrs_('ContentType') := 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml';
+   natr ('PartName', '/xl/workbook.xml', attrs_);
+   attr ('ContentType', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml', attrs_);
    Xml_Node (doc_, nd_types_, 'Override', attrs_);
 
    FOR pc_ IN 1 .. wb_.pivot_caches.count LOOP
-      attrs_('PartName')    := rep('/xl/pivotCache/pivotCacheDefinition:P1.xml', pc_);
-      attrs_('ContentType') := 'application/vnd.openxmlformats-officedocument.spreadsheetml.pivotCacheDefinition+xml';
+      natr ('PartName',    rep('/xl/pivotCache/pivotCacheDefinition:P1.xml', pc_), attrs_);
+      attr ('ContentType', 'application/vnd.openxmlformats-officedocument.spreadsheetml.pivotCacheDefinition+xml', attrs_);
       Xml_Node (doc_, nd_types_, 'Override', attrs_);
-      attrs_('PartName')    := rep('/xl/pivotCache/pivotCacheRecords:P1.xml', pc_);
-      attrs_('ContentType') := 'application/vnd.openxmlformats-officedocument.spreadsheetml.pivotCacheRecords+xml';
+      natr ('PartName', rep('/xl/pivotCache/pivotCacheRecords:P1.xml', pc_), attrs_);
+      attr ('ContentType', 'application/vnd.openxmlformats-officedocument.spreadsheetml.pivotCacheRecords+xml', attrs_);
       Xml_Node (doc_, nd_types_, 'Override', attrs_);
    END LOOP;
-   FOR pt_ IN 1 .. wb_.pivots_list.count LOOP
-      attrs_('PartName')    := rep('/xl/pivotTables/pivotTable:P1.xml', pt_);
-      attrs_('ContentType') := 'application/vnd.openxmlformats-officedocument.spreadsheetml.pivotTable+xml';
+   FOR pt_ IN 1 .. wb_.pivot_tables.count LOOP
+      natr ('PartName', rep('/xl/pivotTables/pivotTable:P1.xml', pt_), attrs_);
+      attr ('ContentType', 'application/vnd.openxmlformats-officedocument.spreadsheetml.pivotTable+xml', attrs_);
       Xml_Node (doc_, nd_types_, 'Override', attrs_);
    END LOOP;
 
    s_ := wb_.sheets.first;
    WHILE s_ IS NOT null LOOP
-      attrs_('PartName')    := rep('/xl/worksheets/sheet:P1.xml', s_);
-      attrs_('ContentType') := 'application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml';
+      natr ('PartName', rep('/xl/worksheets/sheet:P1.xml', s_), attrs_);
+      attr ('ContentType', 'application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml', attrs_);
       Xml_Node (doc_, nd_types_, 'Override', attrs_);
       s_ := wb_.sheets.next(s_);
    END LOOP;
 
-   attrs_('PartName')    := '/xl/theme/theme1.xml';
-   attrs_('ContentType') := 'application/vnd.openxmlformats-officedocument.theme+xml';
+   natr ('PartName', '/xl/theme/theme1.xml', attrs_);
+   attr ('ContentType', 'application/vnd.openxmlformats-officedocument.theme+xml', attrs_);
    Xml_Node (doc_, nd_types_, 'Override', attrs_);
-   attrs_('PartName')    := '/xl/styles.xml';
-   attrs_('ContentType') := 'application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml';
+   natr ('PartName', '/xl/styles.xml', attrs_);
+   attr ('ContentType', 'application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml', attrs_);
    Xml_Node (doc_, nd_types_, 'Override', attrs_);
-   attrs_('PartName')    := '/xl/sharedStrings.xml';
-   attrs_('ContentType') := 'application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml';
+   natr ('PartName', '/xl/sharedStrings.xml', attrs_);
+   attr ('ContentType', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml', attrs_);
    Xml_Node (doc_, nd_types_, 'Override', attrs_);
 
-   attrs_('PartName')    := '/docProps/core.xml';
-   attrs_('ContentType') := 'application/vnd.openxmlformats-package.core-properties+xml';
+   natr ('PartName', '/docProps/core.xml', attrs_);
+   attr ('ContentType', 'application/vnd.openxmlformats-package.core-properties+xml', attrs_);
    Xml_Node (doc_, nd_types_, 'Override', attrs_);
-   attrs_('PartName')    := '/docProps/app.xml';
-   attrs_('ContentType') := 'application/vnd.openxmlformats-officedocument.extended-properties+xml';
+   natr ('PartName', '/docProps/app.xml', attrs_);
+   attr ('ContentType', 'application/vnd.openxmlformats-officedocument.extended-properties+xml', attrs_);
    Xml_Node (doc_, nd_types_, 'Override', attrs_);
 
    s_ := wb_.sheets.first;
    WHILE s_ IS NOT null LOOP
       IF wb_.sheets(s_).comments.count > 0 THEN
-         attrs_('PartName')    := rep('/xl/comments:P1.xml', s_);
-         attrs_('ContentType') := 'application/vnd.openxmlformats-officedocument.spreadsheetml.comments+xml';
+         natr ('PartName', rep('/xl/comments:P1.xml', s_), attrs_);
+         attr ('ContentType', 'application/vnd.openxmlformats-officedocument.spreadsheetml.comments+xml', attrs_);
          Xml_Node (doc_, nd_types_, 'Override', attrs_);
       END IF;
       IF wb_.sheets(s_).drawings.count > 0 THEN
-         attrs_('PartName')    := rep('/xl/drawings/drawing:P1.xml', s_);
-         attrs_('ContentType') := 'application/vnd.openxmlformats-officedocument.drawing+xml';
+         natr ('PartName', rep('/xl/drawings/drawing:P1.xml', s_), attrs_);
+         attr ('ContentType', 'application/vnd.openxmlformats-officedocument.drawing+xml', attrs_);
          Xml_Node (doc_, nd_types_, 'Override', attrs_);
       END IF;
       s_ := wb_.sheets.next(s_);
@@ -3465,21 +3610,20 @@ BEGIN
 
    -- _rels/.rels
    Dbms_XmlDom.setVersion (doc_, '1.0" encoding="UTF-8" standalone="yes');
-   attrs_('xmlns') := 'http://schemas.openxmlformats.org/package/2006/relationships';
+   natr ('xmlns', 'http://schemas.openxmlformats.org/package/2006/relationships', attrs_);
    nd_rels_ := Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'Relationships', attrs_);
 
-   attrs_.delete;
-   attrs_('Id')     := 'rId1';
-   attrs_('Type')   := 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument';
-   attrs_('Target') := 'xl/workbook.xml';
+   natr ('Id', 'rId1', attrs_);
+   attr ('Type', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument', attrs_);
+   attr ('Target', 'xl/workbook.xml', attrs_);
    Xml_Node (doc_, nd_rels_, 'Relationship', attrs_);
-   attrs_('Id')     := 'rId2';
-   attrs_('Type')   := 'http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties';
-   attrs_('Target') := 'docProps/core.xml';
+   natr ('Id', 'rId2', attrs_);
+   attr ('Type', 'http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties', attrs_);
+   attr ('Target', 'docProps/core.xml', attrs_);
    Xml_Node (doc_, nd_rels_, 'Relationship', attrs_);
-   attrs_('Id')     := 'rId3';
-   attrs_('Type')   := 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties';
-   attrs_('Target') := 'docProps/app.xml';
+   natr ('Id', 'rId3', attrs_);
+   attr ('Type', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties', attrs_);
+   attr ('Target', 'docProps/app.xml', attrs_);
    Xml_Node (doc_, nd_rels_, 'Relationship', attrs_);
 
    Add1Xml (excel_, '_rels/.rels', Dbms_XmlDom.getXmlType(doc_).getClobVal);
@@ -3503,19 +3647,18 @@ BEGIN
 
    -- docProps/core.xml
    Dbms_XmlDom.setVersion (doc_, '1.0" encoding="UTF-8" standalone="yes');
-   attrs_('xmlns:cp')       := 'http://schemas.openxmlformats.org/package/2006/metadata/core-properties';
-   attrs_('xmlns:dc')       := 'http://purl.org/dc/elements/1.1/';
-   attrs_('xmlns:dcterms')  := 'http://purl.org/dc/terms/';
-   attrs_('xmlns:dcmitype') := 'http://purl.org/dc/dcmitype/';
-   attrs_('xmlns:xsi')      := 'http://www.w3.org/2001/XMLSchema-instance';
+   natr ('xmlns:cp', 'http://schemas.openxmlformats.org/package/2006/metadata/core-properties', attrs_);
+   attr ('xmlns:dc', 'http://purl.org/dc/elements/1.1/', attrs_);
+   attr ('xmlns:dcterms', 'http://purl.org/dc/terms/', attrs_);
+   attr ('xmlns:dcmitype', 'http://purl.org/dc/dcmitype/', attrs_);
+   attr ('xmlns:xsi', 'http://www.w3.org/2001/XMLSchema-instance', attrs_);
    nd_cprop_ := Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'coreProperties', 'cp', attrs_);
 
    Xml_Text_Node (doc_, nd_cprop_, 'creator',        sys_context('userenv','os_user'), 'dc');
    Xml_Text_Node (doc_, nd_cprop_, 'description',    rep('Build by version: :P1', VERSION_), 'dc');
    Xml_Text_Node (doc_, nd_cprop_, 'lastModifiedBy', sys_context('userenv','os_user'), 'cp');
 
-   attrs_.delete;
-   attrs_('xsi:type') := 'dcterms:W3CDTF';
+   natr ('xsi:type', 'dcterms:W3CDTF', attrs_);
    Xml_Text_Node (doc_, nd_cprop_, 'created',  to_char(current_timestamp,'yyyy-mm-dd"T"hh24:mi:ssTZH:TZM'), 'dcterms', attrs_);
    Xml_Text_Node (doc_, nd_cprop_, 'modified', to_char(current_timestamp,'yyyy-mm-dd"T"hh24:mi:ssTZH:TZM'), 'dcterms', attrs_);
 
@@ -3527,18 +3670,17 @@ BEGIN
    doc_ := Dbms_XmlDom.newDomDocument;
    Dbms_XmlDom.setVersion (doc_, '1.0" encoding="UTF-8" standalone="yes');
 
-   attrs_.delete;
-   attrs_('xmlns')    := 'http://schemas.openxmlformats.org/officeDocument/2006/extended-properties';
-   attrs_('xmlns:vt') := 'http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes';
+   natr ('xmlns', 'http://schemas.openxmlformats.org/officeDocument/2006/extended-properties', attrs_);
+   attr ('xmlns:vt', 'http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes', attrs_);
    nd_prop_ := Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'Properties', attrs_);
 
    Xml_Text_Node (doc_, nd_prop_, 'Application', 'Microsoft Excel');
    Xml_Text_Node (doc_, nd_prop_, 'DocSecurity', '0');
    Xml_Text_Node (doc_, nd_prop_, 'ScaleCrop', 'false');
    nd_hd_  := Xml_Node (doc_, nd_prop_, 'HeadingPairs');
-   attrs_.delete;
-   attrs_('size')     := '2';
-   attrs_('baseType') := 'variant';
+
+   natr ('size',     '2', attrs_);
+   attr ('baseType', 'variant', attrs_);
    nd_vec_ := Xml_Node (doc_, nd_hd_, 'vector', 'vt', attrs_);
    nd_var_ := Xml_Node (doc_, nd_vec_, 'variant', 'vt');
    Xml_Text_Node (doc_, nd_var_, 'lpstr', 'Worksheets', 'vt');
@@ -3546,9 +3688,8 @@ BEGIN
    Xml_Text_Node (doc_, nd_var_, 'i4', to_char(wb_.sheets.count), 'vt');
 
    nd_top_ := Xml_Node (doc_, nd_prop_, 'TitlesOfParts');
-   attrs_.delete;
-   attrs_('size')     := wb_.sheets.count;
-   attrs_('baseType') := 'lpstr';
+   natr ('size', wb_.sheets.count, attrs_);
+   attr ('baseType', 'lpstr', attrs_);
    nd_vec_ := Xml_Node (doc_, nd_top_, 'vector', 'vt', attrs_);
    s_ := wb_.sheets.first;
    WHILE s_ IS NOT null LOOP
@@ -3575,13 +3716,12 @@ BEGIN
 
    -- xl/sharedStrings.xml
    Dbms_XmlDom.setVersion (doc_, '1.0" encoding="UTF-8" standalone="yes');
-   attrs_('xmlns')       := 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
-   attrs_('count')       := to_char(wb_.str_cnt);
-   attrs_('uniqueCount') := wb_.strings.count;
+   natr ('xmlns', 'http://schemas.openxmlformats.org/spreadsheetml/2006/main', attrs_);
+   attr ('count', to_char(wb_.str_cnt), attrs_);
+   attr ('uniqueCount', wb_.strings.count, attrs_);
    nd_sst_ := Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'sst', attrs_);
 
-   attrs_.delete;
-   attrs_('xml:space') := 'preserve';
+   natr ('xml:space', 'preserve', attrs_);
    FOR str_ix_ IN 0 .. wb_.str_ind.count - 1 LOOP
       Xml_Text_Node (
          doc_ => doc_, append_to_ => Xml_Node(doc_,nd_sst_,'si'), tag_name_ => 't',
@@ -3616,148 +3756,136 @@ BEGIN
 
    -- xl/styles.xml
    Dbms_XmlDom.setVersion (doc_, '1.0" encoding="UTF-8" standalone="yes');
-   attrs_('xmlns')        := 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
-   attrs_('xmlns:mc')     := 'http://schemas.openxmlformats.org/markup-compatibility/2006';
-   attrs_('mc:Ignorable') := 'x14ac';
-   attrs_('xmlns:x14ac')  := 'http://schemas.microsoft.com/office/spreadsheetml/2009/9/ac';
+   attr ('xmlns', 'http://schemas.openxmlformats.org/spreadsheetml/2006/main', attrs_);
+   attr ('xmlns:mc', 'http://schemas.openxmlformats.org/markup-compatibility/2006', attrs_);
+   attr ('mc:Ignorable', 'x14ac', attrs_);
+   attr ('xmlns:x14ac', 'http://schemas.microsoft.com/office/spreadsheetml/2009/9/ac', attrs_);
    nd_stl_ := Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'styleSheet', attrs_);
 
    IF wb_.numFmts.count > 0 THEN
-      attrs_.delete;
-      attrs_('count') := to_char(wb_.numFmts.count);
+      natr ('count', to_char(wb_.numFmts.count), attrs_);
       nd_numf_ := Xml_Node (doc_, nd_stl_, 'numFmts', attrs_);
-      attrs_.delete;
       format_mask_ := wb_.numFmts.first;
       WHILE format_mask_ IS NOT null LOOP
-         attrs_('numFmtId')   := wb_.numFmts(format_mask_);
-         attrs_('formatCode') := format_mask_;
+         natr ('numFmtId', wb_.numFmts(format_mask_), attrs_);
+         attr ('formatCode', format_mask_, attrs_);
          Xml_Node (doc_, nd_numf_, 'numFmt', attrs_);
          format_mask_ := wb_.numFmts.next(format_mask_);
       END LOOP;
    END IF;
 
-   attrs_.delete;
-   attrs_('count')            := wb_.fonts.count;
-   attrs_('x14ac:knownFonts') := '1';
+   natr ('count', wb_.fonts.count, attrs_);
+   attr ('x14ac:knownFonts', '1', attrs_);
    nd_fnts_ := Xml_Node (doc_, nd_stl_, 'fonts', attrs_);
    FOR f_ IN 0 .. wb_.fonts.count-1 LOOP
       nd_fnt_ := Xml_Node (doc_, nd_fnts_, 'font');
       IF wb_.fonts(f_).bold     THEN Xml_Node (doc_, nd_fnt_, 'b'); END IF;
       IF wb_.fonts(f_).italic   THEN Xml_Node (doc_, nd_fnt_, 'i'); END IF;
       IF wb_.fonts(f_).underline THEN Xml_Node (doc_, nd_fnt_, 'u'); END IF;
-      attrs_.delete;
-      attrs_('val') := to_char(wb_.fonts(f_).fontsize, 'TM9', 'NLS_NUMERIC_CHARACTERS=.,');
+
+      natr ('val', to_char(wb_.fonts(f_).fontsize, 'TM9', 'NLS_NUMERIC_CHARACTERS=.,'), attrs_);
       Xml_Node (doc_, nd_fnt_, 'sz', attrs_);
       attrs_.delete;
       IF wb_.fonts(f_).rgb IS NOT null THEN
-         attrs_('rgb')   := wb_.fonts(f_).rgb;
+         attr ('rgb', wb_.fonts(f_).rgb, attrs_);
       ELSE
-         attrs_('theme') := wb_.fonts(f_).theme;
+         attr ('theme', wb_.fonts(f_).theme, attrs_);
       END IF;
       Xml_Node (doc_, nd_fnt_, 'color', attrs_);
-      attrs_.delete;
-      attrs_('val') := wb_.fonts(f_).name;
+
+      natr ('val', wb_.fonts(f_).name, attrs_);
       Xml_Node (doc_, nd_fnt_, 'name', attrs_);
-      attrs_('val') := wb_.fonts(f_).family;
+      natr ('val', wb_.fonts(f_).family, attrs_);
       Xml_Node (doc_, nd_fnt_, 'family', attrs_);
-      attrs_.delete;
-      attrs_('val') := 'none';
+      natr ('val', 'none', attrs_);
       Xml_Node (doc_, nd_fnt_, 'scheme', attrs_);
    END LOOP;
 
-   attrs_.delete;
-   attrs_('count') := wb_.fills.count;
+   natr ('count', wb_.fills.count, attrs_);
    nd_fills_ := Xml_Node (doc_, nd_stl_, 'fills', attrs_);
    FOR f_ IN 0 .. wb_.fills.count-1 LOOP
       nd_fill_ := Xml_Node (doc_, nd_fills_, 'fill');
-      attrs_.delete;
-      attrs_('patternType') := wb_.fills(f_).patternType;
+      natr ('patternType', wb_.fills(f_).patternType, attrs_);
       nd_pf_ := Xml_Node (doc_, nd_fill_, 'patternFill', attrs_);
       attrs_.delete;
       IF wb_.fills(f_).fgRGB IS NOT null THEN
-         attrs_('rgb') := wb_.fills(f_).fgRGB;
+         attr ('rgb', wb_.fills(f_).fgRGB, attrs_);
          Xml_Node (doc_, nd_pf_, 'fgColor', attrs_);
       END IF;
       IF wb_.fills(f_).bgRGB IS NOT null THEN
-         attrs_('rgb') := wb_.fills(f_).bgRGB;
+         attr ('rgb', wb_.fills(f_).bgRGB, attrs_);
          Xml_Node (doc_, nd_pf_, 'bgColor', attrs_);
       END IF;
    END LOOP;
 
-   attrs_.delete;
-   attrs_('count') := wb_.borders.count;
+   natr ('count', wb_.borders.count, attrs_);
    nd_bdrs_ := Xml_Node (doc_, nd_stl_, 'borders', attrs_);
    FOR b_ IN 0 .. wb_.borders.count-1 LOOP
       nd_bdr_ := Xml_Node (doc_, nd_bdrs_, 'border');
       attrs_.delete;
-      IF wb_.borders(b_).left   IS null THEN attrs_.delete; ELSE attrs_('style') := wb_.borders(b_).left; END IF;
+      IF wb_.borders(b_).left   IS null THEN attrs_.delete; ELSE attr('style', wb_.borders(b_).left, attrs_); END IF;
       Xml_Node (doc_, nd_bdr_, 'left', attrs_);
-      IF wb_.borders(b_).right  IS null THEN attrs_.delete; ELSE attrs_('style') := wb_.borders(b_).right; END IF;
+      IF wb_.borders(b_).right  IS null THEN attrs_.delete; ELSE attr('style', wb_.borders(b_).right, attrs_); END IF;
       Xml_Node (doc_, nd_bdr_, 'right', attrs_);
-      IF wb_.borders(b_).top    IS null THEN attrs_.delete; ELSE attrs_('style') := wb_.borders(b_).top; END IF;
+      IF wb_.borders(b_).top    IS null THEN attrs_.delete; ELSE attr('style', wb_.borders(b_).top, attrs_); END IF;
       Xml_Node (doc_, nd_bdr_, 'top', attrs_);
-      IF wb_.borders(b_).bottom IS null THEN attrs_.delete; ELSE attrs_('style') := wb_.borders(b_).bottom; END IF;
+      IF wb_.borders(b_).bottom IS null THEN attrs_.delete; ELSE attr('style', wb_.borders(b_).bottom, attrs_); END IF;
       Xml_Node (doc_, nd_bdr_, 'bottom', attrs_);
    END LOOP;
 
-   attrs_.delete;
-   attrs_('count') := '1';
+   natr ('count', '1', attrs_);
    nd_xfs_ := Xml_Node (doc_, nd_stl_, 'cellStyleXfs', attrs_);
-   attrs_.delete;
-   attrs_('numFmtId') := '0';
-   attrs_('fontId')   := '0';
-   attrs_('fillId')   := '0';
-   attrs_('borderId') := '0';
+
+   natr ('numFmtId', '0', attrs_);
+   attr ('fontId', '0', attrs_);
+   attr ('fillId', '0', attrs_);
+   attr ('borderId', '0', attrs_);
    Xml_Node (doc_, nd_xfs_, 'xf', attrs_);
 
-   attrs_.delete;
-   attrs_('count') := wb_.cellXfs.count+1;
+   natr ('count', wb_.cellXfs.count+1, attrs_);
    nd_xfs_ := Xml_Node (doc_, nd_stl_, 'cellXfs', attrs_);
-   attrs_.delete;
-   attrs_('numFmtId') := '0';
-   attrs_('fontId')   := '0';
-   attrs_('fillId')   := '0';
-   attrs_('borderId') := '0';
-   attrs_('xfId')     := '0';
+
+   natr ('numFmtId', '0', attrs_);
+   attr ('fontId', '0', attrs_);
+   attr ('fillId', '0', attrs_);
+   attr ('borderId', '0', attrs_);
+   attr ('xfId', '0', attrs_);
    Xml_Node (doc_, nd_xfs_, 'xf', attrs_);
    FOR x_ IN 1 .. wb_.cellXfs.count LOOP
       attrs_.delete;
-      attrs_('numFmtId') := wb_.cellXfs(x_).numFmtId;
-      attrs_('fontId')   := wb_.cellXfs(x_).fontId;
-      attrs_('fillId')   := wb_.cellXfs(x_).fillId;
-      attrs_('borderId') := wb_.cellXfs(x_).borderId;
+      natr ('numFmtId', wb_.cellXfs(x_).numFmtId, attrs_);
+      attr ('fontId', wb_.cellXfs(x_).fontId, attrs_);
+      attr ('fillId', wb_.cellXfs(x_).fillId, attrs_);
+      attr ('borderId', wb_.cellXfs(x_).borderId, attrs_);
       nd_xf_ := Xml_Node (doc_, nd_xfs_, 'xf', attrs_);
       IF wb_.cellXfs(x_).alignment.horizontal IS NOT null OR wb_.cellXfs(x_).alignment.vertical IS NOT null OR wb_.cellXfs(x_).alignment.wrapText IS NOT null THEN
          attrs_.delete;
-         IF wb_.cellXfs(x_).alignment.horizontal IS NOT null THEN attrs_('horizontal') := wb_.cellXfs(x_).alignment.horizontal; END IF;
-         IF wb_.cellXfs(x_).alignment.vertical    IS NOT null THEN attrs_('vertical')   := wb_.cellXfs(x_).alignment.vertical;   END IF;
-         IF wb_.cellXfs(x_).alignment.wrapText THEN attrs_('wrapText') := 'true'; END IF;
+         IF wb_.cellXfs(x_).alignment.horizontal IS NOT null THEN attr('horizontal', wb_.cellXfs(x_).alignment.horizontal, attrs_); END IF;
+         IF wb_.cellXfs(x_).alignment.vertical    IS NOT null THEN attr('vertical', wb_.cellXfs(x_).alignment.vertical, attrs_); END IF;
+         IF wb_.cellXfs(x_).alignment.wrapText THEN attr('wrapText', 'true', attrs_); END IF;
          Xml_Node (doc_, nd_xf_, 'alignment', attrs_);
       END IF;
    END LOOP;
 
-   attrs_.delete;
-   attrs_('count') := '1';
+   natr ('count', '1', attrs_);
    nd_xfs_ := Xml_Node (doc_, nd_stl_, 'cellStyles', attrs_);
-   attrs_.delete;
-   attrs_('name')      := 'Normal';
-   attrs_('xfId')      := '0';
-   attrs_('builtinId') := '0';
+
+   natr ('name', 'Normal', attrs_);
+   attr ('xfId', '0', attrs_);
+   attr ('builtinId', '0', attrs_);
    Xml_Node (doc_, nd_xfs_, 'cellStyle', attrs_);
-   attrs_.delete;
-   attrs_('count') := '0';
+
+   natr ('count', '0', attrs_);
    Xml_Node (doc_, nd_stl_, 'dxfs', attrs_);
-   attrs_('defaultTableStyle') := 'TableStyleMedium2';
-   attrs_('defaultPivotStyle') := 'PivotStyleLight16';
+   natr ('defaultTableStyle', 'TableStyleMedium2', attrs_);
+   attr ('defaultPivotStyle', 'PivotStyleLight16', attrs_);
    Xml_Node (doc_, nd_stl_, 'tableStyles', attrs_);
 
    nd_xfs_ := Xml_Node (doc_, nd_stl_, 'extLst');
-   attrs_.delete;
-   attrs_('uri')       := '{EB79DEF2-80B8-43e5-95BD-54CBDDF9020C}';
-   attrs_('xmlns:x14') := 'http://schemas.microsoft.com/office/spreadsheetml/2009/9/main';
+   natr ('uri', '{EB79DEF2-80B8-43e5-95BD-54CBDDF9020C}', attrs_);
+   attr ('xmlns:x14', 'http://schemas.microsoft.com/office/spreadsheetml/2009/9/main', attrs_);
    nd_xf_ := Xml_Node (doc_, nd_xfs_, 'ext', attrs_);
-   attrs_.delete;
-   attrs_('defaultSlicerStyle') := 'SlicerStyleLight1';
+   natr ('defaultSlicerStyle', 'SlicerStyleLight1', attrs_);
    Xml_Node (doc_, nd_xf_, 'slicerStyles', 'x14', attrs_);
 
    Add1Xml (excel_, 'xl/styles.xml', Dbms_XmlDom.getXmlType(doc_).getClobVal);
@@ -4020,36 +4148,32 @@ BEGIN
 
    -- xl/workbook.xml
    Dbms_XmlDom.setVersion (doc_, '1.0" encoding="UTF-8" standalone="yes');
-   attrs_('xmlns')   := 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
-   attrs_('xmlns:r') := 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
+   natr ('xmlns', 'http://schemas.openxmlformats.org/spreadsheetml/2006/main', attrs_);
+   attr ('xmlns:r', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships', attrs_);
    nd_wb_ := Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'workbook', attrs_);
 
-   attrs_.delete;
-   attrs_('appName')      := 'xl';
-   attrs_('lastEdited')   := '5';
-   attrs_('lowestEdited') := '5';
-   attrs_('rupBuild')     := '9302';
+   natr ('appName', 'xl', attrs_);
+   attr ('lastEdited', '5', attrs_);
+   attr ('lowestEdited', '5', attrs_);
+   attr ('rupBuild', '9302', attrs_);
    Xml_Node (doc_, nd_wb_, 'fileVersion', attrs_);
-   attrs_.delete;
-   attrs_('date1904')            := 'false';
-   attrs_('defaultThemeVersion') := '124226';
+   natr ('date1904', 'false', attrs_);
+   attr ('defaultThemeVersion', '124226', attrs_);
    Xml_Node (doc_, nd_wb_, 'workbookPr', attrs_);
 
    nd_bks_ := Xml_Node (doc_, nd_wb_, 'bookViews');
-   attrs_.delete;
-   attrs_('xWindow')      := '120';
-   attrs_('yWindow')      := '45';
-   attrs_('windowWidth')  := '19155';
-   attrs_('windowHeight') := '4935';
+   natr ('xWindow',  '120', attrs_);
+   attr ('yWindow', '45', attrs_);
+   attr ('windowWidth', '19155', attrs_);
+   attr ('windowHeight', '4935', attrs_);
    Xml_Node (doc_, nd_bks_, 'workbookView', attrs_);
 
-   attrs_.delete;
    nd_shs_ := Xml_Node (doc_, nd_wb_, 'sheets');
    s_ := wb_.sheets.first;
    WHILE s_ IS NOT null LOOP
-      attrs_('name')    := wb_.sheets(s_).name;
-      attrs_('sheetId') := to_char(s_);
-      attrs_('r:id')    := rep ('rId:P1', to_char(rel_));
+      natr ('name', wb_.sheets(s_).name, attrs_);
+      attr ('sheetId', to_char(s_), attrs_);
+      attr ('r:id', rep ('rId:P1', to_char(rel_)), attrs_);
       Xml_Node (doc_, nd_shs_, 'sheet', attrs_);
       wb_.sheets(s_).wb_rel := rel_;
       rel_ := rel_ + 1;
@@ -4060,10 +4184,12 @@ BEGIN
       nd_dnm_ := Xml_Node (doc_, nd_wb_, 'definedNames');
       dn_ := wb_.defined_names.first;
       WHILE dn_ IS NOT null LOOP
-         attrs_.delete;
-         attrs_('name') := dn_;
-         IF wb_.defined_names(dn_).local_sheet IS NOT null THEN
-            attrs_('localSheetId') := to_char(wb_.defined_names(dn_).local_sheet);
+         natr ('name', dn_, attrs_);
+         IF wb_.defined_names(dn_).local_sheet THEN
+            IF wb_.defined_names(dn_).sheet_id IS null THEN
+               Raise_App_Error ('Sheet Id must be defined for local-sheet function to be viable!');
+            END IF;
+            attr ('localSheetId', to_char(wb_.defined_names(dn_).sheet_id), attrs_);
          END IF;
          Xml_Text_Node (doc_, nd_dnm_, 'definedName', Alfan_Sheet_Range(wb_.defined_names(dn_)), attrs_);
          dn_ := wb_.defined_names.next(dn_);
@@ -4073,17 +4199,15 @@ BEGIN
    IF wb_.pivot_caches.count > 0 THEN
       nd_pvs_ :=  Xml_Node (doc_, nd_wb_, 'pivotCaches');
       FOR pc_ IN 1 .. wb_.pivot_caches.count LOOP
-         attrs_.delete;
-         attrs_('r:id')    := 'rId' || to_char(rel_);
-         attrs_('cacheId') := to_char(pc_);
+         natr ('r:id', 'rId' || to_char(rel_), attrs_);
+         attr ('cacheId', to_char(wb_.pivot_caches(pc_).cache_id), attrs_);
          Xml_Node (doc_, nd_pvs_, 'pivotCache', attrs_);
          wb_.pivot_caches(pc_).wb_rel := rel_;
          rel_                         := rel_ + 1;
       END LOOP;
    END IF;
 
-   attrs_.delete;
-   attrs_('calcId') := '144525';
+   natr ('calcId', '144525', attrs_);
    Xml_Node (doc_, nd_wb_, 'calcPr', attrs_);
 
    Add1Xml (excel_, 'xl/workbook.xml', Dbms_XmlDom.getXmlType(doc_).getClobVal);
@@ -4103,37 +4227,36 @@ BEGIN
    -- xl/_rels/workbook.xml.rels
    Dbms_XmlDom.setVersion (doc_, '1.0" encoding="UTF-8" standalone="yes');
 
-   attrs_('xmlns')   := 'http://schemas.openxmlformats.org/package/2006/relationships';
+   natr ('xmlns', 'http://schemas.openxmlformats.org/package/2006/relationships', attrs_);
    nd_rls_ := Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'Relationships', attrs_);
 
-   attrs_.delete;
-   attrs_('Id')     := 'rId1';
-   attrs_('Type')   := 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings';
-   attrs_('Target') := 'sharedStrings.xml';
+   natr ('Id', 'rId1', attrs_);
+   attr ('Type', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings', attrs_);
+   attr ('Target', 'sharedStrings.xml', attrs_);
    Xml_Node (doc_, nd_rls_, 'Relationship', attrs_);
 
-   attrs_('Id')     := 'rId2';
-   attrs_('Type')   := 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles';
-   attrs_('Target') := 'styles.xml';
+   natr ('Id', 'rId2', attrs_);
+   attr ('Type', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles', attrs_);
+   attr ('Target', 'styles.xml', attrs_);
    Xml_Node (doc_, nd_rls_, 'Relationship', attrs_);
 
-   attrs_('Id')     := 'rId3';
-   attrs_('Type')   := 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme';
-   attrs_('Target') := 'theme/theme1.xml';
+   natr ('Id', 'rId3', attrs_);
+   attr ('Type', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme', attrs_);
+   attr ('Target', 'theme/theme1.xml', attrs_);
    Xml_Node (doc_, nd_rls_, 'Relationship', attrs_);
 
    FOR pc_ IN 1 .. wb_.pivot_caches.count LOOP
-      attrs_('Id')     := 'rId' || to_char (wb_.pivot_caches(pc_).wb_rel);
-      attrs_('Type')   := 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotCacheDefinition';
-      attrs_('Target') := rep ('pivotCache/pivotCacheDefinition:P1.xml', pc_);
+      natr ('Id', 'rId' || to_char (wb_.pivot_caches(pc_).wb_rel), attrs_);
+      attr ('Type', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotCacheDefinition', attrs_);
+      attr ('Target', rep ('pivotCache/pivotCacheDefinition:P1.xml', pc_), attrs_);
       Xml_Node (doc_, nd_rls_, 'Relationship', attrs_);
    END LOOP;
 
    s_ := wb_.sheets.first;
    WHILE s_ IS NOT null LOOP
-      attrs_('Id')     := 'rId' || to_char(wb_.sheets(s_).wb_rel);
-      attrs_('Type')   := 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet';
-      attrs_('Target') := rep ('worksheets/sheet:P1.xml', s_);
+      natr ('Id', 'rId' || to_char(wb_.sheets(s_).wb_rel), attrs_);
+      attr ('Type',  'http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet', attrs_);
+      attr ('Target', rep ('worksheets/sheet:P1.xml', s_), attrs_);
       Xml_Node (doc_, nd_rls_, 'Relationship', attrs_);
       s_ := wb_.sheets.next(s_);
    END LOOP;
@@ -4143,34 +4266,92 @@ BEGIN
 
 END Finish_Workbook_Rels;
 
+PROCEDURE Build_Pivot_Caches
+IS
+   rollup_fn_      VARCHAR2(20);
+   col_name_       VARCHAR2(32000);
+   range_vals_ord_ tp_data_ix_ord;
+   cache_field_    tp_cache_field;
+   min_val_        NUMBER;
+   max_val_        NUMBER;
+   uq_             tp_unique_data;
+BEGIN
+   FOR pc_ IN 1 .. wb_.pivot_caches.count LOOP
+      FOR c_ IN 1 .. Range_Width (wb_.pivot_caches(pc_).ds_range) LOOP
+
+         col_name_  := Range_Col_Head_Name (wb_.pivot_caches(pc_).ds_range, c_);
+         rollup_fn_ := wb_.pivot_caches(pc_).flds_to_cache(c_);
+
+         IF rollup_fn_ IN ('row','col','filter') THEN -- filter needs to be checked!!
+            range_vals_ord_ := Range_Unique_Data_Ord (wb_.pivot_caches(pc_).ds_range, c_);
+            uq_ := Ord_Data_To_Unique (range_vals_ord_);
+            cache_field_ := tp_cache_field (
+               field_name   => col_name_,
+               rollup_fn    => rollup_fn_,
+               format_id    => Range_Col_NumFmtId (wb_.pivot_caches(pc_).ds_range, c_),
+               shared_items => uq_,
+               si_order     => range_vals_ord_,
+               min_value    => null,
+               max_value    => null
+            );
+         ELSIF rollup_fn_ IN ('sum') THEN
+            Range_Col_Min_Max_Values (
+               wb_.pivot_caches(pc_).ds_range, c_, min_val_, max_val_
+            );
+            cache_field_ := tp_cache_field (
+               field_name   => col_name_,
+               rollup_fn    => rollup_fn_,
+               format_id    => Range_Col_NumFmtId (wb_.pivot_caches(pc_).ds_range, c_),
+               shared_items => tp_unique_data(),
+               si_order     => tp_data_ix_ord(),
+               min_value    => min_val_,
+               max_value    => max_val_
+            );
+         ELSE
+            cache_field_ := tp_cache_field (
+               field_name   => col_name_,
+               rollup_fn    => '',
+               format_id    => 0,
+               shared_items => tp_unique_data(),
+               si_order     => tp_data_ix_ord(),
+               min_value    => null,
+               max_value    => null
+            );
+         END IF;
+         wb_.pivot_caches(pc_).cached_fields(col_name_) := cache_field_;
+         wb_.pivot_caches(pc_).cf_order(c_)            := col_name_;
+      END LOOP;
+   END LOOP;
+END Build_Pivot_Caches;
 
 PROCEDURE Finish_Pivot_Caches (
    excel_ IN OUT NOCOPY BLOB )
 IS
-   sh_            PLS_INTEGER;
-   range_width_   PLS_INTEGER;
-   doc_           dbms_XmlDom.DomDocument;
-   attrs_         xml_attrs_arr;
-   nd_pcd_        dbms_XmlDom.DomNode;
-   nd_cs_         dbms_XmlDom.DomNode;
-   nd_cfs_        dbms_XmlDom.DomNode;
-   nd_cf_         dbms_XmlDom.DomNode;
-   nd_rels_       dbms_XmlDom.DomNode;
-   nd_si_         dbms_XmlDom.DomNode;
-   nd_el_         dbms_XmlDom.DomNode;
-   nd_ex_         dbms_XmlDom.DomNode;
-   nd_row_        dbms_XmlDom.DomNode;
-   rollup_type_   VARCHAR2(20); -- col/row/sum
-   unique_values_ tp_pivot_collected_data;
-   val_           VARCHAR2(2000);
-   min_val_       NUMBER;
-   max_val_       NUMBER;
-   tag_           VARCHAR2(1);
+   sh_          PLS_INTEGER;
+   doc_         dbms_XmlDom.DomDocument;
+   attrs_       xml_attrs_arr;
+   nd_pcd_      dbms_XmlDom.DomNode;
+   nd_cs_       dbms_XmlDom.DomNode;
+   nd_cfs_      dbms_XmlDom.DomNode;
+   nd_cf_       dbms_XmlDom.DomNode;
+   nd_rels_     dbms_XmlDom.DomNode;
+   nd_si_       dbms_XmlDom.DomNode;
+   nd_el_       dbms_XmlDom.DomNode;
+   nd_ex_       dbms_XmlDom.DomNode;
+   nd_row_      dbms_XmlDom.DomNode;
+   tag_         VARCHAR2(1);
+   fld_         VARCHAR2(2000);
+   cache_       tp_pivot_cache;
+   cfld_        tp_cache_field;
+   xl_col_      PLS_INTEGER;
 BEGIN
+
+   Build_Pivot_Caches;
 
    FOR pc_ IN 1 .. wb_.pivot_caches.count LOOP
 
-      sh_ := wb_.pivot_caches(pc_).ds_range.sheet_id;
+      cache_ := wb_.pivot_caches(pc_);
+      sh_ := cache_.ds_range.sheet_id;
       IF sh_ IS null THEN
          Raise_App_Error ('A data-range must have a sheet defined inside a cache definition, in Finish_Pivot_Caches()');
       END IF;
@@ -4179,80 +4360,69 @@ BEGIN
       doc_ := Dbms_XmlDom.newDomDocument;
       Dbms_XmlDom.setVersion (doc_, '1.0" encoding="UTF-8" standalone="yes');
 
-      attrs_('xmlns')                 := 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
-      attrs_('xmlns:r')               := 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
-      attrs_('xmlns:mc')              := 'http://schemas.openxmlformats.org/markup-compatibility/2006';
-      attrs_('mc:Ignorable')          := 'xr';
-      attrs_('r:id')                  := 'rId1';
-      attrs_('refreshedBy')           := user;
-      attrs_('refreshedDate')         := Date_To_Xl_Nr(sysdate);
-      attrs_('createdVersion')        := '7'; -- Version of Excel in which this pivot was created!
-      attrs_('refreshedVersion')      := '7';
-      attrs_('minRefreshableVersion') := '3'; -- Minimum version of Excel which is compatible (apparently)
-      attrs_('recordCount')           := to_char (Range_Height(wb_.pivot_caches(pc_).ds_range));
-      attrs_('xmlns:xr')              := 'http://schemas.microsoft.com/office/spreadsheetml/2014/revision';
-      attrs_('xr:uid')                := Get_Guid; --'{C898DCD4-A18D-452F-B655-4FAEB857F78F}';
+      natr ('xmlns', 'http://schemas.openxmlformats.org/spreadsheetml/2006/main', attrs_);
+      attr ('xmlns:r', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships', attrs_);
+      attr ('xmlns:mc', 'http://schemas.openxmlformats.org/markup-compatibility/2006', attrs_);
+      attr ('mc:Ignorable', 'xr', attrs_);
+      attr ('r:id', 'rId1', attrs_); -- points to pivot-cache-record; there's only ever 1 per pCD
+      attr ('refreshedBy', user, attrs_);
+      attr ('refreshedDate', Date_To_Xl_Nr(sysdate), attrs_);
+      attr ('createdVersion', '7', attrs_); -- Version of Excel in which this pivot was created!
+      attr ('refreshedVersion', '7', attrs_);
+      attr ('minRefreshableVersion', '3', attrs_); -- Minimum version of Excel which is compatible (apparently)
+      attr ('recordCount', to_char (Range_Height(cache_.ds_range)), attrs_);
+      attr ('xmlns:xr', 'http://schemas.microsoft.com/office/spreadsheetml/2014/revision', attrs_);
+      attr ('xr:uid', Get_Guid, attrs_); --'{C898DCD4-A18D-452F-B655-4FAEB857F78F}';
       nd_pcd_ := Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'pivotCacheDefinition', attrs_);
 
-      attrs_.delete;
-      attrs_('type') := 'worksheet';
+      natr ('type', 'worksheet', attrs_);
       nd_cs_ := Xml_Node (doc_, nd_pcd_, 'cacheSource', attrs_);
 
       attrs_.delete;
-      IF wb_.pivot_caches(pc_).ds_range.defined_name IS NOT null THEN
-         attrs_('name') := wb_.pivot_caches(pc_).ds_range.defined_name;
+      IF cache_.ds_range.defined_name IS NOT null THEN
+         attr ('name', cache_.ds_range.defined_name, attrs_);
       ELSE
-         attrs_('ref')   := Alfan_Range (wb_.pivot_caches(pc_).ds_range);
-         attrs_('sheet') := Sheet_Name (wb_.pivot_caches(pc_).ds_range);
+         attr ('ref', Alfan_Range (cache_.ds_range), attrs_);
+         attr ('sheet', Sheet_Name (cache_.ds_range), attrs_);
       END IF;
       Xml_Node (doc_, nd_cs_, 'worksheetSource', attrs_);
 
       attrs_.delete;
-      range_width_    := Range_Width (wb_.pivot_caches(pc_).ds_range);
-      attrs_('count') := to_char(range_width_);
+      attr ('count', to_char(cache_.cf_order.count), attrs_);
       nd_cfs_ := Xml_Node (doc_, nd_pcd_, 'cacheFields', attrs_);
-      FOR c_ IN 1 .. range_width_ LOOP
 
-         rollup_type_ := CASE
-            WHEN wb_.pivot_caches(pc_).aggregate_cols.exists(c_) THEN
-               wb_.pivot_caches(pc_).aggregate_cols(c_)
-         END;
+      FOR c_ IN cache_.cf_order.first .. cache_.cf_order.last LOOP
 
-         IF rollup_type_ IN ('row','col') THEN
-            unique_values_ := Range_Unique_Data (wb_.pivot_caches(pc_).ds_range, c_);
-         ELSE
-            unique_values_.delete;
-         END IF;
+         fld_  := cache_.cf_order(c_);
+         cfld_ := cache_.cached_fields(fld_);
 
-         attrs_.delete;
-         attrs_('name')     := Range_Col_Head_Name (wb_.pivot_caches(pc_).ds_range, c_);
-         attrs_('numFmtId') := Range_Col_NumFmtId (wb_.pivot_caches(pc_).ds_range, c_);
+         natr ('name', fld_, attrs_);
+         attr ('numFmtId', cache_.cached_fields(fld_).format_id, attrs_);
          nd_cf_ := Xml_Node (doc_, nd_cfs_, 'cacheField', attrs_);
 
          attrs_.delete;
-         IF unique_values_.count > 0 THEN
-            attrs_('count') := to_char(unique_values_.count);
-         ELSIF rollup_type_ = 'sum' THEN
-            Range_Col_Min_Max_Values (wb_.pivot_caches(pc_).ds_range, c_, min_val_, max_val_);
-            attrs_('containsSemiMixedTypes') := '0';
-            attrs_('containsString')         := '0';
-            attrs_('containsNumber')         := '1';
-            attrs_('minValue')               := to_char(min_val_);
-            attrs_('maxValue')               := to_char(max_val_);
+         IF cfld_.rollup_fn IN ('row','column','fileter') THEN
+            attr ('count', to_char(cache_.cached_fields(fld_).shared_items.count), attrs_);
+         ELSIF cfld_.rollup_fn = 'sum' THEN
+            attr ('containsSemiMixedTypes', '0', attrs_);
+            attr ('containsString', '0', attrs_);
+            attr ('containsNumber', '1', attrs_);
+            attr ('minValue', to_char(cache_.cached_fields(fld_).min_value), attrs_);
+            attr ('maxValue', to_char(cache_.cached_fields(fld_).max_value), attrs_);
          END IF;
          nd_si_ := Xml_Node (doc_, nd_cf_, 'sharedItems', attrs_);
-         val_ := unique_values_.first;
-         WHILE val_ IS NOT null LOOP
-            attrs_.delete;
-            attrs_('v') := val_;
-            Xml_Node (doc_, nd_si_, 's', attrs_);
-            val_ := unique_values_.next(val_);
-         END LOOP;
+
+         IF cfld_.si_order.count > 0 THEN
+            FOR si_ IN cfld_.si_order.first .. cfld_.si_order.last LOOP
+               natr ('v', cfld_.si_order(si_), attrs_);
+               Xml_Node (doc_, nd_si_, 's', attrs_); -- s for a string, which we assume, for now
+            END LOOP;
+         END IF;
       END LOOP;
       nd_el_ := Xml_Node (doc_, nd_pcd_, 'extLst');
       attrs_.delete;
-      attrs_('uri')       := Get_Guid;
-      attrs_('xmlns:x14') := 'http://schemas.microsoft.com/office/spreadsheetml/2009/9/main';
+      natr ('uri', Get_Guid, attrs_);
+      attr ('xmlns:x14', 'http://schemas.microsoft.com/office/spreadsheetml/2009/9/main', attrs_);
       nd_ex_ := Xml_Node (doc_, nd_el_, 'ext', attrs_);
       Xml_Node (doc_, nd_ex_, 'pivotCacheDefinition', 'x14');
 
@@ -4261,28 +4431,27 @@ BEGIN
 
 
       -- xl/pivotCache/pivotCacheRecords:P1.xml
-      attrs_.delete;
       doc_ := Dbms_XmlDom.newDomDocument;
       Dbms_XmlDom.setVersion (doc_, '1.0" encoding="UTF-8" standalone="yes');
 
-      attrs_('xmlns')        := 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
-      attrs_('xmlns:r')      := 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
-      attrs_('xmlns:mc')     := 'http://schemas.openxmlformats.org/markup-compatibility/2006';
-      attrs_('mc:Ignorable') := 'xr';
-      attrs_('xmlns:xr')     := 'http://schemas.microsoft.com/office/spreadsheetml/2014/revision';
-      attrs_('count')        := wb_.pivot_caches(pc_).ds_range.br.r - wb_.pivot_caches(pc_).ds_range.tl.r;
+      natr ('xmlns', 'http://schemas.openxmlformats.org/spreadsheetml/2006/main', attrs_);
+      attr ('xmlns:r', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships', attrs_);
+      attr ('xmlns:mc', 'http://schemas.openxmlformats.org/markup-compatibility/2006', attrs_);
+      attr ('mc:Ignorable', 'xr', attrs_);
+      attr ('xmlns:xr', 'http://schemas.microsoft.com/office/spreadsheetml/2014/revision', attrs_);
+      attr ('count', to_char(cache_.ds_range.br.r - cache_.ds_range.tl.r), attrs_);
       nd_pcd_ := Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'pivotCacheRecords', attrs_);
 
-      attrs_.delete;
-      FOR r_ IN wb_.pivot_caches(pc_).ds_range.tl.r+1 .. wb_.pivot_caches(pc_).ds_range.br.r LOOP
+      FOR r_ IN cache_.ds_range.tl.r+1 .. cache_.ds_range.br.r LOOP
          nd_row_ := Xml_Node (doc_, nd_pcd_, 'r');
-         FOR c_ IN wb_.pivot_caches(pc_).ds_Range.tl.c .. wb_.pivot_caches(pc_).ds_range.br.c LOOP
-            attrs_('v') := Get_Cell_Value_Raw (c_, r_, sh_);
-            tag_        := Get_Cell_Cache_Tag (c_, r_, sh_);
+         FOR c_ IN cache_.cf_order.first .. cache_.cf_order.last LOOP
+            cfld_   := cache_.cached_fields(cache_.cf_order(c_));
+            xl_col_ := cache_.ds_range.tl.c + c_ - 1; -- one based, not zero
+            natr ('v', Get_Cell_Cache_Value (xl_col_, r_, sh_, cfld_.shared_items), attrs_);
+            tag_    := Get_Cell_Cache_Tag (xl_col_, r_, sh_, cfld_.rollup_fn);
             Xml_Node (doc_, nd_row_, tag_, attrs_);
          END LOOP;
       END LOOP;
-
       Add1Xml (excel_, rep('xl/pivotCache/pivotCacheRecords:P1.xml',pc_), Dbms_XmlDom.getXmlType(doc_).getClobVal);
       Dbms_XmlDom.freeDocument (doc_);
 
@@ -4294,14 +4463,12 @@ BEGIN
       doc_ := Dbms_XmlDom.newDomDocument;
       Dbms_XmlDom.setVersion (doc_, '1.0" encoding="UTF-8" standalone="yes');
 
-      attrs_.delete;
-      attrs_('xmlns') := 'http://schemas.openxmlformats.org/package/2006/relationships';
+      natr ('xmlns', 'http://schemas.openxmlformats.org/package/2006/relationships', attrs_);
       nd_rels_ := Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'Relationships', attrs_);
-      attrs_.delete;
 
-      attrs_('Id')     := 'rId1';
-      attrs_('Type')   := 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotCacheRecords';
-      attrs_('Target') := rep ('pivotCacheRecords:P1.xml', pc_);
+      natr ('Id', 'rId1', attrs_);
+      attr ('Type', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotCacheRecords', attrs_);
+      attr ('Target', rep ('pivotCacheRecords:P1.xml', pc_), attrs_);
       Xml_Node (doc_, nd_rels_, 'Relationship', attrs_);
 
       Add1Xml (excel_, rep('xl/pivotCache/_rels/pivotCacheDefinition:P1.xml.rels',pc_), Dbms_XmlDom.getXmlType(doc_).getClobVal);
@@ -4310,6 +4477,435 @@ BEGIN
    END LOOP;
 
 END Finish_Pivot_Caches;
+
+FUNCTION Combine_Arrays (
+   arr1_ IN tp_col_filters,
+   arr2_ IN tp_col_filters ) RETURN tp_col_filters
+IS
+   ix_  PLS_INTEGER;
+   ret_ tp_col_filters;
+BEGIN
+   ix_ := arr1_.first;
+   WHILE ix_ IS NOT null LOOP
+      ret_(ix_) := arr1_(ix_);
+      ix_ := arr1_.next(ix_);
+   END LOOP;
+   ix_ := arr2_.first;
+   WHILE ix_ IS NOT null LOOP
+      IF ret_.exists(ix_) THEN
+         Raise_App_Error ('Duplicate indexes :P1 when combining arrays', to_char(ix_));
+      END IF;
+      ret_(ix_) := arr2_(ix_);
+      ix_ := arr2_.next(ix_);
+   END LOOP;
+   RETURN ret_;
+END Combine_Arrays;
+
+-----
+-- Json_Aggregates_From_Filters()
+--   Given a cell-range and a set of filter-values, we can calculate aggregate
+--   math on one or multiple columns found in that range.
+--   Hard calculations on the underlying data are only done at the leaf level.
+--   Higher levels take values from lower levels in a recursive nature.
+--
+FUNCTION Json_Aggregates_From_Filters (
+   pivot_id_      IN PLS_INTEGER,
+   level_         IN PLS_INTEGER,
+   filter_vals_   IN tp_col_filters := tp_col_filters(), -- should be of length `level_`
+   extra_filters_ IN tp_col_filters := tp_col_filters() ) RETURN json_object_t
+IS
+
+   pivot_            tp_pivot_table := wb_.pivot_tables(pivot_id_);
+   cache_            tp_pivot_cache := wb_.pivot_caches(pivot_.cache_id);
+   range_            tp_cell_range  := cache_.ds_range;
+   vrollup_          tp_pivot_cols  := pivot_.pivot_axes.vrollups;
+   aggregates_       tp_col_agg_fns := pivot_.pivot_axes.col_agg_fns;
+   filters_          tp_col_filters := Combine_Arrays (filter_vals_, extra_filters_);
+   agg_offset_       PLS_INTEGER;
+   fc_offset_        PLS_INTEGER;
+
+   is_leaf_          BOOLEAN       := vrollup_.count = level_;
+   results_obj_      json_object_t := json_object_t();
+   sum_obj_          json_object_t := json_object_t();
+   breakdown_obj_    json_object_t := json_object_t();
+   child_obj_        json_object_t;
+   sum_val_          NUMBER        := 0;
+   rec_count_        PLS_INTEGER   := 0;
+   direct_sub_recs_  PLS_INTEGER   := 0;
+   accum_sub_recs_   PLS_INTEGER   := 0;
+
+   rg_row_start_     PLS_INTEGER := range_.tl.r + 1;
+   rg_row_end_       PLS_INTEGER := range_.br.r;
+   rg_col_start_     PLS_INTEGER := range_.tl.c - 1;
+   col_              PLS_INTEGER;
+   keep_             BOOLEAN;
+
+   next_filter_vals_ tp_col_filters  := filter_vals_;
+   this_colid_       PLS_INTEGER;
+   next_level_       PLS_INTEGER     := level_ + 1;
+   next_colid_       PLS_INTEGER;
+   next_col_name_    VARCHAR2(32000);
+   shared_item_      VARCHAR2(32000);
+
+BEGIN
+
+   IF vrollup_.count = 0 THEN
+      Raise_App_Error ('There must be at least 1 rollup in a Pivot Table!');
+   END IF;
+
+   -- initiate values
+   results_obj_.put ('level', level_);
+   results_obj_.put ('isLeaf', is_leaf_);
+   results_obj_.put ('count', 0);
+
+   agg_offset_ := aggregates_.first;
+   WHILE agg_offset_ IS NOT null LOOP
+      IF aggregates_(agg_offset_) = 'sum' THEN
+         sum_obj_.put (to_char(agg_offset_), 0);
+      END IF;
+      agg_offset_ := aggregates_.next(agg_offset_);
+   END LOOP;
+
+   IF is_leaf_ THEN
+
+      -- For leaf elements, we revert to the data-source already inserted into
+      -- our Excel sheet.  We do our own filtering of this data to find out if
+      -- each record is of interest to us or not, and then base our pivot math
+      -- calculations on that.  Parent elements will base their aggregation on
+      -- this data as well.
+
+      FOR r_ IN rg_row_start_ .. rg_row_end_ LOOP -- loop on dataset rows
+         keep_      := true;
+         fc_offset_ := filters_.first;
+         WHILE fc_offset_ IS NOT null AND keep_ LOOP -- loop on each search criteria
+            col_ := rg_col_start_ + fc_offset_;
+            keep_ := keep_ AND Get_Cell_Value_Raw (col_, r_, range_.sheet_id, false) = filters_(fc_offset_);
+            fc_offset_ := filters_.next(fc_offset_);
+         END LOOP;
+         IF keep_ THEN
+            agg_offset_ := aggregates_.first;
+            rec_count_  := rec_count_ + 1;
+            WHILE agg_offset_ IS NOT null LOOP -- loop on aggregation array to print the results out
+               col_ := rg_col_start_ + agg_offset_;
+               sum_val_ := sum_obj_.get_number(to_char(agg_offset_)) + Get_Cell_Value_Num (col_, r_, range_.sheet_id);
+               sum_obj_.put (to_char(agg_offset_), sum_val_);
+               agg_offset_ := aggregates_.next(agg_offset_);
+            END LOOP;
+         END IF;
+      END LOOP;
+      results_obj_.put ('count', rec_count_);
+      results_obj_.put ('sum', sum_obj_);
+
+   ELSE
+      -- If this is not the leaf, we need to recurse down to the next level of
+      -- rollup.  Aggregations are added up from leaf-nodes, in order to limit
+      -- looping on the source data as much as possible
+
+      this_colid_    := vrollup_(level_+1);
+      results_obj_.put ('colId',   this_colid_);
+      results_obj_.put ('colDesc', Range_Col_Head_Name (cache_.ds_range, this_colid_));
+      next_colid_    := vrollup_(next_level_);
+      next_col_name_ := Range_Col_Head_Name (cache_.ds_range, next_colid_);
+
+      shared_item_ := cache_.cached_fields(next_col_name_).shared_items.first;
+      WHILE shared_item_ IS NOT null LOOP
+
+         next_filter_vals_(next_colid_) := shared_item_;
+         child_obj_ := Json_Aggregates_From_Filters (
+            pivot_id_      => pivot_id_,
+            level_         => next_level_,
+            filter_vals_   => next_filter_vals_, -- varchar index-by col_ix_, should be same length as `level_`
+            extra_filters_ => extra_filters_
+         );
+
+         -- We only attach elements that have records in this filter criteria
+         IF child_obj_.get_number('count') > 0 THEN
+
+            breakdown_obj_.put (shared_item_, child_obj_);
+
+            direct_sub_recs_  := direct_sub_recs_ + 1;
+            IF child_obj_.has('accum-sub-records') THEN
+               accum_sub_recs_ := accum_sub_recs_ + child_obj_.get_number('accum-sub-records');
+            END IF;
+            rec_count_ := rec_count_ + child_obj_.get_number('count');
+            agg_offset_ := aggregates_.first;
+            WHILE agg_offset_ IS NOT null LOOP
+               sum_val_ := sum_obj_.get_number(to_char(agg_offset_));
+               sum_val_ := sum_val_ + child_obj_.get_object('sum').get_number(to_char(agg_offset_));
+               sum_obj_.put (to_char(agg_offset_), sum_val_);
+               agg_offset_ := aggregates_.next(agg_offset_);
+            END LOOP;
+         END IF;
+
+         shared_item_ := cache_.cached_fields(next_col_name_).shared_items.next(shared_item_);
+      END LOOP;
+
+      results_obj_.put ('direct-sub-records', direct_sub_recs_);
+      results_obj_.put ('accum-sub-records', accum_sub_recs_ + direct_sub_recs_);
+      results_obj_.put ('count', rec_count_);
+      results_obj_.put ('sum', sum_obj_);
+      results_obj_.put ('breakdown', breakdown_obj_);
+
+   END IF;
+
+   RETURN results_obj_;
+
+END Json_Aggregates_From_Filters;
+
+PROCEDURE Recurse_Json_Append_Xml (
+   doc_      IN OUT NOCOPY dbms_XmlDom.DomDocument,
+   xml_nd_   IN            dbms_XmlDom.DomNode,
+   j_node_   IN            json_object_t,
+   cache_    IN OUT NOCOPY tp_pivot_cache,
+   col_name_ IN            VARCHAR2 := null,
+   si_val_   IN            VARCHAR2 := null )
+IS
+   nd_i_        dbms_XmlDom.DomNode;
+   bkdn_obj_    json_object_t;
+   keys_        json_key_list;
+   attrs_       xml_attrs_arr;
+   level_       PLS_INTEGER := j_node_.get_number('level');
+   lv_          PLS_INTEGER := level_ - 1;
+   v_           PLS_INTEGER := 0;
+   si_val_loop_ VARCHAR2(32000);
+BEGIN
+
+   IF level_ > 0 THEN
+
+      IF lv_ > 0 THEN
+         attr ('r', to_char(lv_), attrs_);
+      END IF;
+      nd_i_ := Xml_Node (doc_, xml_nd_, 'i', attrs_);
+
+      si_val_loop_ := cache_.cached_fields(col_name_).shared_items.first;
+      WHILE si_val_loop_ IS NOT null LOOP
+         EXIT WHEN si_val_loop_ = si_val_;
+         v_ := v_ + 1;
+         si_val_loop_ := cache_.cached_fields(col_name_).shared_items.next(si_val_loop_);
+      END LOOP;
+
+      IF v_ > 0 THEN
+         natr ('v', v_, attrs_);
+      END IF;
+      Xml_Node (doc_, nd_i_, 'x', attrs_);
+
+   END IF;
+
+   IF j_node_.has('breakdown') THEN
+      bkdn_obj_ := j_node_.get_object ('breakdown');
+      keys_     := bkdn_obj_.get_keys;
+      FOR k_ IN keys_.first .. keys_.last LOOP
+         Recurse_Json_Append_Xml (
+            doc_      => doc_,
+            xml_nd_   => xml_nd_,
+            j_node_   => bkdn_obj_.get_object(keys_(k_)),
+            cache_    => cache_,
+            col_name_ => j_node_.get_string('colDesc'),
+            si_val_   => keys_(k_)
+         );
+      END LOOP;
+   END IF;
+
+   IF level_ = 0 THEN
+      natr ('t', 'grand', attrs_);
+      nd_i_ := Xml_Node (doc_, xml_nd_, 'i', attrs_);
+      Xml_Node (doc_, nd_i_, 'x');
+   END IF;
+
+END Recurse_Json_Append_Xml;
+
+
+-----
+-- Finish_Pivot_Tables()
+--   Must be called after Build_Pivot_Caches(), which also means that function
+--   Finish_Pivot_Caches() must be called first too.
+--   Getting the right data out of a pivot table isn't easy, especially if you
+--   want to support multi-dimentional axes, so modelling the solution in JSON
+--   seems to be the easiest way, b
+--
+PROCEDURE Finish_Pivot_Tables (
+   excel_ IN OUT NOCOPY BLOB )
+IS
+   doc_         dbms_XmlDom.DomDocument;
+   attrs_       xml_attrs_arr;
+   nd_ptd_      dbms_XmlDom.DomNode;
+   nd_pfs_      dbms_XmlDom.DomNode;
+   nd_pf_       dbms_XmlDom.DomNode;
+   nd_is_       dbms_XmlDom.DomNode;
+   nd_ri_       dbms_XmlDom.DomNode;
+   nd_exl_      dbms_XmlDom.DomNode;
+   nd_ext_      dbms_XmlDom.DomNode;
+   nd_rels_     dbms_XmlDom.DomNode;
+   j_piv_       json_object_t;
+   pt_region_   tp_cell_range;
+   cache_       tp_pivot_cache;
+   cf_          tp_cache_field;
+   shared_item_ VARCHAR2(32000);
+   agg_col_     PLS_INTEGER;
+   prefix_      VARCHAR2(50);
+BEGIN
+
+   FOR pt_ IN 1 .. wb_.pivot_tables.count LOOP
+
+      j_piv_ := Json_Aggregates_From_Filters (pivot_id_ => pt_, level_ => 0);
+      Trace ('Pivot table :P1: ' || j_piv_.stringify);
+
+      cache_ := wb_.pivot_caches(wb_.pivot_tables(pt_).cache_id);
+
+      -- xl/pivotTables/pivotTable:P1.xml
+      doc_ := Dbms_XmlDom.newDomDocument;
+      Dbms_XmlDom.setVersion (doc_, '1.0" encoding="UTF-8" standalone="yes');
+
+      natr ('xmlns', 'http://schemas.openxmlformats.org/spreadsheetml/2006/main', attrs_);
+      attr ('xmlns:mc', 'http://schemas.openxmlformats.org/markup-compatibility/2006', attrs_);
+      attr ('mc:Ignorable', 'xr', attrs_);
+      attr ('name', wb_.pivot_tables(pt_).pivot_name, attrs_);
+      attr ('cacheId', wb_.pivot_tables(pt_).cache_id, attrs_);
+      attr ('xmlns:xr', 'http://schemas.microsoft.com/office/spreadsheetml/2014/revision', attrs_);
+      attr ('xr:uid', Get_Guid, attrs_);
+      attr ('applyNumberFormats', '0', attrs_);
+      attr ('applyBorderFormats', '0', attrs_);
+      attr ('applyFontFormats', '0', attrs_);
+      attr ('applyPatternFormats', '0', attrs_);
+      attr ('applyAlignmentFormats', '0', attrs_);
+      attr ('applyWidthHeightFormats', '1', attrs_);
+      attr ('dataCaption', 'Values', attrs_);
+      attr ('createdVersion', '7', attrs_); -- Version of Excel in which this pivot was created!
+      attr ('updatedVersion', '7', attrs_);
+      attr ('minRefreshableVersion', '3', attrs_); -- Minimum version of Excel which is compatible (apparently)
+      attr ('useAutoFormatting', '1', attrs_);
+      attr ('itemPrintTitles', '1', attrs_);
+      attr ('indent', '0', attrs_);
+      attr ('outline', '1', attrs_);
+      attr ('outlineData', '1', attrs_);
+      attr ('multipleFieldFilters', '0', attrs_);
+      nd_ptd_ := Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'pivotTableDefinition', attrs_);
+
+      wb_.pivot_tables(pt_).pivot_height := j_piv_.get_number('accum-sub-records') + 2; -- +header, +grand-totals rows
+      wb_.pivot_tables(pt_).pivot_width  := wb_.pivot_tables(pt_).pivot_axes.col_agg_fns.count + 1; -- assume for now that we only do v-rollups
+      pt_region_ := tp_cell_range (
+         sheet_id => wb_.pivot_tables(pt_).on_sheet,
+         tl       => wb_.pivot_tables(pt_).location_tl,
+         br       => tp_cell_loc (
+            c => wb_.pivot_tables(pt_).location_tl.c + wb_.pivot_tables(pt_).pivot_width - 1,
+            r => wb_.pivot_tables(pt_).location_tl.r + wb_.pivot_tables(pt_).pivot_height - 1
+         )
+      );
+
+      natr ('ref', Alfan_Range(pt_region_), attrs_);
+      attr ('firstHeaderRow', '1', attrs_);
+      attr ('firstDataRow', '1', attrs_);
+      attr ('firstDataCol', '1', attrs_);
+      Xml_Node (doc_, nd_ptd_, 'location', attrs_);
+
+      natr ('count', to_char(cache_.cf_order.count), attrs_);
+      nd_pfs_ := Xml_Node (doc_, nd_ptd_, 'pivotFields', attrs_);
+
+      FOR cf_ix_ IN cache_.cf_order.first .. cache_.cf_order.last LOOP
+
+         cf_ := cache_.cached_fields(cache_.cf_order(cf_ix_));
+
+         attrs_.delete;
+         CASE cf_.rollup_fn
+            WHEN 'row' THEN attr ('axis', 'axisRow', attrs_);
+            WHEN 'sum' THEN attr ('dataField', '1', attrs_);
+            ELSE null;
+         END CASE;
+         attr ('showAll', 0, attrs_);
+         nd_pf_ := Xml_Node (doc_, nd_pfs_, 'pivotField', attrs_);
+
+         IF cf_.shared_items.count > 0 THEN
+            natr ('count', to_char(cf_.shared_items.count + 1), attrs_);
+            nd_is_ := Xml_Node (doc_, nd_pf_, 'items', attrs_);
+
+            shared_item_ := cf_.shared_items.first;
+            WHILE shared_item_ IS NOT null LOOP
+               natr ('x', cf_.shared_items(shared_item_), attrs_);
+               Xml_Node (doc_, nd_is_, 'item', attrs_);
+               shared_item_ := cf_.shared_items.next(shared_item_);
+            END LOOP;
+            natr ('t', 'default', attrs_);
+            Xml_Node (doc_, nd_is_, 'item', attrs_);
+         END IF;
+
+      END LOOP;
+
+      natr ('count', to_char(wb_.pivot_tables(pt_).pivot_axes.vrollups.count), attrs_);
+      nd_pfs_ := Xml_Node (doc_, nd_ptd_, 'rowFields', attrs_);
+
+      FOR r_ IN 1 .. wb_.pivot_tables(pt_).pivot_axes.vrollups.count LOOP
+         natr ('x', to_char(wb_.pivot_tables(pt_).pivot_axes.vrollups(r_) - 1), attrs_);
+         Xml_Node (doc_, nd_pfs_, 'field', attrs_);
+      END LOOP;
+
+      natr ('count', to_char(j_piv_.get_number('accum-sub-records') + 1), attrs_);
+      nd_ri_ := Xml_Node (doc_, nd_ptd_, 'rowItems', attrs_);
+
+      Recurse_Json_Append_Xml (doc_, nd_ri_, j_piv_, cache_);
+
+      natr ('count', 1, attrs_);
+      Xml_Node (doc_, Xml_Node (doc_, nd_ptd_, 'colItems', attrs_), 'i');
+
+      natr ('count', to_char(wb_.pivot_tables(pt_).pivot_axes.col_agg_fns.count), attrs_);
+      Xml_Node (doc_, nd_ptd_, 'dataFields', attrs_);
+
+      agg_col_ := wb_.pivot_tables(pt_).pivot_axes.col_agg_fns.first;
+      WHILE agg_col_ IS NOT null LOOP
+         prefix_ := CASE wb_.pivot_tables(pt_).pivot_axes.col_agg_fns(agg_col_)
+            WHEN 'sum' THEN 'Sum of '
+         END;
+         natr ('name', prefix_ || Range_Col_Head_Name (cache_.ds_range, agg_col_), attrs_);
+         attr ('fld', agg_col_ - 1, attrs_); -- zero based, I think
+         attr ('baseField', '0', attrs_); -- used with showDataAs, which we aren't using for now
+         attr ('baseItem', '0', attrs_);
+         agg_col_ := wb_.pivot_tables(pt_).pivot_axes.col_agg_fns.next(agg_col_);
+      END LOOP;
+
+      natr ('name', 'PivotStyleLight16', attrs_);
+      attr ('showRowHeaders', '1', attrs_);
+      attr ('showColHeaders', '1', attrs_);
+      attr ('showRowStripes', '0', attrs_);
+      attr ('showColStripes', '0', attrs_);
+      attr ('showLastColumn', '1', attrs_);
+      Xml_Node (doc_, nd_ptd_, 'pivotTableStyleInfo', attrs_);
+
+      nd_exl_ := Xml_Node (doc_, nd_ptd_, 'extLst');
+
+      natr ('uri', Get_Guid, attrs_);
+      attr ('xmlns:x14', 'http://schemas.microsoft.com/office/spreadsheetml/2009/9/main', attrs_);
+      nd_ext_ := Xml_Node (doc_, nd_exl_, 'ext', attrs_);
+
+      natr ('hideValuesRow', '1', attrs_);
+      attr ('xmlns:xm', 'http://schemas.microsoft.com/office/excel/2006/main', attrs_);
+      Xml_Node (doc_, nd_ext_, 'pivotTableDefinition', 'x14', attrs_);
+
+      natr ('uri', Get_Guid, attrs_);
+      attr ('xmlns:xpdl', 'http://schemas.microsoft.com/office/spreadsheetml/2016/pivotdefaultlayout', attrs_);
+      nd_ext_ := Xml_Node (doc_, nd_exl_, 'ext', attrs_);
+      Xml_Node (doc_, nd_ext_, 'pivotTableDefinition16', 'xpdl');
+
+      Add1Xml (excel_, rep('xl/pivotTables/pivotTable:P1.xml',pt_), Dbms_XmlDom.getXmlType(doc_).getClobVal);
+      Dbms_XmlDom.freeDocument (doc_);
+
+
+      -- One _rel file per pivot table.
+      -- xl/pivotTables/_rels/pivotTable:P1.xml.rels
+      doc_ := Dbms_XmlDom.newDomDocument;
+      Dbms_XmlDom.setVersion (doc_, '1.0" encoding="UTF-8" standalone="yes');
+
+      natr ('xmlns', 'http://schemas.openxmlformats.org/package/2006/relationships', attrs_);
+      nd_rels_ := Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'Relationships', attrs_);
+
+      natr ('Id', 'rId1', attrs_);
+      attr ('Type', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotCacheDefinition', attrs_);
+      attr ('Target', rep ('../pivotCache/pivotCacheDefinition:P1.xml', to_char(wb_.pivot_tables(pt_).cache_id)), attrs_);
+      Xml_Node (doc_, nd_rels_, 'Relationship', attrs_);
+
+      Add1Xml (excel_, rep('xl/pivotTables/_rels/pivotTable:P1.xml.rels',pt_), Dbms_XmlDom.getXmlType(doc_).getClobVal);
+      Dbms_XmlDom.freeDocument (doc_);
+
+   END LOOP;
+END Finish_Pivot_Tables;
 
 
 PROCEDURE Finish_Drawings_Rels (
@@ -4327,14 +4923,13 @@ BEGIN
    -- xl/drawings/_rels/drawing1.xml.rels
    Dbms_XmlDom.setVersion (doc_, '1.0" encoding="UTF-8" standalone="yes');
 
-   attrs_('xmlns') := 'http://schemas.openxmlformats.org/package/2006/relationships';
+   natr ('xmlns', 'http://schemas.openxmlformats.org/package/2006/relationships', attrs_);
    nd_rels_ := Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'Relationships', attrs_);
 
    FOR dr_ IN 1 .. wb_.images.count LOOP
-      attrs_.delete;
-      attrs_('Id')     := 'rId' || dr_;
-      attrs_('Type')   := 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/image';
-      attrs_('Target') := rep ('../media/image:P1.:P2', dr_, wb_.images(dr_).extension);
+      natr ('Id', 'rId' || dr_, attrs_);
+      attr ('Type', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/image', attrs_);
+      attr ('Target', rep ('../media/image:P1.:P2', dr_, wb_.images(dr_).extension), attrs_);
       Xml_Node (doc_, nd_rels_, 'Relationship', attrs_);
       Add1File (
          zipped_blob_ => excel_,
@@ -4383,52 +4978,51 @@ BEGIN
 
    Dbms_XmlDom.setVersion (doc_, '1.0" encoding="UTF-8" standalone="yes');
 
-   attrs_('xmlns')        := 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
-   attrs_('xmlns:r')      := 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
-   attrs_('xmlns:xdr')    := 'http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing';
-   attrs_('xmlns:x14')    := 'http://schemas.microsoft.com/office/spreadsheetml/2009/9/main';
-   attrs_('xmlns:mc')     := 'http://schemas.openxmlformats.org/markup-compatibility/2006';
-   attrs_('mc:Ignorable') := 'x14ac';
-   attrs_('xmlns:x14ac')  := 'http://schemas.microsoft.com/office/spreadsheetml/2009/9/ac';
+   natr ('xmlns', 'http://schemas.openxmlformats.org/spreadsheetml/2006/main', attrs_);
+   attr ('xmlns:r', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships', attrs_);
+   attr ('xmlns:xdr', 'http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing', attrs_);
+   attr ('xmlns:x14', 'http://schemas.microsoft.com/office/spreadsheetml/2009/9/main', attrs_);
+   attr ('xmlns:mc', 'http://schemas.openxmlformats.org/markup-compatibility/2006', attrs_);
+   attr ('mc:Ignorable', 'x14ac', attrs_);
+   attr ('xmlns:x14ac', 'http://schemas.microsoft.com/office/spreadsheetml/2009/9/ac', attrs_);
    nd_ws_ := Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'worksheet', attrs_);
    IF wb_.sheets(s_).tabcolor IS NOT null THEN
-      attrs_.delete;
-      attrs_('rgb') := wb_.sheets(s_).tabcolor;
+      natr ('rgb', wb_.sheets(s_).tabcolor, attrs_);
       Xml_Node (doc_, Xml_Node(doc_,nd_ws_,'sheetPr'), 'tabColor', attrs_);
    END IF;
 
-   attrs_.delete;
-   attrs_('ref') := Alfan_Range (
-      col_tl_ => col_min_, row_tl_ => wb_.sheets(s_).rows.first,
-      col_br_ => col_max_, row_br_ => wb_.sheets(s_).rows.last
+   natr (
+      'ref', Alfan_Range (
+         col_tl_ => col_min_, row_tl_ => wb_.sheets(s_).rows.first,
+         col_br_ => col_max_, row_br_ => wb_.sheets(s_).rows.last
+      ), attrs_
    );
    Xml_Node (doc_, nd_ws_, 'dimension', attrs_);
 
    nd_svs_ := Xml_Node (doc_, nd_ws_, 'sheetViews');
    attrs_.delete;
-   IF s_ = 1 THEN attrs_('tabSelected') := '1'; END IF;
-   attrs_('workbookViewId') := '0';
+   IF s_ = 1 THEN attr ('tabSelected', '1', attrs_); END IF;
+   attr ('workbookViewId', '0', attrs_);
    nd_sv_  := Xml_Node (doc_, nd_svs_, 'sheetView', attrs_);
 
-   attrs_.delete;
-   attrs_('activePane')  := 'bottomLeft';
-   attrs_('state')       := 'frozen';
+   natr ('activePane', 'bottomLeft', attrs_);
+   attr ('state', 'frozen', attrs_);
    IF wb_.sheets(s_).freeze_rows > 0 AND wb_.sheets(s_).freeze_cols > 0 THEN
-      attrs_('xSplit')      := wb_.sheets(s_).freeze_cols;
-      attrs_('ySplit')      := wb_.sheets(s_).freeze_rows;
-      attrs_('topLeftCell') := Alfan_Cell (wb_.sheets(s_).freeze_cols+1, wb_.sheets(s_).freeze_rows+1);
+      attr ('xSplit', wb_.sheets(s_).freeze_cols, attrs_);
+      attr ('ySplit', wb_.sheets(s_).freeze_rows, attrs_);
+      attr ('topLeftCell', Alfan_Cell (wb_.sheets(s_).freeze_cols+1, wb_.sheets(s_).freeze_rows+1), attrs_);
    ELSIF wb_.sheets(s_).freeze_rows > 0 THEN
-      attrs_('ySplit')      := wb_.sheets(s_).freeze_rows;
-      attrs_('topLeftCell') := Alfan_Cell (1, wb_.sheets(s_).freeze_rows+1);
+      attr ('ySplit', wb_.sheets(s_).freeze_rows, attrs_);
+      attr ('topLeftCell', Alfan_Cell (1, wb_.sheets(s_).freeze_rows+1), attrs_);
    ELSIF wb_.sheets(s_).freeze_cols > 0 THEN
-      attrs_('xSplit')      := wb_.sheets(s_).freeze_cols;
-      attrs_('topLeftCell') := Alfan_Cell (wb_.sheets(s_).freeze_cols+1, 1);
+      attr ('xSplit', wb_.sheets(s_).freeze_cols, attrs_);
+      attr ('topLeftCell', Alfan_Cell (wb_.sheets(s_).freeze_cols+1, 1), attrs_);
    END IF;
    Xml_Node (doc_, nd_sv_, 'pane', attrs_);
 
    attrs_.delete;
-   attrs_('defaultRowHeight') := '15';
-   attrs_('x14ac:dyDescent')  := '0.25';
+   natr ('defaultRowHeight', '15', attrs_);
+   attr ('x14ac:dyDescent', '0.25', attrs_);
    Xml_Node (doc_, nd_ws_, 'sheetFormatPr', attrs_);
 
    IF wb_.sheets(s_).widths.count > 0 THEN
@@ -4436,10 +5030,10 @@ BEGIN
       attrs_.delete;
       col_ := wb_.sheets(s_).widths.first;
       WHILE col_ IS NOT null LOOP
-         attrs_('min')         := col_;
-         attrs_('max')         := col_;
-         attrs_('width')       := to_char (wb_.sheets(s_).widths(col_), 'TM9', 'NLS_NUMERIC_CHARACTERS=.,');
-         attrs_('customWidth') := '1';
+         natr ('min', col_, attrs_);
+         attr ('max', col_, attrs_);
+         attr ('width', to_char (wb_.sheets(s_).widths(col_), 'TM9', 'NLS_NUMERIC_CHARACTERS=.,'), attrs_);
+         attr ('customWidth', '1', attrs_);
          Xml_Node (doc_, nd_cls_, 'col', attrs_);
          col_ := wb_.sheets(s_).widths.next(col_);
       END LOOP;
@@ -4448,24 +5042,22 @@ BEGIN
    nd_sd_ := Xml_Node (doc_, nd_ws_, 'sheetData');
    row_   := wb_.sheets(s_).rows.first;
    WHILE row_ IS NOT null LOOP
-      attrs_.delete;
-      attrs_('r')     := to_char(row_);
-      attrs_('spans') := to_char(col_min_) || ':' || to_char(col_max_);
+      natr ('r', to_char(row_), attrs_);
+      attr ('spans', to_char(col_min_) || ':' || to_char(col_max_), attrs_);
       IF wb_.sheets(s_).row_fmts.exists(row_) AND wb_.sheets(s_).row_fmts(row_).height IS NOT null THEN
-         attrs_('customHeight') := '1';
-         attrs_('ht')           := to_char (wb_.sheets(s_).row_fmts(row_).height, 'TM9', 'NLS_NUMERIC_CHARACTERS=.,');
+         attr ('customHeight', '1', attrs_);
+         attr ('ht', to_char (wb_.sheets(s_).row_fmts(row_).height, 'TM9', 'NLS_NUMERIC_CHARACTERS=.,'), attrs_);
       END IF;
       nd_r_ := Xml_Node (doc_, nd_sd_, 'row', attrs_);
 
       col_ := wb_.sheets(s_).rows(row_).first;
       WHILE col_ IS NOT null LOOP
-         attrs_.delete;
-         attrs_('r') := Alfan_Cell (col_, row_);
+         natr ('r', Alfan_Cell (col_, row_), attrs_);
          IF wb_.sheets(s_).rows(row_)(col_).datatype IN (CELL_DT_STRING_, CELL_DT_HYPERLINK_) THEN
-            attrs_('t') := 's';
+            attr ('t', 's', attrs_);
          END IF;
          IF wb_.sheets(s_).rows(row_)(col_).style IS NOT null THEN
-            attrs_('s') := to_char(wb_.sheets(s_).rows(row_)(col_).style);
+            attr ('s', to_char(wb_.sheets(s_).rows(row_)(col_).style), attrs_);
          END IF;
          nd_c_ := Xml_Node (doc_, nd_r_, 'c', attrs_);
          IF wb_.sheets(s_).rows(row_)(col_).formula_idx IS NOT null THEN
@@ -4479,51 +5071,50 @@ BEGIN
 
    FOR af_ IN 1 .. wb_.sheets(s_).autofilters.count LOOP
       attrs_.delete;
-      attrs_('ref') := Alfan_Range (
-         col_tl_ => nvl (wb_.sheets(s_).autofilters(af_).column_start, col_min_),
-         row_tl_ => nvl (wb_.sheets(s_).autofilters(af_).row_start, wb_.sheets(s_).rows.first),
-         col_br_ => coalesce (wb_.sheets(s_).autofilters(af_).column_end, wb_.sheets(s_).autofilters(af_).column_start, col_max_),
-         row_br_ => nvl (wb_.sheets(s_).autofilters(af_).row_end, wb_.sheets(s_).rows.last)
+      natr (
+         'ref', Alfan_Range (
+            col_tl_ => nvl (wb_.sheets(s_).autofilters(af_).column_start, col_min_),
+            row_tl_ => nvl (wb_.sheets(s_).autofilters(af_).row_start, wb_.sheets(s_).rows.first),
+            col_br_ => coalesce (wb_.sheets(s_).autofilters(af_).column_end, wb_.sheets(s_).autofilters(af_).column_start, col_max_),
+            row_br_ => nvl (wb_.sheets(s_).autofilters(af_).row_end, wb_.sheets(s_).rows.last)
+         ), attrs_
       );
       Xml_Node (doc_, nd_ws_, 'autoFilter', attrs_);
    END LOOP;
 
    IF wb_.sheets(s_).mergecells.count > 0 THEN
-      attrs_.delete;
-      attrs_('count') := to_char(wb_.sheets(s_).mergecells.count);
+      natr ('count', to_char(wb_.sheets(s_).mergecells.count), attrs_);
       nd_mc_ := Xml_Node (doc_, nd_ws_, 'mergeCells', attrs_);
       FOR mg_ IN 1 .. wb_.sheets(s_).mergecells.count LOOP
-         attrs_.delete;
-         attrs_('ref') := wb_.sheets(s_).mergecells(mg_);
+         natr ('ref', wb_.sheets(s_).mergecells(mg_), attrs_);
          Xml_Node (doc_, nd_mc_, 'mergeCell', attrs_);
       END LOOP;
    END IF;
 
    IF wb_.sheets(s_).validations.count > 0 THEN
-      attrs_.delete;
-      attrs_('count') := to_char(wb_.sheets(s_).validations.count);
+      natr ('count', to_char(wb_.sheets(s_).validations.count), attrs_);
       nd_dvs_ := Xml_Node (doc_, nd_ws_, 'dataValidations');
 
       FOR v_ IN wb_.sheets(s_).validations.count LOOP
          attrs_.delete;
-         attrs_('type')       := wb_.sheets(s_).validations(v_).type;
-         attrs_('errorStyle') := wb_.sheets(s_).validations(v_).errorstyle;
-         attrs_('allowBlank') := CASE WHEN nvl(wb_.sheets(s_).validations(v_).allowBlank, true) THEN '1' ELSE '0' END;
-         attrs_('sqref')      := wb_.sheets(s_).validations(v_).sqref;
+         natr ('type', wb_.sheets(s_).validations(v_).type, attrs_);
+         attr ('errorStyle', wb_.sheets(s_).validations(v_).errorstyle, attrs_);
+         attr ('allowBlank', CASE WHEN nvl(wb_.sheets(s_).validations(v_).allowBlank, true) THEN '1' ELSE '0' END, attrs_);
+         attr ('sqref', wb_.sheets(s_).validations(v_).sqref, attrs_);
          IF wb_.sheets(s_).validations(v_).prompt IS NOT null THEN
-            attrs_('showInputMessage') := '1';
-            attrs_('prompt')           := wb_.sheets(s_).validations(v_).prompt;
+            attr ('showInputMessage', '1', attrs_);
+            attr ('prompt', wb_.sheets(s_).validations(v_).prompt, attrs_);
             IF wb_.sheets(s_).validations(v_).title IS NOT null THEN
-               attrs_('promptTitle') := wb_.sheets(s_).validations(v_).title;
+               attr ('promptTitle', wb_.sheets(s_).validations(v_).title, attrs_);
             END IF;
          END IF;
          IF wb_.sheets(s_).validations(v_).showerrormessage THEN
-            attrs_('showErrorMessage') := '1';
+            attr ('showErrorMessage', '1', attrs_);
             IF wb_.sheets(s_).validations(v_).error_title IS NOT null THEN
-               attrs_('errorTitle') := wb_.sheets(s_).validations(v_).error_title;
+               attr ('errorTitle', wb_.sheets(s_).validations(v_).error_title, attrs_);
             END IF;
             IF wb_.sheets(s_).validations(v_).error_txt IS NOT null THEN
-               attrs_('error') := wb_.sheets(s_).validations(v_).error_txt;
+               attr ('error', wb_.sheets(s_).validations(v_).error_txt, attrs_);
             END IF;
          END IF;
          nd_dv_ := Xml_Node (doc_, nd_dvs_, 'dataValidation', attrs_);
@@ -4540,33 +5131,29 @@ BEGIN
    IF wb_.sheets(s_).hyperlinks.count > 0 THEN
       nd_h_ := Xml_Node (doc_, nd_ws_, 'hyperlinks');
       FOR h_ IN 1 .. wb_.sheets(s_).hyperlinks.count LOOP
-         attrs_.delete;
-         attrs_('ref')  := wb_.sheets(s_).hyperlinks(h_).cell;
-         attrs_('r:id') := rep ('rId:P1', id_);
+         natr ('ref', wb_.sheets(s_).hyperlinks(h_).cell, attrs_);
+         attr ('r:id', rep ('rId:P1', id_), attrs_);
          Xml_Node (doc_, nd_h_, 'hyperlink', attrs_);
          id_ := id_ + 1;
       END LOOP;
    END IF;
 
-   attrs_.delete;
-   attrs_('left')   := '0.7';
-   attrs_('right')  := '0.7';
-   attrs_('top')    := '0.75';
-   attrs_('bottom') := '0.75';
-   attrs_('header') := '0.3';
-   attrs_('footer') := '0.3';
+   natr ('left', '0.7', attrs_);
+   attr ('right', '0.7', attrs_);
+   attr ('top', '0.75', attrs_);
+   attr ('bottom', '0.75', attrs_);
+   attr ('header', '0.3', attrs_);
+   attr ('footer', '0.3', attrs_);
    Xml_Node (doc_, nd_ws_, 'pageMargins', attrs_);
 
    IF wb_.sheets(s_).drawings.count > 0 THEN
-      attrs_.delete;
-      attrs_('r:id') := rep ('rId:P1', id_);
+      natr ('r:id', rep ('rId:P1', id_), attrs_);
       Xml_Node (doc_, nd_ws_, 'drawing', attrs_);
       id_ := id_ + 1;
    END IF;
    
    IF wb_.sheets(s_).comments.count > 0 THEN
-      attrs_.delete;
-      attrs_('r:id') := rep ('rId:P1', id_);
+      natr ('r:id', rep ('rId:P1', id_), attrs_);
       Xml_Node (doc_, nd_ws_, 'legacyDrawing', attrs_);
    END IF;
 
@@ -4582,7 +5169,7 @@ IS
    id_            PLS_INTEGER := 1;
    nr_hyperlinks_ PLS_INTEGER := wb_.sheets(s_).hyperlinks.count;
    nr_comments_   PLS_INTEGER := wb_.sheets(s_).comments.count;
-   nr_pivots_     PLS_INTEGER := wb_.sheets(s_).pivot_tables.count;
+   nr_pivots_     PLS_INTEGER := wb_.pivot_tables.count;
    nr_drawings_   PLS_INTEGER := wb_.sheets(s_).drawings.count;
    pt_            PLS_INTEGER; -- pivot list non-contiguous on sheet
    doc_           dbms_XmlDom.DomDocument := Dbms_XmlDom.newDomDocument;
@@ -4595,48 +5182,46 @@ BEGIN
    END IF;
 
    Dbms_XmlDom.setVersion (doc_, '1.0" encoding="UTF-8" standalone="yes');
-   attrs_('xmlns') := 'http://schemas.openxmlformats.org/package/2006/relationships';
+   natr ('xmlns', 'http://schemas.openxmlformats.org/package/2006/relationships', attrs_);
    nd_rels_ := Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'Relationships', attrs_);
 
    FOR h_ IN 1 .. nr_hyperlinks_ LOOP
       IF wb_.sheets(s_).hyperlinks(h_).url IS NOT null THEN
-         attrs_('Id')         := rep ('rId:P1', id_);
-         attrs_('Type')       := 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink';
-         attrs_('Target')     := wb_.sheets(s_).hyperlinks(h_).url;
-         attrs_('TargetMode') := 'External';
+         natr ('Id', rep ('rId:P1', id_), attrs_);
+         attr ('Type', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink', attrs_);
+         attr ('Target',  wb_.sheets(s_).hyperlinks(h_).url, attrs_);
+         attr ('TargetMode', 'External', attrs_);
          Xml_Node (doc_, nd_rels_, 'Relationship', attrs_);
          id_ := id_ + 1;
       END IF;
    END LOOP;
    IF nr_drawings_ > 0 THEN
-      attrs_.delete;
-      attrs_('Id')     := rep ('rId:P1', id_);
-      attrs_('Type')   := 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing';
-      attrs_('Target') := rep ('../drawings/drawing:P1.xml', s_);
+      natr ('Id', rep ('rId:P1', id_), attrs_);
+      attr ('Type', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing', attrs_);
+      attr ('Target', rep ('../drawings/drawing:P1.xml', s_), attrs_);
       Xml_Node (doc_, nd_rels_, 'Relationship', attrs_);
       id_ := id_ + 1;
    END IF;
    IF nr_comments_ > 0 THEN
-      attrs_.delete;
-      attrs_('Id')     := rep ('rId:P1', id_);
-      attrs_('Type')   := 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/vmlDrawing';
-      attrs_('Target') := rep ('../drawings/vmlDrawing:P1.vml', s_);
+      natr ('Id', rep ('rId:P1', id_), attrs_);
+      attr ('Type', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/vmlDrawing', attrs_);
+      attr ('Target', rep ('../drawings/vmlDrawing:P1.vml', s_), attrs_);
       Xml_Node (doc_, nd_rels_, 'Relationship', attrs_);
       id_ := id_ + 1;
-      attrs_('Id')     := rep('rId:P1', id_);
-      attrs_('Type')   := 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments';
-      attrs_('Target') := rep ('../comments:P1.xml', s_);
+      natr ('Id', rep('rId:P1', id_), attrs_);
+      attr ('Type', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments', attrs_);
+      attr ('Target', rep ('../comments:P1.xml', s_), attrs_);
       Xml_Node (doc_, nd_rels_, 'Relationship', attrs_);
       id_ := id_ + 1;
    END IF;
-   pt_ := wb_.sheets(s_).pivot_tables.first;
+   pt_ := wb_.pivot_tables.first;
    WHILE pt_ IS NOT null LOOP
-      attrs_('Id')     := 'rId' || to_char(id_);
-      attrs_('Type')   := 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotTable';
-      attrs_('Target') := rep ('../pivotCache/pivotCacheDefinition:P1.xml', pt_);
+      natr ('Id', 'rId' || to_char(id_), attrs_);
+      attr ('Type', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotTable', attrs_);
+      attr ('Target', rep ('../pivotCache/pivotCacheDefinition:P1.xml', pt_), attrs_);
       Xml_Node (doc_, nd_rels_, 'Relationship', attrs_);
       id_ := id_ + 1;
-      pt_ := wb_.sheets(s_).pivot_tables.next(pt_);
+      pt_ := wb_.pivot_tables.next(pt_);
    END LOOP;
 
    Add1Xml (excel_, rep('xl/worksheets/_rels/sheet:P1.xml.rels',s_), Dbms_XmlDom.getXmlType(doc_).getClobVal);
@@ -4739,8 +5324,8 @@ BEGIN
 
    -- xl/drawings/drawing:P1.xml
    Dbms_XmlDom.setVersion (doc_, '1.0" encoding="UTF-8" standalone="yes');
-   attrs_('xmlns:xdr') := 'http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing';
-   attrs_('xmlns:a')   := 'http://schemas.openxmlformats.org/drawingml/2006/main';
+   natr ('xmlns:xdr', 'http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing', attrs_);
+   attr ('xmlns:a', 'http://schemas.openxmlformats.org/drawingml/2006/main', attrs_);
    nd_ws_ := Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'wsDr', 'xdr', attrs_);
 
    FOR img_ IN 1 .. wb_.sheets(s_).drawings.count LOOP
@@ -4748,8 +5333,7 @@ BEGIN
       drawing_ := wb_.sheets(s_).drawings(img_);
       Calc_Image_Col_And_Row (to_col_, to_row_, col_ovfl_, row_ovfl_, drawing_, s_);
 
-      attrs_.delete;
-      attrs_('editAs') := 'oneCell';
+      natr ('editAs', 'oneCell', attrs_);
       nd_tc_ := Xml_Node (doc_, nd_ws_, 'twoCellAnchor', 'xdr', attrs_);
 
       nd_fr_ := Xml_Node (doc_, nd_tc_, 'from', 'xdr');
@@ -4766,35 +5350,33 @@ BEGIN
 
       nd_pi_ := Xml_Node (doc_, nd_tc_, 'pic', 'xdr');
       nd_nv_ := Xml_Node (doc_, nd_pi_, 'nvPicPr', 'xdr');
-      attrs_.delete;
-      attrs_('id')   := '3';
-      attrs_('name') := coalesce (drawing_.name, 'Picture '||img_);
-      IF drawing_.title       IS NOT null THEN attrs_('title') := drawing_.title;       END IF;
-      IF drawing_.description IS NOT null THEN attrs_('descr') := drawing_.description; END IF;
+
+      natr ('id', '3', attrs_);
+      attr ('name', coalesce (drawing_.name, 'Picture '||img_), attrs_);
+      IF drawing_.title       IS NOT null THEN attr('title', drawing_.title, attrs_); END IF;
+      IF drawing_.description IS NOT null THEN attr('descr', drawing_.description, attrs_); END IF;
       Xml_Node (doc_, nd_nv_, 'cNvPr', 'xdr', attrs_);
       nd_cn_ := Xml_Node (doc_, nd_nv_, 'cNvPicPr', 'xdr');
-      attrs_.delete;
-      attrs_('noChangeAspect') := '1';
+
+      natr ('noChangeAspect', '1', attrs_);
       Xml_Node (doc_, nd_cn_, 'picLocks', 'a', attrs_);
 
       nd_bf_ := Xml_Node (doc_, nd_pi_, 'blipFill', 'xdr');
-      attrs_.delete;
-      attrs_('xmlns:r') := 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
-      attrs_('r:embed') := rep ('rId:P1', to_char(drawing_.img_id));
+
+      natr ('xmlns:r', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships', attrs_);
+      attr ('r:embed', rep ('rId:P1', to_char(drawing_.img_id)), attrs_);
       nd_bl_ := Xml_Node (doc_, nd_bf_, 'blip', 'a', attrs_);
       nd_et_ := Xml_Node (doc_, nd_bl_, 'extLst', 'a');
-      attrs_.delete;
-      attrs_('uri') := '{28A0092B-C50C-407E-A947-70E740481C1C}';
+
+      natr ('uri', Get_Guid, attrs_);
       nd_el_ := Xml_Node (doc_, nd_et_, 'ext', 'a', attrs_);
-      attrs_.delete;
-      attrs_('xmlns:a14') := 'http://schemas.microsoft.com/office/drawing/2010/main';
-      attrs_('val')       := '0';
+
+      natr ('xmlns:a14', 'http://schemas.microsoft.com/office/drawing/2010/main', attrs_);
+      attr ('val', '0', attrs_);
       Xml_Node (doc_, nd_el_, 'useLocalDpi', 'a14', attrs_);
-      Xml_Node (
-         doc_, Xml_Node(doc_,nd_bf_,'stretch','a'), 'fillRect', 'a'
-      );
-      attrs_.delete;
-      attrs_('prst') := 'rect';
+      Xml_Node (doc_, Xml_Node(doc_,nd_bf_,'stretch','a'), 'fillRect', 'a');
+
+      natr ('prst', 'rect', attrs_);
       Xml_Node (doc_, Xml_Node(doc_,nd_pi_,'spPr','xdr'), 'prstGeom', 'a', attrs_);
       Xml_Node (doc_, nd_tc_, 'clientData', 'xdr');
 
@@ -4848,7 +5430,7 @@ BEGIN
    -- xl/comments:P1.xml
    Dbms_XmlDom.setVersion (doc_, '1.0" encoding="UTF-8" standalone="yes');
 
-   attrs_('xmlns') := 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
+   natr ('xmlns', 'http://schemas.openxmlformats.org/spreadsheetml/2006/main', attrs_);
    nd_cms_ := Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'comments', attrs_);
    nd_aus_ := Xml_Node (doc_, nd_cms_, 'authors');
    author_ := ws_authors_.first;
@@ -4861,45 +5443,46 @@ BEGIN
 
    nd_cml_ := Xml_Node (doc_, nd_cms_, 'commentList');
    FOR cm_ IN 1 .. wb_.sheets(s_).comments.count LOOP
-      attrs_.delete;
-      attrs_('ref') := Alfan_Cell (wb_.sheets(s_).comments(cm_).column, wb_.sheets(s_).comments(cm_).row);
-      attrs_('authorId') := ws_authors_(wb_.sheets(s_).comments(cm_).author);
+      natr ('ref', Alfan_Cell (wb_.sheets(s_).comments(cm_).column, wb_.sheets(s_).comments(cm_).row), attrs_);
+      attr ('authorId', ws_authors_(wb_.sheets(s_).comments(cm_).author), attrs_);
       nd_cm_ := Xml_Node (doc_, nd_cml_, 'comment', attrs_);
       nd_tx_ := Xml_Node (doc_, nd_cm_, 'text');
       IF wb_.sheets(s_).comments(cm_).author IS NOT null THEN
          nd_r_  := Xml_Node (doc_, nd_tx_, 'r');
          nd_pr_ := Xml_Node (doc_, nd_r_, 'rPr');
          Xml_Node (doc_, nd_pr_, 'b');
-         attrs_.delete;
-         attrs_('val') := '9';
+
+         natr ('val', '9', attrs_);
          Xml_Node (doc_, nd_pr_, 'sz', attrs_);
-         attrs_.delete;
-         attrs_('indexed') := '81';
+
+         natr ('indexed', '81', attrs_);
          Xml_Node (doc_, nd_pr_, 'color', attrs_);
-         attrs_.delete;
-         attrs_('val') := 'Tahoma';
+
+         natr ('val', 'Tahoma', attrs_);
          Xml_Node (doc_, nd_pr_, 'rFont', attrs_);
-         attrs_('val') := '1';
+
+         natr ('val', '1', attrs_);
          Xml_Node (doc_, nd_pr_, 'charset', attrs_);
-         attrs_.delete;
-         attrs_('xml:space') := 'preserve';
+
+         natr ('xml:space', 'preserve', attrs_);
          Xml_Text_Node (doc_, nd_r_, 't', wb_.sheets(s_).comments(cm_).author, attrs_);
       END IF;
       nd_r_  := Xml_Node (doc_, nd_tx_, 'r');
       nd_pr_ := Xml_Node (doc_, nd_r_, 'rPr');
-      attrs_.delete;
-      attrs_('val') := '9';
+
+      natr ('val', '9', attrs_);
       Xml_Node (doc_, nd_pr_, 'sz', attrs_);
-      attrs_.delete;
-      attrs_('indexed') := '81';
+
+      natr ('indexed', '81', attrs_);
       Xml_Node (doc_, nd_pr_, 'color', attrs_);
-      attrs_.delete;
-      attrs_('val') := 'Tahoma';
+
+      natr ('val', 'Tahoma', attrs_);
       Xml_Node (doc_, nd_pr_, 'rFont', attrs_);
-      attrs_('val') := '1';
+
+      natr ('val', '1', attrs_);
       Xml_Node (doc_, nd_pr_, 'charset', attrs_);
-      attrs_.delete;
-      attrs_('xml:space') := 'preserve';
+
+      natr ('xml:space', 'preserve', attrs_);
       nl_ := CASE WHEN wb_.sheets(s_).comments(cm_).author IS NOT null THEN chr(13) || chr(10) END;
       Xml_Text_Node (doc_, nd_r_, 't', nl_ || wb_.sheets(s_).comments(cm_).text, attrs_);
    END LOOP;
@@ -4911,57 +5494,57 @@ BEGIN
    -- xl/drawings/vmlDrawing:P1.vml
    doc_ := Dbms_XmlDom.newDomDocument;
 
-   attrs_.delete;
-   attrs_('xmlns:v') := 'urn:schemas-microsoft-com:vml';
-   attrs_('xmlns:o') := 'urn:schemas-microsoft-com:office:office';
-   attrs_('xmlns:x') := 'urn:schemas-microsoft-com:office:excel';
+   natr ('xmlns:v', 'urn:schemas-microsoft-com:vml', attrs_);
+   attr ('xmlns:o', 'urn:schemas-microsoft-com:office:office', attrs_);
+   attr ('xmlns:x', 'urn:schemas-microsoft-com:office:excel', attrs_);
    nd_xml_ := Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'xml', attrs_);
-   attrs_.delete;
-   attrs_('v:ext') := 'edit';
+
+   natr ('v:ext', 'edit', attrs_);
    nd_sl_ := Xml_Node (doc_, nd_xml_, 'shapelayout', 'o', attrs_);
-   attrs_('data') := '2';
+
+   natr ('v:ext', 'edit', attrs_);
+   attr ('data', '2', attrs_);
    Xml_Node (doc_, nd_sl_, 'idmap', 'o', attrs_);
    attrs_.delete;
-   attrs_('id')        := '_x0000_t202';
-   attrs_('coordsize') := '21600,21600';
-   attrs_('o:spt')     := '202';
-   attrs_('path')      := 'm,l,21600r21600,l21600,xe';
+   natr ('id', '_x0000_t202', attrs_);
+   attr ('coordsize', '21600,21600', attrs_);
+   attr ('o:spt', '202', attrs_);
+   attr ('path', 'm,l,21600r21600,l21600,xe', attrs_);
    nd_st_ := Xml_Node (doc_, nd_xml_, 'shapetype', 'v', attrs_);
-   attrs_.delete;
-   attrs_('joinstyle') := 'miter';
+
+   natr ('joinstyle', 'miter', attrs_);
    Xml_Node (doc_, nd_st_, 'stroke', 'v', attrs_);
-   attrs_.delete;
-   attrs_('gradientshapeok') := 't';
-   attrs_('o:connecttype')   := 'rect';
+
+   natr ('gradientshapeok', 't', attrs_);
+   attr ('o:connecttype', 'rect', attrs_);
    Xml_Node (doc_, nd_st_, 'path', 'v', attrs_);
 
    FOR cm_ IN 1 .. wb_.sheets(s_).comments.count LOOP
-      attrs_.delete;
-      attrs_('id')          := rep('_x0000_s:P1', to_char(cm_));
-      attrs_('type')        := '#_x0000_t202';
-      attrs_('style')       := rep ('position:absolute;margin-left:35.25pt;margin-top:3pt;z-index::P1;visibility:hidden;', to_char(cm_));
-      attrs_('fillcolor')   := '#ffffe1';
-      attrs_('o:insetmode') := 'auto';
+
+      natr ('id', rep('_x0000_s:P1', to_char(cm_)), attrs_);
+      attr ('type', '#_x0000_t202', attrs_);
+      attr ('style', rep ('position:absolute;margin-left:35.25pt;margin-top:3pt;z-index::P1;visibility:hidden;', to_char(cm_)), attrs_);
+      attr ('fillcolor', '#ffffe1', attrs_);
+      attr ('o:insetmode', 'auto', attrs_);
       nd_sh_ := Xml_Node (doc_, nd_xml_, 'shape', 'v', attrs_);
-      attrs_.delete;
-      attrs_('color2') := '#ffffe1';
+
+      natr ('color2', '#ffffe1', attrs_);
       Xml_Node (doc_, nd_sh_, 'fill', 'v', attrs_);
-      attrs_.delete;
-      attrs_('n')        := 't';
-      attrs_('color')    := 'black';
-      attrs_('obscured') := 't';
+
+      natr ('n', 't', attrs_);
+      attr ('color', 'black', attrs_);
+      attr ('obscured', 't', attrs_);
       Xml_Node (doc_, nd_sh_, 'shadow', 'v', attrs_);
-      attrs_.delete;
-      attrs_('o:connecttype') := 'none';
+
+      natr ('o:connecttype', 'none', attrs_);
       Xml_Node (doc_, nd_sh_, 'path', 'v', attrs_);
-      attrs_.delete;
-      attrs_('style') := 'mso-direction-alt:auto';
+
+      natr ('style', 'mso-direction-alt:auto', attrs_);
       nd_tb_ := Xml_Node (doc_, nd_sh_, 'textbox', 'v', attrs_);
-      attrs_('style') := 'text-align:left';
+      attr ('style', 'text-align:left', attrs_);
       Xml_Text_Node (doc_, nd_tb_, 'div', '', attrs_);
 
-      attrs_.delete;
-      attrs_('ObjectType') := 'Note';
+      natr ('ObjectType', 'Note', attrs_);
       nd_cd_ := Xml_Node (doc_, nd_sh_, 'ClientData', 'x', attrs_);
       Xml_Node (doc_, nd_cd_, 'MoveWithCells', 'x');
       Xml_Node (doc_, nd_cd_, 'SizeWithCells', 'x');
@@ -5023,6 +5606,7 @@ BEGIN
    Finish_Workbook (excel_);                -- xl/workbook.xml
    Finish_Workbook_Rels (excel_);           -- xl/_rels/workbook.xml.rels
    Finish_Pivot_Caches (excel_);            -- xl/pivotCache/pivotCacheDefinition[1].xml, 
+   Finish_Pivot_Tables (excel_);            -- xl/pivotTables/pivotTable[1].xml
    Finish_Drawings_Rels (excel_);           -- xl/drawings/_rels/drawing1.xml.rels
 
    s_ := wb_.sheets.first;
