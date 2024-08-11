@@ -45,7 +45,7 @@ TYPE tp_cell_range IS RECORD (
    tl           tp_cell_loc,   -- (2, 3, false, true)
    br           tp_cell_loc,   -- (6, 6, false, false) Alfan_Range() => 'My Perfect Sheet'!B$3:F6
    defined_name VARCHAR2(100), -- 'MyDatacells'
-   local_sheet  BOOLEAN,       -- sets the defined name accessible only on `sheet_id`
+   local_sheet  BOOLEAN,       -- sets the defined name to be accessible only on `sheet_id`
    col_names    tp_column_names ); -- makes our lives easier in building pivots
 
 TYPE tp_alignment IS RECORD (
@@ -794,10 +794,12 @@ TYPE tp_pivot_table IS RECORD (
    on_sheet       PLS_INTEGER,
    location_tl    tp_cell_loc,
    pivot_axes     tp_pivot_axes,
+   json_table     json_object_t,
    pivot_height   PLS_INTEGER,
    pivot_width    PLS_INTEGER
 );
 TYPE tp_pivot_tables IS TABLE OF tp_pivot_table INDEX BY PLS_INTEGER;
+TYPE tp_pivots_list  IS TABLE OF PLS_INTEGER INDEX BY PLS_INTEGER;
 
 -----
 -- image/drawing/picture types
@@ -831,7 +833,7 @@ TYPE tp_sheet IS RECORD (
    validations  tp_validations,
    tabcolor     VARCHAR2(8),
    fontid       PLS_INTEGER,
-   --pivot_tables tp_pivot_tables, -- non-contiguous on page; IDs match the wb ID
+   pivots_list  tp_pivots_list,
    drawings     tp_drawings
 );
 TYPE tp_sheets IS TABLE OF tp_sheet INDEX BY PLS_INTEGER;
@@ -1588,7 +1590,7 @@ FUNCTION Range_Height (
 IS
    add_hdr_ PLS_INTEGER := CASE WHEN include_hdr_ THEN 1 ELSE 0 END;
 BEGIN
-   RETURN range_.tl.r - range_.br.r + add_hdr_;
+   RETURN range_.br.r - range_.tl.r + add_hdr_;
 END Range_Height;
 
 FUNCTION Range_Width (
@@ -3397,6 +3399,13 @@ BEGIN
    RETURN rtn_;
 END Get_Agg_Fn_From_Axes;
 
+FUNCTION Get_Pivot_Source (
+   pivot_id_ IN PLS_INTEGER ) RETURN tp_cell_range
+IS
+BEGIN
+   RETURN wb_.pivot_caches(wb_.pivot_tables(pivot_id_).cache_id).ds_range;
+END Get_Pivot_Source;
+
 PROCEDURE Add_Pivot_Table (
    cache_id_       IN OUT NOCOPY PLS_INTEGER,
    src_data_range_ IN OUT NOCOPY tp_cell_range,
@@ -3410,8 +3419,9 @@ IS
    cols_to_cache_ tp_col_agg_fns;
    sh_            PLS_INTEGER := CASE
       WHEN add_to_sheet_ IS NOT null THEN add_to_sheet_
-      ELSE New_Sheet (nvl (new_sheet_name_, rep('Pivot:P1', pv_id_)))
+      ELSE New_Sheet (nvl (new_sheet_name_, 'Pivot' || pv_id_))
    END;
+   sheet_pv_ix_   PLS_INTEGER := wb_.sheets(sh_).pivots_list.count + 1;
 BEGIN
 
    IF cache_id_ IS NOT null AND not wb_.pivot_caches.exists(cache_id_) THEN
@@ -3438,6 +3448,7 @@ BEGIN
       location_tl    => location_tl_,
       pivot_axes     => pivot_axes_
    );
+   wb_.sheets(sh_).pivots_list(sheet_pv_ix_) := pv_id_;
 END Add_Pivot_Table;
 
 PROCEDURE Freeze_Rows (
@@ -3527,14 +3538,16 @@ BEGIN
       END LOOP;
    END IF;
 
-   natr ('ContentType', 'application/vnd.openxmlformats-package.relationships+xml', attrs_);
-   attr ('Extension',   'rels', attrs_);
+   natr ('Extension',   'rels', attrs_);
+   attr ('ContentType', 'application/vnd.openxmlformats-package.relationships+xml', attrs_);
    Xml_Node (doc_, nd_types_, 'Default', attrs_);
-   natr ('ContentType', 'application/xml', attrs_);
-   attr ('Extension',   'xml', attrs_);
+
+   natr ('Extension',   'xml', attrs_);
+   attr ('ContentType', 'application/xml', attrs_);
    Xml_Node (doc_, nd_types_, 'Default', attrs_);
-   natr ('ContentType', 'application/vnd.openxmlformats-officedocument.vmlDrawing', attrs_);
-   attr ('Extension',   'vml', attrs_);
+
+   natr ('Extension',   'vml', attrs_);
+   attr ('ContentType', 'application/vnd.openxmlformats-officedocument.vmlDrawing', attrs_);
    Xml_Node (doc_, nd_types_, 'Default', attrs_);
 
    natr ('PartName', '/xl/workbook.xml', attrs_);
@@ -3557,7 +3570,7 @@ BEGIN
 
    s_ := wb_.sheets.first;
    WHILE s_ IS NOT null LOOP
-      natr ('PartName', rep('/xl/worksheets/sheet:P1.xml', s_), attrs_);
+      natr ('PartName', rep('/xl/worksheets/sheet:P1.xml', to_char(s_)), attrs_);
       attr ('ContentType', 'application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml', attrs_);
       Xml_Node (doc_, nd_types_, 'Override', attrs_);
       s_ := wb_.sheets.next(s_);
@@ -4256,7 +4269,7 @@ BEGIN
    WHILE s_ IS NOT null LOOP
       natr ('Id', 'rId' || to_char(wb_.sheets(s_).wb_rel), attrs_);
       attr ('Type',  'http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet', attrs_);
-      attr ('Target', rep ('worksheets/sheet:P1.xml', s_), attrs_);
+      attr ('Target', rep ('worksheets/sheet:P1.xml', to_char(s_)), attrs_);
       Xml_Node (doc_, nd_rls_, 'Relationship', attrs_);
       s_ := wb_.sheets.next(s_);
    END LOOP;
@@ -4319,7 +4332,7 @@ BEGIN
             );
          END IF;
          wb_.pivot_caches(pc_).cached_fields(col_name_) := cache_field_;
-         wb_.pivot_caches(pc_).cf_order(c_)            := col_name_;
+         wb_.pivot_caches(pc_).cf_order(c_)             := col_name_;
       END LOOP;
    END LOOP;
 END Build_Pivot_Caches;
@@ -4327,26 +4340,24 @@ END Build_Pivot_Caches;
 PROCEDURE Finish_Pivot_Caches (
    excel_ IN OUT NOCOPY BLOB )
 IS
-   sh_          PLS_INTEGER;
-   doc_         dbms_XmlDom.DomDocument;
-   attrs_       xml_attrs_arr;
-   nd_pcd_      dbms_XmlDom.DomNode;
-   nd_cs_       dbms_XmlDom.DomNode;
-   nd_cfs_      dbms_XmlDom.DomNode;
-   nd_cf_       dbms_XmlDom.DomNode;
-   nd_rels_     dbms_XmlDom.DomNode;
-   nd_si_       dbms_XmlDom.DomNode;
-   nd_el_       dbms_XmlDom.DomNode;
-   nd_ex_       dbms_XmlDom.DomNode;
-   nd_row_      dbms_XmlDom.DomNode;
-   tag_         VARCHAR2(1);
-   fld_         VARCHAR2(2000);
-   cache_       tp_pivot_cache;
-   cfld_        tp_cache_field;
-   xl_col_      PLS_INTEGER;
+   sh_      PLS_INTEGER;
+   doc_     dbms_XmlDom.DomDocument;
+   attrs_   xml_attrs_arr;
+   nd_pcd_  dbms_XmlDom.DomNode;
+   nd_cs_   dbms_XmlDom.DomNode;
+   nd_cfs_  dbms_XmlDom.DomNode;
+   nd_cf_   dbms_XmlDom.DomNode;
+   nd_rels_ dbms_XmlDom.DomNode;
+   nd_si_   dbms_XmlDom.DomNode;
+   nd_el_   dbms_XmlDom.DomNode;
+   nd_ex_   dbms_XmlDom.DomNode;
+   nd_row_  dbms_XmlDom.DomNode;
+   tag_     VARCHAR2(1);
+   fld_     VARCHAR2(2000);
+   cache_   tp_pivot_cache;
+   cfld_    tp_cache_field;
+   xl_col_  PLS_INTEGER;
 BEGIN
-
-   Build_Pivot_Caches;
 
    FOR pc_ IN 1 .. wb_.pivot_caches.count LOOP
 
@@ -4370,7 +4381,7 @@ BEGIN
       attr ('createdVersion', '7', attrs_); -- Version of Excel in which this pivot was created!
       attr ('refreshedVersion', '7', attrs_);
       attr ('minRefreshableVersion', '3', attrs_); -- Minimum version of Excel which is compatible (apparently)
-      attr ('recordCount', to_char (Range_Height(cache_.ds_range)), attrs_);
+      attr ('recordCount', to_char(Range_Height(cache_.ds_range)), attrs_);
       attr ('xmlns:xr', 'http://schemas.microsoft.com/office/spreadsheetml/2014/revision', attrs_);
       attr ('xr:uid', Get_Guid, attrs_); --'{C898DCD4-A18D-452F-B655-4FAEB857F78F}';
       nd_pcd_ := Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'pivotCacheDefinition', attrs_);
@@ -4501,12 +4512,182 @@ BEGIN
    RETURN ret_;
 END Combine_Arrays;
 
+PROCEDURE Check_Cell_Not_Exist (
+   sh_  IN PLS_INTEGER,
+   col_ IN PLS_INTEGER,
+   row_ IN PLS_INTEGER )
+IS BEGIN
+   IF wb_.sheets(sh_).rows.exists(row_) AND wb_.sheets(sh_).rows(row_).exists(col_) THEN
+      Raise_App_Error ('Pivot table has expaned into cells that already contain data.  To avoid any chance of recursive references, this is not allowed.');
+   END IF;
+END Check_Cell_Not_Exist;
+
+
+-----
+-- Unravel_Json_To_Sheet()
+--   Once rolled up, we first need to use the JSON to populate this workbook's
+--   sheets.  Dependant on the pivot caches, it may well be that the new pivot
+--   tables overwirte existing cells, which should not be allowed.
+--   There are 2 versions of this function, the second is the initiator, while
+--   the first is the recursor.
+--
+PROCEDURE Unravel_Json_To_Sheet (
+   sh_       IN PLS_INTEGER,
+   j_node_   IN json_object_t,
+   init_col_ IN PLS_INTEGER,
+   row_      IN OUT NOCOPY PLS_INTEGER )
+IS
+   col_      PLS_INTEGER;
+   k_obj_    json_object_t;
+   sum_obj_  json_object_t;
+   keys_     json_key_list := j_node_.get_keys;
+   s_keys_   json_key_list;
+BEGIN
+
+   FOR k_ IN keys_.first .. keys_.last LOOP
+
+      col_ := init_col_;
+      Check_Cell_Not_Exist (sh_, col_, row_);
+      CellS (col_, row_, keys_(k_), sheet_ => sh_);
+
+      k_obj_   := j_node_.get_object(keys_(k_));
+      sum_obj_ := k_obj_.get_object('sum');
+      s_keys_  := sum_obj_.get_keys;
+
+      FOR l_ IN s_keys_.first .. s_keys_.last LOOP
+         col_ := col_ + 1;
+         Check_Cell_Not_Exist (sh_, col_, row_);
+         CellN (col_, row_, sum_obj_.get_number(s_keys_(l_)), sheet_ => sh_);
+      END LOOP;
+      row_ := row_ + 1;
+
+      IF k_obj_.has('breakdown') THEN
+         Unravel_Json_To_Sheet (sh_, k_obj_.get_object('breakdown'), init_col_, row_);
+      END IF;
+
+   END LOOP;   
+
+END Unravel_Json_To_Sheet;
+
+
+PROCEDURE Unravel_Json_To_Sheet (
+   pivot_id_ IN PLS_INTEGER,
+   j_piv_    IN json_object_t )
+IS
+   aggs_arr_ tp_col_agg_fns := wb_.pivot_tables(pivot_id_).pivot_axes.col_agg_fns;
+   ds_range_ tp_cell_range  := Get_Pivot_Source (pivot_id_);
+   loc_      tp_cell_loc    := wb_.pivot_tables(pivot_id_).location_tl;
+   sh_       PLS_INTEGER    := wb_.pivot_tables(pivot_id_).on_sheet;
+   init_col_ PLS_INTEGER    := loc_.c;
+   col_      PLS_INTEGER    := init_col_;
+   row_      PLS_INTEGER    := loc_.r;
+   desc_     VARCHAR2(2000);
+   ix_       PLS_INTEGER;
+   sum_obj_  json_object_t;
+   keys_     json_key_list;
+BEGIN
+
+   CellS (col_, row_, 'Row Labels');
+   ix_ := aggs_arr_.first;
+   WHILE ix_ IS NOT null LOOP
+      desc_ := CASE aggs_arr_(ix_)
+         WHEN 'sum'   THEN 'Sum of '
+         WHEN 'count' THEN 'Count of '
+      END || Range_Col_Head_Name (ds_range_, ix_);
+      col_ := col_ + 1;
+      CellS (col_, row_, desc_);
+      ix_ := aggs_arr_.next(ix_);
+   END LOOP;
+   row_ := row_ + 1;
+   Unravel_Json_To_Sheet (sh_, j_piv_.get_object('breakdown'), init_col_, row_);
+
+   col_ := init_col_;
+   CellS (col_, row_, 'Grand Total');
+
+   sum_obj_ := j_piv_.get_object('sum');
+   keys_ := sum_obj_.get_keys;
+   FOR k_ IN keys_.first .. keys_.last LOOP
+      col_ := col_ + 1;
+      CellN (col_, row_, sum_obj_.get_number(keys_(k_)));
+   END LOOP;
+
+END Unravel_Json_To_Sheet;
+
+-----
+-- Unravel_Json_Pivot_Table_Xml()
+--   Once rolled up, we can use the JSON to build our PivotTable.xml series of
+--   files.
+PROCEDURE Unravel_Json_Pivot_Table_Xml (
+   doc_      IN OUT NOCOPY dbms_XmlDom.DomDocument,
+   xml_nd_   IN            dbms_XmlDom.DomNode,
+   j_node_   IN            json_object_t,
+   cache_    IN OUT NOCOPY tp_pivot_cache,
+   col_name_ IN            VARCHAR2 := null,
+   si_val_   IN            VARCHAR2 := null )
+IS
+   nd_i_        dbms_XmlDom.DomNode;
+   bkdn_obj_    json_object_t;
+   keys_        json_key_list;
+   attrs_       xml_attrs_arr;
+   level_       PLS_INTEGER := j_node_.get_number('level');
+   lv_          PLS_INTEGER := level_ - 1;
+   v_           PLS_INTEGER := 0;
+   si_val_loop_ VARCHAR2(32000);
+BEGIN
+
+   IF level_ > 0 THEN
+
+      IF lv_ > 0 THEN
+         attr ('r', to_char(lv_), attrs_);
+      END IF;
+      nd_i_ := Xml_Node (doc_, xml_nd_, 'i', attrs_);
+
+      si_val_loop_ := cache_.cached_fields(col_name_).shared_items.first;
+      WHILE si_val_loop_ IS NOT null LOOP
+         EXIT WHEN si_val_loop_ = si_val_;
+         v_ := v_ + 1;
+         si_val_loop_ := cache_.cached_fields(col_name_).shared_items.next(si_val_loop_);
+      END LOOP;
+
+      attrs_.delete;
+      IF v_ > 0 THEN
+         attr ('v', v_, attrs_);
+      END IF;
+      Xml_Node (doc_, nd_i_, 'x', attrs_);
+
+   END IF;
+
+   IF j_node_.has('breakdown') THEN
+      bkdn_obj_ := j_node_.get_object ('breakdown');
+      keys_     := bkdn_obj_.get_keys;
+      FOR k_ IN keys_.first .. keys_.last LOOP
+         Unravel_Json_Pivot_Table_Xml (
+            doc_      => doc_,
+            xml_nd_   => xml_nd_,
+            j_node_   => bkdn_obj_.get_object(keys_(k_)),
+            cache_    => cache_,
+            col_name_ => j_node_.get_string('colDesc'),
+            si_val_   => keys_(k_)
+         );
+      END LOOP;
+   END IF;
+
+   IF level_ = 0 THEN
+      natr ('t', 'grand', attrs_);
+      nd_i_ := Xml_Node (doc_, xml_nd_, 'i', attrs_);
+      Xml_Node (doc_, nd_i_, 'x');
+   END IF;
+
+END Unravel_Json_Pivot_Table_Xml;
+
+
 -----
 -- Json_Aggregates_From_Filters()
---   Given a cell-range and a set of filter-values, we can calculate aggregate
---   math on one or multiple columns found in that range.
---   Hard calculations on the underlying data are only done at the leaf level.
---   Higher levels take values from lower levels in a recursive nature.
+--   Given a cell-range (where our base-data is to be found) plus some filters
+--   upon which we would like that data to be sieved, we can build a matrix of
+--   the pivot table modelled as a JSON object.  At this stage, that JSON data
+--   isn't located in the Excel sheet, but its shape is important to build out
+--   the PivotTableX.xml flie, and later to stamp the data into the sheet.
 --
 FUNCTION Json_Aggregates_From_Filters (
    pivot_id_      IN PLS_INTEGER,
@@ -4648,80 +4829,19 @@ BEGIN
 
    END IF;
 
+   IF level_ = 0 THEN
+      Unravel_Json_To_Sheet (pivot_id_, results_obj_);
+   END IF;
    RETURN results_obj_;
 
 END Json_Aggregates_From_Filters;
 
-PROCEDURE Recurse_Json_Append_Xml (
-   doc_      IN OUT NOCOPY dbms_XmlDom.DomDocument,
-   xml_nd_   IN            dbms_XmlDom.DomNode,
-   j_node_   IN            json_object_t,
-   cache_    IN OUT NOCOPY tp_pivot_cache,
-   col_name_ IN            VARCHAR2 := null,
-   si_val_   IN            VARCHAR2 := null )
-IS
-   nd_i_        dbms_XmlDom.DomNode;
-   bkdn_obj_    json_object_t;
-   keys_        json_key_list;
-   attrs_       xml_attrs_arr;
-   level_       PLS_INTEGER := j_node_.get_number('level');
-   lv_          PLS_INTEGER := level_ - 1;
-   v_           PLS_INTEGER := 0;
-   si_val_loop_ VARCHAR2(32000);
-BEGIN
-
-   IF level_ > 0 THEN
-
-      IF lv_ > 0 THEN
-         attr ('r', to_char(lv_), attrs_);
-      END IF;
-      nd_i_ := Xml_Node (doc_, xml_nd_, 'i', attrs_);
-
-      si_val_loop_ := cache_.cached_fields(col_name_).shared_items.first;
-      WHILE si_val_loop_ IS NOT null LOOP
-         EXIT WHEN si_val_loop_ = si_val_;
-         v_ := v_ + 1;
-         si_val_loop_ := cache_.cached_fields(col_name_).shared_items.next(si_val_loop_);
-      END LOOP;
-
-      IF v_ > 0 THEN
-         natr ('v', v_, attrs_);
-      END IF;
-      Xml_Node (doc_, nd_i_, 'x', attrs_);
-
-   END IF;
-
-   IF j_node_.has('breakdown') THEN
-      bkdn_obj_ := j_node_.get_object ('breakdown');
-      keys_     := bkdn_obj_.get_keys;
-      FOR k_ IN keys_.first .. keys_.last LOOP
-         Recurse_Json_Append_Xml (
-            doc_      => doc_,
-            xml_nd_   => xml_nd_,
-            j_node_   => bkdn_obj_.get_object(keys_(k_)),
-            cache_    => cache_,
-            col_name_ => j_node_.get_string('colDesc'),
-            si_val_   => keys_(k_)
-         );
-      END LOOP;
-   END IF;
-
-   IF level_ = 0 THEN
-      natr ('t', 'grand', attrs_);
-      nd_i_ := Xml_Node (doc_, xml_nd_, 'i', attrs_);
-      Xml_Node (doc_, nd_i_, 'x');
-   END IF;
-
-END Recurse_Json_Append_Xml;
-
 
 -----
 -- Finish_Pivot_Tables()
---   Must be called after Build_Pivot_Caches(), which also means that function
---   Finish_Pivot_Caches() must be called first too.
---   Getting the right data out of a pivot table isn't easy, especially if you
---   want to support multi-dimentional axes, so modelling the solution in JSON
---   seems to be the easiest way, b
+--   Must be called after Build_Pivot_Caches(), which isn't hard to achieve on
+--   account of being called at the start of the Finish() process.  It's worth
+--   making a note of anyway to avoid potential problem in future.
 --
 PROCEDURE Finish_Pivot_Tables (
    excel_ IN OUT NOCOPY BLOB )
@@ -4736,6 +4856,7 @@ IS
    nd_exl_      dbms_XmlDom.DomNode;
    nd_ext_      dbms_XmlDom.DomNode;
    nd_rels_     dbms_XmlDom.DomNode;
+   nd_dfs_      dbms_XmlDom.DomNode;
    j_piv_       json_object_t;
    pt_region_   tp_cell_range;
    cache_       tp_pivot_cache;
@@ -4841,13 +4962,13 @@ BEGIN
       natr ('count', to_char(j_piv_.get_number('accum-sub-records') + 1), attrs_);
       nd_ri_ := Xml_Node (doc_, nd_ptd_, 'rowItems', attrs_);
 
-      Recurse_Json_Append_Xml (doc_, nd_ri_, j_piv_, cache_);
+      Unravel_Json_Pivot_Table_Xml (doc_, nd_ri_, j_piv_, cache_);
 
       natr ('count', 1, attrs_);
       Xml_Node (doc_, Xml_Node (doc_, nd_ptd_, 'colItems', attrs_), 'i');
 
       natr ('count', to_char(wb_.pivot_tables(pt_).pivot_axes.col_agg_fns.count), attrs_);
-      Xml_Node (doc_, nd_ptd_, 'dataFields', attrs_);
+      nd_dfs_ := Xml_Node (doc_, nd_ptd_, 'dataFields', attrs_);
 
       agg_col_ := wb_.pivot_tables(pt_).pivot_axes.col_agg_fns.first;
       WHILE agg_col_ IS NOT null LOOP
@@ -4858,6 +4979,7 @@ BEGIN
          attr ('fld', agg_col_ - 1, attrs_); -- zero based, I think
          attr ('baseField', '0', attrs_); -- used with showDataAs, which we aren't using for now
          attr ('baseItem', '0', attrs_);
+         Xml_Node (doc_, nd_dfs_, 'dataField', attrs_);
          agg_col_ := wb_.pivot_tables(pt_).pivot_axes.col_agg_fns.next(agg_col_);
       END LOOP;
 
@@ -4970,7 +5092,7 @@ IS
    id_      PLS_INTEGER := 1;
 BEGIN
 
-   WHILE row_ IS not null LOOP
+   WHILE row_ IS NOT null LOOP
       col_min_ := least (col_min_, wb_.sheets(s_).rows(row_).first);
       col_max_ := greatest (col_max_, wb_.sheets(s_).rows(row_).last);
       row_  := wb_.sheets(s_).rows.next(row_);
@@ -5138,6 +5260,14 @@ BEGIN
       END LOOP;
    END IF;
 
+   -- pivot tables need to be inserted here
+   -- Question about whether pivot tables need to be generated before or after
+   -- images (drawings) and comments.  Assuming that the designer of the Excel
+   -- document is careful, there shouldn't be too many overlaps of normal data
+   -- with pivoted data (which can expand quite easily to cover large areas of
+   -- a sheet).  Images and comments should still be allowed to be placed over
+   -- pivot tables though (at least in principlet)
+
    natr ('left', '0.7', attrs_);
    attr ('right', '0.7', attrs_);
    attr ('top', '0.75', attrs_);
@@ -5153,11 +5283,11 @@ BEGIN
    END IF;
    
    IF wb_.sheets(s_).comments.count > 0 THEN
-      natr ('r:id', rep ('rId:P1', id_), attrs_);
+      natr ('r:id', 'rId' || id_, attrs_);
       Xml_Node (doc_, nd_ws_, 'legacyDrawing', attrs_);
    END IF;
 
-   Add1Xml (excel_, rep('xl/worksheets/sheet:P1.xml',s_), Dbms_XmlDom.getXmlType(doc_).getClobVal);
+   Add1Xml (excel_, rep('xl/worksheets/sheet:P1.xml',to_char(s_)), Dbms_XmlDom.getXmlType(doc_).getClobVal);
    Dbms_XmlDom.freeDocument (doc_);
 
 END Finish_Worksheet;
@@ -5169,9 +5299,9 @@ IS
    id_            PLS_INTEGER := 1;
    nr_hyperlinks_ PLS_INTEGER := wb_.sheets(s_).hyperlinks.count;
    nr_comments_   PLS_INTEGER := wb_.sheets(s_).comments.count;
-   nr_pivots_     PLS_INTEGER := wb_.pivot_tables.count;
+   nr_pivots_     PLS_INTEGER := wb_.sheets(s_).pivots_list.count;
    nr_drawings_   PLS_INTEGER := wb_.sheets(s_).drawings.count;
-   pt_            PLS_INTEGER; -- pivot list non-contiguous on sheet
+   pivot_id_      PLS_INTEGER;
    doc_           dbms_XmlDom.DomDocument := Dbms_XmlDom.newDomDocument;
    attrs_         xml_attrs_arr;
    nd_rels_       dbms_XmlDom.DomNode;
@@ -5198,33 +5328,32 @@ BEGIN
    IF nr_drawings_ > 0 THEN
       natr ('Id', rep ('rId:P1', id_), attrs_);
       attr ('Type', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing', attrs_);
-      attr ('Target', rep ('../drawings/drawing:P1.xml', s_), attrs_);
+      attr ('Target', rep ('../drawings/drawing:P1.xml', to_char(s_)), attrs_);
       Xml_Node (doc_, nd_rels_, 'Relationship', attrs_);
       id_ := id_ + 1;
    END IF;
    IF nr_comments_ > 0 THEN
       natr ('Id', rep ('rId:P1', id_), attrs_);
       attr ('Type', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/vmlDrawing', attrs_);
-      attr ('Target', rep ('../drawings/vmlDrawing:P1.vml', s_), attrs_);
+      attr ('Target', rep ('../drawings/vmlDrawing:P1.vml', to_char(s_)), attrs_);
       Xml_Node (doc_, nd_rels_, 'Relationship', attrs_);
       id_ := id_ + 1;
       natr ('Id', rep('rId:P1', id_), attrs_);
       attr ('Type', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments', attrs_);
-      attr ('Target', rep ('../comments:P1.xml', s_), attrs_);
+      attr ('Target', rep ('../comments:P1.xml', to_char(s_)), attrs_);
       Xml_Node (doc_, nd_rels_, 'Relationship', attrs_);
       id_ := id_ + 1;
    END IF;
-   pt_ := wb_.pivot_tables.first;
-   WHILE pt_ IS NOT null LOOP
+   FOR spid_ IN 1 .. wb_.sheets(s_).pivots_list.count LOOP
+      pivot_id_ := wb_.sheets(s_).pivots_list(spid_);
       natr ('Id', 'rId' || to_char(id_), attrs_);
       attr ('Type', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotTable', attrs_);
-      attr ('Target', rep ('../pivotCache/pivotCacheDefinition:P1.xml', pt_), attrs_);
+      attr ('Target', rep ('../pivotTables/pivotTable:P1.xml', pivot_id_), attrs_);
       Xml_Node (doc_, nd_rels_, 'Relationship', attrs_);
       id_ := id_ + 1;
-      pt_ := wb_.pivot_tables.next(pt_);
    END LOOP;
 
-   Add1Xml (excel_, rep('xl/worksheets/_rels/sheet:P1.xml.rels',s_), Dbms_XmlDom.getXmlType(doc_).getClobVal);
+   Add1Xml (excel_, rep('xl/worksheets/_rels/sheet:P1.xml.rels',to_char(s_)), Dbms_XmlDom.getXmlType(doc_).getClobVal);
    Dbms_XmlDom.freeDocument (doc_);
 
    <<skip_relationships>>
@@ -5595,7 +5724,18 @@ IS
    s_            PLS_INTEGER;
 BEGIN
 
+   -- Pad out the Pivot Cache before doing any Excel generation.  Pivot tables
+   -- will need this data in a moment...
+   Build_Pivot_Caches;
+
    Dbms_Lob.createTemporary (excel_, true);
+
+   -- We need to sort out the Pivots first, because tables will inject data to
+   -- sheets, which in turn will create some additional shared strings and the
+   -- like.  All this needs to be modelled in PL/SQL data-structures before we
+   -- go about building the XML for various parts
+   Finish_Pivot_Caches (excel_);            -- xl/pivotCache/pivotCacheDefinition[1].xml, 
+   Finish_Pivot_Tables (excel_);            -- xl/pivotTables/pivotTable[1].xml
 
    Finish_Content_Types (excel_);           -- [Content_Types].xml
    Finish_docProps (excel_);                -- docProps/core.xml
@@ -5605,8 +5745,6 @@ BEGIN
    Finish_Theme (excel_);                   -- xl/theme/theme1.xml
    Finish_Workbook (excel_);                -- xl/workbook.xml
    Finish_Workbook_Rels (excel_);           -- xl/_rels/workbook.xml.rels
-   Finish_Pivot_Caches (excel_);            -- xl/pivotCache/pivotCacheDefinition[1].xml, 
-   Finish_Pivot_Tables (excel_);            -- xl/pivotTables/pivotTable[1].xml
    Finish_Drawings_Rels (excel_);           -- xl/drawings/_rels/drawing1.xml.rels
 
    s_ := wb_.sheets.first;

@@ -1,0 +1,45 @@
+PL/SQL Developer Test script 3.0
+41
+{
+   "aggregates": {
+      "columns": [4]
+   },
+   "col-v-rollups": {
+      "level": 0,
+      "leaf": false,
+      "1": "Identity Type", -- "1" being the first column in the dataset, the value being its description
+      "count": 4,
+      "sum": {
+         "4", 2000
+      },
+      "breakdown": {
+         "Supplier": {
+            "level": 1,
+            "leaf": false,
+            "3": "Currency",
+            "count": 1,
+            "sum": {
+               "4": 500
+            }
+            "breakdown": {
+               "EUR":` {
+                  "level": 2,
+                  "leaf": true,
+                  "count": 0
+                  "sum": {
+                     "4": 500
+                  }
+               },
+               "GBP": {
+               }
+            }
+         },
+         "Customer": {
+         }
+      }
+   },
+   "col-h-rollups": {
+   }
+}
+0
+0

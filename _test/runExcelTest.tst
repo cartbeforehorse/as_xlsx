@@ -1,5 +1,5 @@
 PL/SQL Developer Test script 3.0
-111
+87
 DECLARE
    file_end_    CONSTANT VARCHAR2(20) := Cbh_Utils_API.Rep ('_:P1.xlsx', to_char(sysdate,'YYYYMMDD-HH24MI'));
    file_start_  CONSTANT VARCHAR2(20) := 'TestOut_';
@@ -10,8 +10,6 @@ DECLARE
    row_         PLS_INTEGER := 3;
    init_row_    PLS_INTEGER := row_;
    data_range_  as_xlsx.tp_cell_range;
-   rollup_cols_ as_xlsx.rollup_columns;
-   excel_       BLOB;
    gen_file_    BOOLEAN := false;
 
    CURSOR get_entities IS
@@ -73,42 +71,20 @@ BEGIN
       As_Xlsx.CellN (col_+3, row_, r_.amount);
    END LOOP;
 
-   data_range_ := as_xlsx.tp_cell_range (
-      defined_name => 'SystemData',
-      sheet_id     => sheet_,
-      tl           => as_xlsx.tp_cell_loc (
-         c => col_, r => init_row_, fixc => true, fixr => true
-      ),
-      br           => as_xlsx.tp_cell_loc (
-         c => col_end_, r => row_, fixc => true, fixr => true
-      )
-   );
-   As_Xlsx.Print_Range (data_range_);
-   rollup_cols_(1) := 'col';
-   rollup_cols_(3) := 'col';
-   rollup_cols_(4) := 'sum';
-
    As_Xlsx.Set_Column_Width (col_,   15, sheet_);
    As_Xlsx.Set_Column_Width (col_+1, 15, sheet_);
    As_Xlsx.Set_Column_Width (col_+2, 15, sheet_);
    As_Xlsx.Set_Column_Width (col_+3, 15, sheet_);
+
+   data_range_.sheet_id     := sheet_;
+   data_range_.tl           := as_xlsx.tp_cell_loc (col_, init_row_, true, true);
+   data_range_.br           := as_xlsx.tp_cell_loc (col_ + 3, row_, true, true);
+   data_range_.defined_name := 'MyDataSource';
    As_Xlsx.Defined_Name (data_range_);
 
-   As_Xlsx.Add_Pivot_Table (
-      cache_id_       => null,
-      data_range_     => data_range_,
-      rollup_cols_    => rollup_cols_,
-      pivot_name_     => 'My Pivot',
-      add_to_sheet_   => sheet_,
-      new_sheet_name_ => null
-   );
-
-   excel_     := As_Xlsx.Finish;
    file_name_ := file_start_ || 'ImageHypCommNm' || file_end_;
-   IF gen_file_ THEN
-      As_Xlsx.Save (excel_, 'EXCEL_OUT', file_name_);
-      Dbms_Output.Put_Line (file_name_ || ' saved to filesystem');
-   END IF;
+   As_Xlsx.Save (As_Xlsx.Finish, 'EXCEL_OUT', file_name_);
+   Dbms_Output.Put_Line (file_name_ || ' saved to filesystem');
 
 END;
 0

@@ -7,12 +7,12 @@ DECLARE
    sheet_       PLS_INTEGER := 1;
    col_         PLS_INTEGER := 2;
    col_end_     PLS_INTEGER := col_ + 3;
-   row_         PLS_INTEGER := 3;
+   row_         PLS_INTEGER := 2;
    init_row_    PLS_INTEGER := row_;
    data_range_  as_xlsx.tp_cell_range;
    blob_        BLOB;
    cache_id_    PLS_INTEGER;
-   loc_         as_xlsx.tp_cell_loc := as_xlsx.tp_cell_loc (c => 10, r => 5);
+   loc_         as_xlsx.tp_cell_loc := as_xlsx.tp_cell_loc (c => 8, r => 2);
    piv_axes_    as_xlsx.tp_pivot_axes := as_xlsx.tp_pivot_axes (
       vrollups    => as_xlsx.tp_pivot_cols(),
       hrollups    => as_xlsx.tp_pivot_cols(),
