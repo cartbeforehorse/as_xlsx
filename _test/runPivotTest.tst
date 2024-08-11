@@ -1,5 +1,5 @@
 PL/SQL Developer Test script 3.0
-79
+76
 DECLARE
    file_end_    CONSTANT VARCHAR2(20) := Cbh_Utils_API.Rep ('_:P1.xlsx', to_char(sysdate,'YYYYMMDD-HH24MI'));
    file_start_  CONSTANT VARCHAR2(20) := 'TestOut_';
@@ -47,22 +47,19 @@ BEGIN
    END LOOP;
 
    data_range_ := as_xlsx.tp_cell_range (
-      defined_name => 'SystemData',
+      --defined_name => 'SystemData', -- will create a "defined name" instance
       sheet_id     => sheet_,
-      tl           => as_xlsx.tp_cell_loc (
-         c => col_, r => init_row_, fixc => true, fixr => true
-      ),
-      br           => as_xlsx.tp_cell_loc (
-         c => col_end_, r => row_, fixc => true, fixr => true
+      tl           => as_xlsx.tp_cell_loc (col_, init_row_, true, true),
+      br           => as_xlsx.tp_cell_loc (col_end_, row_, true, true
       )
    );
+   --As_Xlsx.Defined_Name (data_range_);
    As_Xlsx.Print_Range (data_range_); -- debug
 
    As_Xlsx.Set_Column_Width (col_,   15, sheet_);
    As_Xlsx.Set_Column_Width (col_+1, 15, sheet_);
    As_Xlsx.Set_Column_Width (col_+2, 15, sheet_);
    As_Xlsx.Set_Column_Width (col_+3, 15, sheet_);
-   As_Xlsx.Defined_Name (data_range_);
 
    As_Xlsx.Add_Pivot_Table (
       cache_id_       => cache_id_,
@@ -74,7 +71,7 @@ BEGIN
    );
 
    --blob_ := As_Xlsx.Finish;
-   file_name_ := file_start_ || 'ImageHypCommNm' || file_end_;
+   file_name_ := file_start_ || 'PivotTest' || file_end_;
    As_Xlsx.Save (As_Xlsx.Finish, 'EXCEL_OUT', file_name_);
    Dbms_Output.Put_Line (file_name_ || ' saved to filesystem');
 

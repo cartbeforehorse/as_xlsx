@@ -3336,8 +3336,8 @@ PROCEDURE Defined_Name (
 IS BEGIN
    wb_.defined_names(name_) := tp_cell_range (
       sheet_id     => sheet_,
-      tl           => tp_cell_loc ( c => tl_col_, r => tl_row_, fixc => fix_tlc_, fixr => fix_tlr_),
-      br           => tp_cell_loc ( c => br_col_, r => br_row_, fixc => fix_brc_, fixr => fix_brr_),
+      tl           => tp_cell_loc (c => tl_col_, r => tl_row_, fixc => fix_tlc_, fixr => fix_tlr_),
+      br           => tp_cell_loc (c => br_col_, r => br_row_, fixc => fix_brc_, fixr => fix_brr_),
       defined_name => name_,
       local_sheet  => localsheet_
    );
@@ -3365,6 +3365,9 @@ FUNCTION Create_Pivot_Cache (
 IS
    cache_id_ PLS_INTEGER := wb_.pivot_caches.count + 1;
 BEGIN
+   IF range_.defined_name IS NOT null THEN
+      Defined_Name (range_); -- will override existing defined name, so be a little careful
+   END IF;
    wb_.pivot_caches(cache_id_) := tp_pivot_cache (
       cache_id      => cache_id_,
       ds_range      => range_,
@@ -3428,7 +3431,7 @@ BEGIN
       Raise_App_Error ('Cache Id :P1 does not exist in the workbook', cache_id_);
    END IF;
 
-   Add_Col_Headings_To_Range (src_data_range_);
+   Add_Col_Headings_To_Range (src_data_range_); -- easier to access column names later
 
    IF cache_id_ IS null THEN
       FOR c_ IN src_data_range_.col_names.first .. src_data_range_.col_names.last LOOP
@@ -3438,6 +3441,8 @@ BEGIN
    -- ELSE???
    --   if the cache already exists, it implies that multiple PTs are using the
    --   same cache.  Should we be updating the `cols_to_cache_` list in this scenario?
+   --   THIS FEATURE NOT CURRENTLY SUPPORTED; for now we assume 1:1 cach/pivot
+   --   relationship
    END IF;
 
    wb_.pivot_tables(pv_id_) := tp_pivot_table (
