@@ -832,7 +832,7 @@ TYPE tp_sheet IS RECORD (
    mergecells   tp_mergecells,
    validations  tp_validations,
    tabcolor     VARCHAR2(8),
-   fontid       PLS_INTEGER,
+   fontId       PLS_INTEGER,
    pivots_list  tp_pivots_list,
    drawings     tp_drawings
 );
@@ -893,7 +893,7 @@ TYPE tp_book IS RECORD (
    cellXfs       tp_cellXfs,
    defined_names tp_defined_names,
    formulas      tp_formulas,
-   fontid        PLS_INTEGER,
+   fontId        PLS_INTEGER,
    pivot_caches  tp_pivot_caches,
    pivot_tables  tp_pivot_tables,
    images        tp_images
@@ -1062,8 +1062,7 @@ PROCEDURE nAtr (
    key_   IN VARCHAR2,
    val_   IN VARCHAR2,
    attrs_ IN OUT NOCOPY xml_attrs_arr )
-IS
-BEGIN
+IS BEGIN
    attrs_.delete;
    Attr (key_, val_, attrs_);
 END nAtr;
@@ -1926,7 +1925,7 @@ BEGIN
       Get_Border ('', '', '', '');
    END IF;
    Set_TabColor(tab_color_, s_);
-   wb_.sheets(s_).fontid := wb_.fontid;
+   wb_.sheets(s_).fontId := wb_.fontId;
    RETURN s_;
 END New_Sheet;
 
@@ -2079,6 +2078,9 @@ FUNCTION Get_Num_Format_Mask (
 IS
    fmt_mask_ VARCHAR2(100) := wb_.numFmts.first;
 BEGIN
+   IF num_fmt_id_ = 0 THEN
+      RETURN '';
+   END IF;
    WHILE fmt_mask_ IS NOT null LOOP
       EXIT WHEN wb_.numFmts(fmt_mask_) = num_fmt_id_;
       fmt_mask_ := wb_.numFmts.next(fmt_mask_);
@@ -2107,9 +2109,9 @@ IS
    ix_ PLS_INTEGER := Get_Font (name_, family_, fontsize_, theme_, underline_, italic_, bold_, rgb_);
 BEGIN
    IF sheet_ IS null THEN
-      wb_.fontid := ix_;
+      wb_.fontId := ix_;
    ELSE
-      wb_.sheets(sheet_).fontid := ix_;
+      wb_.sheets(sheet_).fontId := ix_;
    END IF;
 END Set_Font;
 
@@ -2419,7 +2421,7 @@ BEGIN
    FOR i_ IN 1 .. xf_count_ LOOP
       IF wb_.cellXfs(i_).md5 = md5_hash_ THEN
          XfId_ := i_;
-         EXIT;
+         exit;
       END IF;
    END LOOP;
    IF XfId_ IS null THEN -- we didn't find a matching style, so create a new one
@@ -2455,8 +2457,7 @@ BEGIN
    IF wb_.sheets(sheet_).row_fmts.exists(row_) THEN
       row_Xf_ := wb_.sheets(sheet_).row_fmts(row_);
    END IF;
-
-   Xf_.numFmtId  := coalesce (numFmtId_, col_Xf_.numFmtId, row_Xf_.numFmtId, wb_.sheets(sheet_).fontid, wb_.fontid);
+   Xf_.numFmtId  := coalesce (numFmtId_, col_Xf_.numFmtId, row_Xf_.numFmtId, wb_.sheets(sheet_).fontId, wb_.fontId, 0); -- is this correct with the fontId?
    Xf_.fontId    := coalesce (fontId_, col_Xf_.fontId, row_Xf_.fontId, 0);
    Xf_.fillId    := coalesce (fillId_, col_Xf_.fillId, row_Xf_.fillId, 0);
    Xf_.borderId  := coalesce (borderId_, col_Xf_.borderId, row_Xf_.borderId, 0);
@@ -2470,7 +2471,7 @@ BEGIN
       AND Xf_.alignment.vertical IS null AND Xf_.alignment.horizontal IS null
       AND not nvl(Xf_.alignment.wrapText, false)
    THEN
-      RETURN '';
+      RETURN 0;
    END IF;
 
    IF Xf_.numFmtId > 0 THEN
@@ -2547,7 +2548,7 @@ BEGIN
          row_Xf_ := wb_.sheets(sheet_).row_fmts(row_);
       END IF;
 
-      Xf_.numFmtId  := coalesce (col_Xf_.numFmtId, row_Xf_.numFmtId, wb_.sheets(sheet_).fontid, wb_.fontid);
+      Xf_.numFmtId  := coalesce (col_Xf_.numFmtId, row_Xf_.numFmtId, wb_.sheets(sheet_).fontId, wb_.fontId);  -- is this correct with the fontId??
       Xf_.fontId    := coalesce (col_Xf_.fontId, row_Xf_.fontId, 0);
       Xf_.fillId    := coalesce (col_Xf_.fillId, row_Xf_.fillId, 0);
       Xf_.borderId  := coalesce (col_Xf_.borderId, row_Xf_.borderId, 0);
@@ -3767,6 +3768,7 @@ IS
    nd_bdrs_     dbms_XmlDom.DomNode;
    nd_bdr_      dbms_XmlDom.DomNode;
    nd_pf_       dbms_XmlDom.DomNode;
+   nd_sxfs_     dbms_XmlDom.DomNode;
    nd_xfs_      dbms_XmlDom.DomNode;
    nd_xf_       dbms_XmlDom.DomNode;
    attrs_       xml_attrs_arr;
@@ -3852,13 +3854,12 @@ BEGIN
    END LOOP;
 
    natr ('count', '1', attrs_);
-   nd_xfs_ := Xml_Node (doc_, nd_stl_, 'cellStyleXfs', attrs_);
-
+   nd_sxfs_ := Xml_Node (doc_, nd_stl_, 'cellStyleXfs', attrs_);
    natr ('numFmtId', '0', attrs_);
    attr ('fontId', '0', attrs_);
    attr ('fillId', '0', attrs_);
    attr ('borderId', '0', attrs_);
-   Xml_Node (doc_, nd_xfs_, 'xf', attrs_);
+   Xml_Node (doc_, nd_sxfs_, 'xf', attrs_);
 
    natr ('count', wb_.cellXfs.count+1, attrs_);
    nd_xfs_ := Xml_Node (doc_, nd_stl_, 'cellXfs', attrs_);
@@ -4158,6 +4159,9 @@ IS
    nd_shs_   dbms_XmlDom.DomNode;
    nd_dnm_   dbms_XmlDom.DomNode;
    nd_pvs_   dbms_XmlDom.DomNode;
+   nd_extl_  dbms_XmlDom.DomNode;
+   nd_ext_   dbms_XmlDom.DomNode;
+   nd_cf_    dbms_XmlDom.DomNode;
    attrs_    xml_attrs_arr;
    s_        PLS_INTEGER;
    dn_       VARCHAR2(100);
@@ -4175,8 +4179,12 @@ BEGIN
    attr ('lowestEdited', '5', attrs_);
    attr ('rupBuild', '9302', attrs_);
    Xml_Node (doc_, nd_wb_, 'fileVersion', attrs_);
-   natr ('date1904', 'false', attrs_);
+   attrs_.delete;
+   IF wb_.pivot_tables.count > 0 THEN
+      attr ('hidePivotFieldList', '1', attrs_);
+   END IF;
    attr ('defaultThemeVersion', '124226', attrs_);
+   attr ('date1904', 'false', attrs_);
    Xml_Node (doc_, nd_wb_, 'workbookPr', attrs_);
 
    nd_bks_ := Xml_Node (doc_, nd_wb_, 'bookViews');
@@ -4214,6 +4222,9 @@ BEGIN
       END LOOP;
    END IF;
 
+   natr ('calcId', '144525', attrs_);
+   Xml_Node (doc_, nd_wb_, 'calcPr', attrs_);
+
    IF wb_.pivot_caches.count > 0 THEN
       nd_pvs_ :=  Xml_Node (doc_, nd_wb_, 'pivotCaches');
       FOR pc_ IN 1 .. wb_.pivot_caches.count LOOP
@@ -4223,10 +4234,34 @@ BEGIN
          wb_.pivot_caches(pc_).wb_rel := rel_;
          rel_                         := rel_ + 1;
       END LOOP;
-   END IF;
 
-   natr ('calcId', '144525', attrs_);
-   Xml_Node (doc_, nd_wb_, 'calcPr', attrs_);
+      nd_extl_ := Xml_Node (doc_, nd_wb_, 'extLst');
+
+      natr ('uri', Get_Guid, attrs_);
+      attr ('xmlns:x15', 'http://schemas.microsoft.com/office/spreadsheetml/2010/11/main', attrs_);
+      nd_ext_ := Xml_Node (doc_, nd_extl_, 'ext', attrs_);
+
+      natr ('chartTrackingRefBase', '1', attrs_);
+      Xml_Node (doc_, nd_ext_, 'workbookPr', 'x15', attrs_);
+
+      natr ('uri', Get_Guid, attrs_);
+      attr ('xmlns:xcalcf', 'http://schemas.microsoft.com/office/spreadsheetml/2018/calcfeatures', attrs_);
+      nd_ext_ := Xml_Node (doc_, nd_extl_, 'ext', attrs_);
+
+      nd_cf_ := Xml_Node (doc_, nd_ext_, 'calcFeatures', 'xcalcf');
+
+      natr ('name', 'microsoft.com:RD', attrs_);
+      Xml_Node (doc_, nd_cf_, 'feature', 'xcalcf', attrs_);
+      natr ('name', 'microsoft.com:Single', attrs_);
+      Xml_Node (doc_, nd_cf_, 'feature', 'xcalcf', attrs_);
+      natr ('name', 'microsoft.com:FV', attrs_);
+      Xml_Node (doc_, nd_cf_, 'feature', 'xcalcf', attrs_);
+      natr ('name', 'microsoft.com:CNMTM', attrs_);
+      Xml_Node (doc_, nd_cf_, 'feature', 'xcalcf', attrs_);
+      natr ('name', 'microsoft.com:LET_WF', attrs_);
+      Xml_Node (doc_, nd_cf_, 'feature', 'xcalcf', attrs_);
+
+   END IF;
 
    Add1Xml (excel_, 'xl/workbook.xml', Dbms_XmlDom.getXmlType(doc_).getClobVal);
    Dbms_XmlDom.freeDocument (doc_);
@@ -5103,15 +5138,16 @@ BEGIN
       row_  := wb_.sheets(s_).rows.next(row_);
    END LOOP;
 
+   -- xl/worksheets/sheet:P1.xml
    Dbms_XmlDom.setVersion (doc_, '1.0" encoding="UTF-8" standalone="yes');
-
    natr ('xmlns', 'http://schemas.openxmlformats.org/spreadsheetml/2006/main', attrs_);
    attr ('xmlns:r', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships', attrs_);
-   attr ('xmlns:xdr', 'http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing', attrs_);
-   attr ('xmlns:x14', 'http://schemas.microsoft.com/office/spreadsheetml/2009/9/main', attrs_);
    attr ('xmlns:mc', 'http://schemas.openxmlformats.org/markup-compatibility/2006', attrs_);
-   attr ('mc:Ignorable', 'x14ac', attrs_);
    attr ('xmlns:x14ac', 'http://schemas.microsoft.com/office/spreadsheetml/2009/9/ac', attrs_);
+   attr ('xmlns:xr', 'http://schemas.microsoft.com/office/spreadsheetml/2014/revision', attrs_);
+   --attr ('xmlns:x14', 'http://schemas.microsoft.com/office/spreadsheetml/2009/9/main', attrs_);
+   attr ('mc:Ignorable', 'x14ac', attrs_);
+   attr ('xr:uid', Get_Guid, attrs_);
    nd_ws_ := Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'worksheet', attrs_);
    IF wb_.sheets(s_).tabcolor IS NOT null THEN
       natr ('rgb', wb_.sheets(s_).tabcolor, attrs_);
@@ -5132,20 +5168,26 @@ BEGIN
    attr ('workbookViewId', '0', attrs_);
    nd_sv_  := Xml_Node (doc_, nd_svs_, 'sheetView', attrs_);
 
-   natr ('activePane', 'bottomLeft', attrs_);
-   attr ('state', 'frozen', attrs_);
-   IF wb_.sheets(s_).freeze_rows > 0 AND wb_.sheets(s_).freeze_cols > 0 THEN
-      attr ('xSplit', wb_.sheets(s_).freeze_cols, attrs_);
-      attr ('ySplit', wb_.sheets(s_).freeze_rows, attrs_);
-      attr ('topLeftCell', Alfan_Cell (wb_.sheets(s_).freeze_cols+1, wb_.sheets(s_).freeze_rows+1), attrs_);
-   ELSIF wb_.sheets(s_).freeze_rows > 0 THEN
-      attr ('ySplit', wb_.sheets(s_).freeze_rows, attrs_);
-      attr ('topLeftCell', Alfan_Cell (1, wb_.sheets(s_).freeze_rows+1), attrs_);
-   ELSIF wb_.sheets(s_).freeze_cols > 0 THEN
-      attr ('xSplit', wb_.sheets(s_).freeze_cols, attrs_);
-      attr ('topLeftCell', Alfan_Cell (wb_.sheets(s_).freeze_cols+1, 1), attrs_);
+   IF wb_.sheets(s_).freeze_rows + wb_.sheets(s_).freeze_cols > 0 THEN
+      natr ('activePane', 'bottomLeft', attrs_);
+      attr ('state', 'frozen', attrs_);
+      IF wb_.sheets(s_).freeze_rows > 0 AND wb_.sheets(s_).freeze_cols > 0 THEN
+         attr ('xSplit', wb_.sheets(s_).freeze_cols, attrs_);
+         attr ('ySplit', wb_.sheets(s_).freeze_rows, attrs_);
+         attr ('topLeftCell', Alfan_Cell (wb_.sheets(s_).freeze_cols+1, wb_.sheets(s_).freeze_rows+1), attrs_);
+      ELSIF wb_.sheets(s_).freeze_rows > 0 THEN
+         attr ('ySplit', wb_.sheets(s_).freeze_rows, attrs_);
+         attr ('topLeftCell', Alfan_Cell (1, wb_.sheets(s_).freeze_rows+1), attrs_);
+      ELSIF wb_.sheets(s_).freeze_cols > 0 THEN
+         attr ('xSplit', wb_.sheets(s_).freeze_cols, attrs_);
+         attr ('topLeftCell', Alfan_Cell (wb_.sheets(s_).freeze_cols+1, 1), attrs_);
+      END IF;
+      Xml_Node (doc_, nd_sv_, 'pane', attrs_);
+   ELSE
+      natr ('activeCell', 'A1', attrs_);
+      attr ('sqref', 'A1', attrs_);
+      Xml_Node (doc_, nd_sv_, 'selection', attrs_);
    END IF;
-   Xml_Node (doc_, nd_sv_, 'pane', attrs_);
 
    attrs_.delete;
    natr ('defaultRowHeight', '15', attrs_);
@@ -6099,6 +6141,7 @@ BEGIN
    fonts_('bld_lt_bl')   := Get_Font (rgb_ => 'FFDCE6F1', bold_ => true);
    fonts_('bld_ltbl_lg') := Get_Font (rgb_ => 'FFDCE6F1', bold_ => true, fontsize_ => 14);
    fonts_('bld_lt_gr')   := Get_Font (rgb_ => 'FFEBF1DE', bold_ => true);
+   fonts_('italic')      := Get_Font (italic_ => true);
    fonts_('dk_gr')       := Get_Font (rgb_ => 'FF4F6228');
 
    fills_('dk_blue')     := Get_Fill ('solid', 'FF17375D');

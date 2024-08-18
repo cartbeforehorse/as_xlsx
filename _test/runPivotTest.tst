@@ -1,5 +1,5 @@
 PL/SQL Developer Test script 3.0
-76
+75
 DECLARE
    file_end_    CONSTANT VARCHAR2(20) := Cbh_Utils_API.Rep ('_:P1.xlsx', to_char(sysdate,'YYYYMMDD-HH24MI'));
    file_start_  CONSTANT VARCHAR2(20) := 'TestOut_';
@@ -31,7 +31,7 @@ BEGIN
 
    -- Image File
    As_Xlsx.Init_Workbook;
-   As_Xlsx.Set_Sheet_Name (1, 'Data and Pivot');
+   As_Xlsx.Set_Sheet_Name (1, 'Base Data');
 
    As_Xlsx.CellS (col_,   row_, 'Identity Type');
    As_Xlsx.CellS (col_+1, row_, 'Identity');
@@ -50,8 +50,7 @@ BEGIN
       --defined_name => 'SystemData', -- will create a "defined name" instance
       sheet_id     => sheet_,
       tl           => as_xlsx.tp_cell_loc (col_, init_row_, true, true),
-      br           => as_xlsx.tp_cell_loc (col_end_, row_, true, true
-      )
+      br           => as_xlsx.tp_cell_loc (col_end_, row_, true, true)
    );
    --As_Xlsx.Defined_Name (data_range_);
    As_Xlsx.Print_Range (data_range_); -- debug
