@@ -1,8 +1,9 @@
 PL/SQL Developer Test script 3.0
-87
+88
 DECLARE
-   file_end_    CONSTANT VARCHAR2(20) := Cbh_Utils_API.Rep ('_:P1.xlsx', to_char(sysdate,'YYYYMMDD-HH24MI'));
+   test_name_   CONSTANT VARCHAR2(30) := 'ImageHypCommentDefnm';
    file_start_  CONSTANT VARCHAR2(20) := 'TestOut_';
+   file_end_    CONSTANT VARCHAR2(20) := Cbh_Utils_API.Rep ('_:P1.xlsx', to_char(sysdate,'YYYYMMDD-HH24MI'));
    file_name_   VARCHAR2(60);
    sheet_       PLS_INTEGER;
    col_         PLS_INTEGER := 2;
@@ -82,7 +83,7 @@ BEGIN
    data_range_.defined_name := 'MyDataSource';
    As_Xlsx.Defined_Name (data_range_);
 
-   file_name_ := file_start_ || 'ImageHypCommNm' || file_end_;
+   file_name_ := file_start_ || test_name_ || file_end_;
    As_Xlsx.Save (As_Xlsx.Finish, 'EXCEL_OUT', file_name_);
    Dbms_Output.Put_Line (file_name_ || ' saved to filesystem');
 

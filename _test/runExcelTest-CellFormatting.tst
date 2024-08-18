@@ -1,8 +1,9 @@
 PL/SQL Developer Test script 3.0
-24
+25
 DECLARE
-   file_end_    CONSTANT VARCHAR2(20) := Cbh_Utils_API.Rep ('_:P1.xlsx', to_char(sysdate,'YYYYMMDD-HH24MI'));
+   test_name_   CONSTANT VARCHAR2(30) := 'NumFormats';
    file_start_  CONSTANT VARCHAR2(20) := 'TestOut_';
+   file_end_    CONSTANT VARCHAR2(20) := Cbh_Utils_API.Rep ('_:P1.xlsx', to_char(sysdate,'YYYYMMDD-HH24MI'));
    file_name_   VARCHAR2(60);
 BEGIN
 
@@ -19,7 +20,7 @@ BEGIN
 
    As_Xlsx.Comment (2, 2, 'This is a silly dingle dongle', 'Bob the Builder', 300, 200, 1);
 
-   file_name_ := file_start_ || 'NumFormats' || file_end_;
+   file_name_ := file_start_ || test_name_ || file_end_;
    As_Xlsx.Save (As_Xlsx.Finish, 'EXCEL_OUT', file_name_);
    Dbms_Output.Put_Line (file_name_ || ' saved to filesystem');
 

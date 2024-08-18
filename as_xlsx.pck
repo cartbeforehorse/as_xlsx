@@ -2448,7 +2448,7 @@ IS
 BEGIN
 
    IF not g_useXf_ THEN
-      RETURN '';
+      RETURN null;
    END IF;
 
    IF wb_.sheets(sheet_).col_fmts.exists(col_) THEN
@@ -2471,7 +2471,7 @@ BEGIN
       AND Xf_.alignment.vertical IS null AND Xf_.alignment.horizontal IS null
       AND not nvl(Xf_.alignment.wrapText, false)
    THEN
-      RETURN 0;
+      RETURN null;
    END IF;
 
    IF Xf_.numFmtId > 0 THEN
@@ -3364,7 +3364,7 @@ FUNCTION Create_Pivot_Cache (
    range_    IN tp_cell_range,
    agg_cols_ IN tp_col_agg_fns ) RETURN PLS_INTEGER
 IS
-   cache_id_ PLS_INTEGER := wb_.pivot_caches.count + 1;
+   cache_id_ PLS_INTEGER := wb_.pivot_caches.count;
 BEGIN
    IF range_.defined_name IS NOT null THEN
       Defined_Name (range_); -- will override existing defined name, so be a little careful
@@ -3560,7 +3560,7 @@ BEGIN
    attr ('ContentType', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml', attrs_);
    Xml_Node (doc_, nd_types_, 'Override', attrs_);
 
-   FOR pc_ IN 1 .. wb_.pivot_caches.count LOOP
+   FOR pc_ IN 0 .. wb_.pivot_caches.count-1 LOOP
       natr ('PartName',    rep('/xl/pivotCache/pivotCacheDefinition:P1.xml', pc_), attrs_);
       attr ('ContentType', 'application/vnd.openxmlformats-officedocument.spreadsheetml.pivotCacheDefinition+xml', attrs_);
       Xml_Node (doc_, nd_types_, 'Override', attrs_);
@@ -4183,7 +4183,7 @@ BEGIN
    IF wb_.pivot_tables.count > 0 THEN
       attr ('hidePivotFieldList', '1', attrs_);
    END IF;
-   attr ('defaultThemeVersion', '124226', attrs_);
+   attr ('defaultThemeVersion', '166925', attrs_);
    attr ('date1904', 'false', attrs_);
    Xml_Node (doc_, nd_wb_, 'workbookPr', attrs_);
 
@@ -4227,9 +4227,9 @@ BEGIN
 
    IF wb_.pivot_caches.count > 0 THEN
       nd_pvs_ :=  Xml_Node (doc_, nd_wb_, 'pivotCaches');
-      FOR pc_ IN 1 .. wb_.pivot_caches.count LOOP
-         natr ('r:id', 'rId' || to_char(rel_), attrs_);
-         attr ('cacheId', to_char(wb_.pivot_caches(pc_).cache_id), attrs_);
+      FOR pc_ IN 0 .. wb_.pivot_caches.count-1 LOOP
+         natr ('cacheId', to_char(wb_.pivot_caches(pc_).cache_id), attrs_);
+         attr ('r:id', 'rId' || to_char(rel_), attrs_);
          Xml_Node (doc_, nd_pvs_, 'pivotCache', attrs_);
          wb_.pivot_caches(pc_).wb_rel := rel_;
          rel_                         := rel_ + 1;
@@ -4298,7 +4298,7 @@ BEGIN
    attr ('Target', 'theme/theme1.xml', attrs_);
    Xml_Node (doc_, nd_rls_, 'Relationship', attrs_);
 
-   FOR pc_ IN 1 .. wb_.pivot_caches.count LOOP
+   FOR pc_ IN 0 .. wb_.pivot_caches.count-1 LOOP
       natr ('Id', 'rId' || to_char (wb_.pivot_caches(pc_).wb_rel), attrs_);
       attr ('Type', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotCacheDefinition', attrs_);
       attr ('Target', rep ('pivotCache/pivotCacheDefinition:P1.xml', pc_), attrs_);
@@ -4329,7 +4329,7 @@ IS
    max_val_        NUMBER;
    uq_             tp_unique_data;
 BEGIN
-   FOR pc_ IN 1 .. wb_.pivot_caches.count LOOP
+   FOR pc_ IN 0 .. wb_.pivot_caches.count-1 LOOP
       FOR c_ IN 1 .. Range_Width (wb_.pivot_caches(pc_).ds_range) LOOP
 
          col_name_  := Range_Col_Head_Name (wb_.pivot_caches(pc_).ds_range, c_);
@@ -4399,7 +4399,7 @@ IS
    xl_col_  PLS_INTEGER;
 BEGIN
 
-   FOR pc_ IN 1 .. wb_.pivot_caches.count LOOP
+   FOR pc_ IN 0 .. wb_.pivot_caches.count-1 LOOP
 
       cache_ := wb_.pivot_caches(pc_);
       sh_ := cache_.ds_range.sheet_id;
