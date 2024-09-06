@@ -477,6 +477,10 @@ PROCEDURE Defined_Name (
 FUNCTION Range_From_Defined_Name (
    defined_name_ IN VARCHAR2 ) RETURN tp_cell_range;
 
+FUNCTION Add_Pivot_Cache (
+   src_data_range_ IN OUT NOCOPY tp_cell_range,
+   pivot_axes_     IN tp_pivot_axes ) RETURN PLS_INTEGER;
+
 PROCEDURE Add_Pivot_Table (
    cache_id_       IN OUT NOCOPY PLS_INTEGER,
    src_data_range_ IN OUT NOCOPY tp_cell_range,
@@ -988,9 +992,12 @@ PROCEDURE Trace (
    p9_      IN VARCHAR2 := null,
    p0_      IN VARCHAR2 := null,
    repl_nl_ IN BOOLEAN  := true,
-   quiet_   IN BOOLEAN  := false )
-IS BEGIN
-   Cbh_Utils_API.Trace (msg_, p1_, p2_, p3_, p4_, p5_, p6_, p7_, p8_, p9_, p0_, repl_nl_, quiet_);
+   quiet_   IN BOOLEAN  := false,
+   indent_  IN NUMBER   := 0 )
+IS
+   m_  CLOB := lpad (' ', indent_ * 3) || msg_;
+BEGIN
+   Cbh_Utils_API.Trace (m_, p1_, p2_, p3_, p4_, p5_, p6_, p7_, p8_, p9_, p0_, repl_nl_, quiet_);
 END Trace;
 FUNCTION Rep (
    msg_     IN CLOB,
@@ -3410,6 +3417,19 @@ BEGIN
    RETURN wb_.pivot_caches(wb_.pivot_tables(pivot_id_).cache_id).ds_range;
 END Get_Pivot_Source;
 
+FUNCTION Add_Pivot_Cache (
+   src_data_range_ IN OUT NOCOPY tp_cell_range,
+   pivot_axes_     IN tp_pivot_axes ) RETURN PLS_INTEGER
+IS
+   cols_to_cache_ tp_col_agg_fns;
+BEGIN
+   Add_Col_Headings_To_Range (src_data_range_); -- easier to access column names later
+   FOR c_ IN src_data_range_.col_names.first .. src_data_range_.col_names.last LOOP
+      cols_to_cache_(c_) := Get_Agg_Fn_From_Axes (pivot_axes_, c_);
+   END LOOP;
+   RETURN Create_Pivot_Cache (src_data_range_, cols_to_cache_);
+END Add_Pivot_Cache;
+
 PROCEDURE Add_Pivot_Table (
    cache_id_       IN OUT NOCOPY PLS_INTEGER,
    src_data_range_ IN OUT NOCOPY tp_cell_range,
@@ -3420,7 +3440,6 @@ PROCEDURE Add_Pivot_Table (
    new_sheet_name_ IN VARCHAR2    := null )
 IS
    pv_id_         PLS_INTEGER := wb_.pivot_tables.count + 1;
-   cols_to_cache_ tp_col_agg_fns;
    sh_            PLS_INTEGER := CASE
       WHEN add_to_sheet_ IS NOT null THEN add_to_sheet_
       ELSE New_Sheet (nvl (new_sheet_name_, 'Pivot' || pv_id_))
@@ -3435,10 +3454,7 @@ BEGIN
    Add_Col_Headings_To_Range (src_data_range_); -- easier to access column names later
 
    IF cache_id_ IS null THEN
-      FOR c_ IN src_data_range_.col_names.first .. src_data_range_.col_names.last LOOP
-         cols_to_cache_(c_) := Get_Agg_Fn_From_Axes (pivot_axes_, c_);
-      END LOOP;
-      cache_id_ := Create_Pivot_Cache (src_data_range_, cols_to_cache_);
+      cache_id_ := Add_Pivot_Cache (src_data_range_, pivot_axes_);
    -- ELSE???
    --   if the cache already exists, it implies that multiple PTs are using the
    --   same cache.  Should we be updating the `cols_to_cache_` list in this scenario?
@@ -4558,7 +4574,11 @@ PROCEDURE Check_Cell_Not_Exist (
    row_ IN PLS_INTEGER )
 IS BEGIN
    IF wb_.sheets(sh_).rows.exists(row_) AND wb_.sheets(sh_).rows(row_).exists(col_) THEN
-      Raise_App_Error ('Pivot table has expaned into cells that already contain data.  To avoid any chance of recursive references, this is not allowed.');
+      Raise_App_Error (
+         'Pivot table has expaned into sheet/cell [:P1/:P2] which already contains data.' ||
+         '  To avoid any chance of recursive references, this is not allowed.',
+         sh_, Alfan_Cell (col_, row_)
+      );
    END IF;
 END Check_Cell_Not_Exist;
 
@@ -4627,7 +4647,7 @@ IS
    keys_     json_key_list;
 BEGIN
 
-   CellS (col_, row_, 'Row Labels');
+   CellS (col_, row_, 'Row Labels', sheet_ => sh_);
    ix_ := aggs_arr_.first;
    WHILE ix_ IS NOT null LOOP
       desc_ := CASE aggs_arr_(ix_)
@@ -4635,20 +4655,20 @@ BEGIN
          WHEN 'count' THEN 'Count of '
       END || Range_Col_Head_Name (ds_range_, ix_);
       col_ := col_ + 1;
-      CellS (col_, row_, desc_);
+      CellS (col_, row_, desc_, sheet_ => sh_);
       ix_ := aggs_arr_.next(ix_);
    END LOOP;
    row_ := row_ + 1;
    Unravel_Json_To_Sheet (sh_, j_piv_.get_object('breakdown'), init_col_, row_);
 
    col_ := init_col_;
-   CellS (col_, row_, 'Grand Total');
+   CellS (col_, row_, 'Grand Total', sheet_ => sh_);
 
    sum_obj_ := j_piv_.get_object('sum');
    keys_ := sum_obj_.get_keys;
    FOR k_ IN keys_.first .. keys_.last LOOP
       col_ := col_ + 1;
-      CellN (col_, row_, sum_obj_.get_number(keys_(k_)));
+      CellN (col_, row_, sum_obj_.get_number(keys_(k_)), sheet_ => sh_);
    END LOOP;
 
 END Unravel_Json_To_Sheet;
@@ -4762,7 +4782,6 @@ IS
    keep_             BOOLEAN;
 
    next_filter_vals_ tp_col_filters  := filter_vals_;
-   this_colid_       PLS_INTEGER;
    next_level_       PLS_INTEGER     := level_ + 1;
    next_colid_       PLS_INTEGER;
    next_col_name_    VARCHAR2(32000);
@@ -4822,12 +4841,12 @@ BEGIN
       -- rollup.  Aggregations are added up from leaf-nodes, in order to limit
       -- looping on the source data as much as possible
 
-      this_colid_    := vrollup_(level_+1);
-      results_obj_.put ('colId',   this_colid_);
-      results_obj_.put ('colDesc', Range_Col_Head_Name (cache_.ds_range, this_colid_));
       next_colid_    := vrollup_(next_level_);
       next_col_name_ := Range_Col_Head_Name (cache_.ds_range, next_colid_);
+      results_obj_.put ('colId',   next_colid_);
+      results_obj_.put ('colDesc', next_col_name_);
 
+      -- Loop on each "shared item" already built into the cache
       shared_item_ := cache_.cached_fields(next_col_name_).shared_items.first;
       WHILE shared_item_ IS NOT null LOOP
 
@@ -4904,6 +4923,7 @@ IS
    shared_item_ VARCHAR2(32000);
    agg_col_     PLS_INTEGER;
    prefix_      VARCHAR2(50);
+
 BEGIN
 
    FOR pt_ IN 1 .. wb_.pivot_tables.count LOOP
@@ -4964,10 +4984,11 @@ BEGIN
 
       FOR cf_ix_ IN cache_.cf_order.first .. cache_.cf_order.last LOOP
 
-         cf_ := cache_.cached_fields(cache_.cf_order(cf_ix_));
-
+         -- the rollup in the pivot-table needn't be the same as the rollup in
+         -- the cache because a cache could serve multiple tables.  The rollup
+         -- calculated here must therefore be that taken from the table
          attrs_.delete;
-         CASE cf_.rollup_fn
+         CASE Get_Agg_Fn_From_Axes (wb_.pivot_tables(pt_).pivot_axes, cf_ix_)
             WHEN 'row' THEN attr ('axis', 'axisRow', attrs_);
             WHEN 'sum' THEN attr ('dataField', '1', attrs_);
             ELSE null;
@@ -4975,6 +4996,7 @@ BEGIN
          attr ('showAll', 0, attrs_);
          nd_pf_ := Xml_Node (doc_, nd_pfs_, 'pivotField', attrs_);
 
+         cf_ := cache_.cached_fields(cache_.cf_order(cf_ix_));
          IF cf_.shared_items.count > 0 THEN
             natr ('count', to_char(cf_.shared_items.count + 1), attrs_);
             nd_is_ := Xml_Node (doc_, nd_pf_, 'items', attrs_);

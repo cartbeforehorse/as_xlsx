@@ -75,7 +75,7 @@ BEGIN
          src_data_range_ => data_range_,
          pivot_axes_     => piv_axes_,
          location_tl_    => loc_,
-         pivot_name_     => 'OsianPivot',
+         pivot_name_     => 'AutoPivot',
          add_to_sheet_   => sheet_
       );
       As_Xlsx.Set_Column_Width (8, 15, sheet_);
