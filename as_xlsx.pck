@@ -4633,29 +4633,6 @@ END Check_Cell_Not_Exist;
 
 
 -----
--- Prep_Pivot_Table_For_Rollup()
---   Build out the combined attributes that are useful for calculating how our
---   pivot will appear on the sheet.  These "combined" values are to be worked
---   out from those given by the calling function
---
-/*PROCEDURE Prep_Pivot_Table_For_Rollup (
-   pid_ IN PLS_INTEGER )
-IS
-   ix_ PLS_INTEGER := 0;
-BEGIN
-   FOR h_ IN 1 .. wb_.pivot_tables(pid_).pivot_axes.hrollups.count LOOP
-      ix_ := ix_ + 1;
-      wb_.pivot_tables(pid_).pivot_axes.hvrollups(ix_).col_id := wb_.pivot_tables(pid_).pivot_axes.hrollups(h_);
-      wb_.pivot_tables(pid_).pivot_axes.hvrollups(ix_).hv     := 'h';
-   END LOOP;
-   FOR v_ IN 1 .. wb_.pivot_tables(pid_).pivot_axes.vrollups.count LOOP
-      ix_ := ix_ + 1;
-      wb_.pivot_tables(pid_).pivot_axes.hvrollups(ix_).col_id := wb_.pivot_tables(pid_).pivot_axes.vrollups(v_);
-      wb_.pivot_tables(pid_).pivot_axes.hvrollups(ix_).hv     := 'v';
-   END LOOP;
-END Prep_Pivot_Table_For_Rollup;*/
-
------
 -- Unravel_Json_To_Sheet()
 --   Once rolled up, we first need to use the JSON to populate this workbook's
 --   sheets.  Dependant on the pivot caches, it may well be that the new pivot
@@ -4881,27 +4858,16 @@ BEGIN
 END Increment_Agg_Obj_From_Data;
 
 PROCEDURE Increment_Agg_Obj (
-   accum_aggs_obj_ IN OUT NOCOPY json_object_t,
-   new_agg_values_ IN            json_object_t )
+   new_agg_values_ IN            json_object_t,
+   accum_aggs_obj_ IN OUT NOCOPY json_object_t )
 IS
-/*
-"aggregates": {
-    "aggregatesCount": 2,
-    "aggregateCols": [
-        {"colId": 4, "fn": "sum", "value": 333.34 },
-        {"colId": 4, "fn": "count", "value": 1}
-    ]
-}
-*/
    changed_        BOOLEAN      := false;
    accum_aggs_arr_ json_array_t := accum_aggs_obj_.get_array('aggregateCols');
    new_aggs_arr_   json_array_t := new_agg_values_.get_array('aggregateCols');
    accum_agg_      json_object_t;
    accum_val_      NUMBER;
    new_val_        NUMBER;
-
 BEGIN
-
    FOR ix_ IN 0 .. accum_aggs_arr_.get_size-1 LOOP
       accum_agg_ := treat (accum_aggs_arr_.get(ix_) as json_object_t);
       IF accum_agg_.get_string('fn') IN ('count','sum') THEN
@@ -4914,48 +4880,6 @@ BEGIN
    IF changed_ THEN
       accum_aggs_obj_.put ('aggregateCols', accum_aggs_arr_);
    END IF;
-/*
-   FOR ix_ IN 0 .. aggs_list_.get_size-1 LOOP
-      agg_obj_ := treat (aggs_list_.get(ix_) as json_object_t);
-      CASE agg_obj_.get_string('fn')
-         WHEN 'count' THEN
-            agg_obj_.put ('value', agg_obj_.get_number('value') + 1);
-         WHEN 'sum' THEN
-            col_ := rg_col_start_ + agg_obj_.get_number('colId');
-            agg_obj_.put (
-               'value',
-               agg_obj_.get_number('value') + Get_Cell_Value_Num (col_, row_, data_range_.sheet_id)
-            );
-      END CASE;
-      aggs_list_.put (ix_, agg_obj_, true);
-   END LOOP;
-   aggs_obj_.put ('aggregateCols', aggs_list_);
-*/
-   -------------------------------
-   /*IF accum_agg_obj_.has('count') THEN
-      accum_obj_    := accum_agg_obj_.get_object('count');
-      new_vals_obj_ := new_agg_values_.get_object('count');
-      keys_         := new_vals_obj_.get_keys;
-      FOR k_ IN 1 .. keys_.count LOOP
-         accum_obj_.put (
-            keys_(k_),
-            accum_obj_.get_number(keys_(k_)) + new_vals_obj_.get_number(keys_(k_))
-         );
-      END LOOP;
-      accum_agg_obj_.put ('count', accum_obj_);
-   END IF;
-   IF accum_agg_obj_.has('sum') THEN
-      accum_obj_    := accum_agg_obj_.get_object('sum');
-      new_vals_obj_ := new_agg_values_.get_object('sum');
-      keys_         := new_vals_obj_.get_keys;
-      FOR k_ IN 1 .. keys_.count LOOP
-         accum_obj_.put (
-            keys_(k_),
-            accum_obj_.get_number(keys_(k_)) + new_vals_obj_.get_number(keys_(k_))
-         );
-      END LOOP;
-      accum_agg_obj_.put ('sum', accum_obj_);
-   END IF;*/
 END Increment_Agg_Obj;
 
 -----
@@ -5004,6 +4928,7 @@ BEGIN
    results_obj_.put ('isLeaf',      true);
    results_obj_.put ('recordCount', rec_count_);
    results_obj_.put ('width',       aggs_obj_.get_number('aggregatesCount'));
+   results_obj_.put ('height',      1);
    results_obj_.put ('aggregates',  aggs_obj_);
 
 END Build_Leaf_Json_Obj;
@@ -5050,6 +4975,7 @@ IS
    direct_nodes_   PLS_INTEGER    := 0;
    record_count_   PLS_INTEGER    := 0;
    width_          PLS_INTEGER    := 0;
+   height_         PLS_INTEGER    := 0;
    col_id_         PLS_INTEGER;
    col_name_       VARCHAR2(32000);
    shared_item_    VARCHAR2(32000);
@@ -5112,15 +5038,26 @@ BEGIN
          );
          IF direction_ = 'full-grid' OR child_obj_.get_number('recordCount') > 0 THEN
             sis_obj_.put (shared_item_, child_obj_);
-            Increment_Agg_Obj (node_agg_obj_, child_obj_.get_object('aggregates'));
+            Increment_Agg_Obj (child_obj_.get_object('aggregates'), node_agg_obj_);
             direct_nodes_ := direct_nodes_ + 1;
             record_count_ := record_count_ + child_obj_.get_number('recordCount');
-            width_        := width_        + child_obj_.get_number('width');
+
+            IF direction_ = 'horizontal' THEN
+               width_ := width_ + child_obj_.get_number('width');
+            ELSIF direction_ = 'vertical' THEN
+               height_ := height_ + child_obj_.get_number('height');
+            END IF;
+
          END IF;
 
          shared_item_ := cache_.cached_fields(col_name_).shared_items.next(shared_item_);
       END LOOP;
-      width_ := width_ + node_agg_obj_.get_number('aggregatesCount');
+
+      IF direction_ = 'horizontal' THEN
+         width_ := width_ + node_agg_obj_.get_number('aggregatesCount');
+      ELSIF direction_ = 'vertical' THEN
+         height_ := height_ + 1;
+      END IF;
       sis_obj_.put ('[[Totals]]', node_agg_obj_);
 
       results_obj_.put ('direction',       CASE WHEN build_vertical_ THEN 'vertical' ELSE 'horizontal' END);
@@ -5130,9 +5067,14 @@ BEGIN
       results_obj_.put ('v-level',         v_level_);
       results_obj_.put ('is-hLeaf',        next_is_h_leaf_);
       results_obj_.put ('is-vLeaf',        next_is_v_leaf_);
+      results_obj_.put ('isLeaf',          false);
       results_obj_.put ('sharedItemCount', direct_nodes_);
       results_obj_.put ('recordCount',     record_count_);
-      results_obj_.put ('width',           width_);
+      IF direction_ = 'horizontal' THEN
+         results_obj_.put ('width',        width_);
+      ELSIF direction_ = 'vertical' THEN
+         results_obj_.put ('height',       height_);
+      END IF;
       results_obj_.put ('aggregates',      node_agg_obj_);
       results_obj_.put ('sharedItems',     sis_obj_);
 
