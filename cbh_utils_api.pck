@@ -264,7 +264,6 @@ END Null_Date_Today;
 --
 --
 
--- Because the IFS standard replace only allows 3 variables, which can be limiting
 FUNCTION Strlim (
    str_      IN VARCHAR2,
    limit_    IN NUMBER := 4000 ) RETURN VARCHAR2
@@ -353,7 +352,7 @@ PROCEDURE Trace (
    repl_nl_ IN BOOLEAN  := true,
    quiet_   IN BOOLEAN  := false )
 IS
-   logmsg_ VARCHAR2(32000) := strlim(Rep(msg_, p1_, p2_, p3_, p4_, p5_, p6_, p7_, p8_, p9_, p0_, repl_nl_));
+   logmsg_ VARCHAR2(32000) := Rep(msg_, p1_, p2_, p3_, p4_, p5_, p6_, p7_, p8_, p9_, p0_, repl_nl_);
 BEGIN
    Dbms_Output.Put_Line (CASE WHEN not quiet_ THEN 'Trace: ' END || logmsg_);
 END Trace;

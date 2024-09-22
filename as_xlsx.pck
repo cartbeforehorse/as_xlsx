@@ -26,10 +26,14 @@ CREATE OR REPLACE PACKAGE as_xlsx IS
 -- Excel cell structure, cell and range locators
 --
 TYPE tp_pivot_cols  IS TABLE OF PLS_INTEGER INDEX BY PLS_INTEGER;
-TYPE tp_col_agg_fns IS TABLE OF VARCHAR2(20) INDEX BY PLS_INTEGER; -- [sum,avg,count...]
+TYPE tp_agg_fn IS RECORD (
+   colid  PLS_INTEGER,
+   agg_fn VARCHAR2(20) -- [sum,avg,count...]
+);
+TYPE tp_col_agg_fns IS TABLE OF tp_agg_fn INDEX BY PLS_INTEGER;
 TYPE tp_pivot_axes IS RECORD (
-   vrollups    tp_pivot_cols,
    hrollups    tp_pivot_cols,
+   vrollups    tp_pivot_cols,
    filter_cols tp_pivot_cols,
    col_agg_fns tp_col_agg_fns
 );
@@ -771,6 +775,7 @@ TYPE tp_validations IS TABLE OF tp_validation INDEX BY PLS_INTEGER;
 TYPE tp_unique_data IS TABLE OF PLS_INTEGER INDEX BY VARCHAR2(32000);
 TYPE tp_data_ix_ord IS TABLE OF VARCHAR2(32000) INDEX BY PLS_INTEGER;
 TYPE tp_col_filters IS TABLE OF VARCHAR2(32000) INDEX BY PLS_INTEGER;
+TYPE tp_col_cache_method IS TABLE OF VARCHAR2(20) INDEX BY PLS_INTEGER;
 
 TYPE tp_cache_field IS RECORD (
    field_name   VARCHAR2(2000),
@@ -785,8 +790,8 @@ TYPE tp_cache_fields IS TABLE OF tp_cache_field INDEX BY VARCHAR2(32000);
 TYPE tp_pivot_cache IS RECORD (
    cache_id       PLS_INTEGER,
    ds_range       tp_cell_range,
-   flds_to_cache  tp_col_agg_fns,  -- dynamically built from `pivot_axes` on the Pivot Table
-   cached_fields  tp_cache_fields, -- dynamically built, indexed by col-heading
+   flds_to_cache  tp_col_cache_method, -- dynamically built from `pivot_axes` on the Pivot Table
+   cached_fields  tp_cache_fields,     -- dynamically built, indexed by col-heading
    cf_order       tp_data_ix_ord,
    wb_rel         PLS_INTEGER
 );
@@ -999,6 +1004,24 @@ IS
 BEGIN
    Cbh_Utils_API.Trace (m_, p1_, p2_, p3_, p4_, p5_, p6_, p7_, p8_, p9_, p0_, repl_nl_, quiet_);
 END Trace;
+PROCEDURE Debug (
+   msg_     IN CLOB,
+   p1_      IN VARCHAR2 := null,
+   p2_      IN VARCHAR2 := null,
+   p3_      IN VARCHAR2 := null,
+   p4_      IN VARCHAR2 := null,
+   p5_      IN VARCHAR2 := null,
+   p6_      IN VARCHAR2 := null,
+   p7_      IN VARCHAR2 := null,
+   p8_      IN VARCHAR2 := null,
+   p9_      IN VARCHAR2 := null,
+   p0_      IN VARCHAR2 := null,
+   repl_nl_ IN BOOLEAN  := true,
+   indent_  IN NUMBER   := 0 )
+IS BEGIN
+   Dbms_Output.Put_Line ('--- debugging...');
+   Trace (msg_, p1_, p2_, p3_, p4_, p5_, p6_, p7_, p8_, p9_, p0_, repl_nl_, true, indent_);
+END Debug;
 FUNCTION Rep (
    msg_     IN CLOB,
    p1_      IN VARCHAR2 := null,
@@ -3369,7 +3392,7 @@ END Range_From_Defined_Name;
 
 FUNCTION Create_Pivot_Cache (
    range_    IN tp_cell_range,
-   agg_cols_ IN tp_col_agg_fns ) RETURN PLS_INTEGER
+   agg_cols_ IN tp_col_cache_method ) RETURN PLS_INTEGER
 IS
    cache_id_ PLS_INTEGER := wb_.pivot_caches.count;
 BEGIN
@@ -3391,7 +3414,12 @@ IS
    rtn_ VARCHAR2(20);
    ix_  PLS_INTEGER;
 BEGIN
-   rtn_ := CASE WHEN pivot_axes_.col_agg_fns.exists(col_ix_) THEN pivot_axes_.col_agg_fns(col_ix_) END;
+   FOR ix_ IN 1 .. pivot_axes_.col_agg_fns.count LOOP
+      IF pivot_axes_.col_agg_fns(ix_).colid = col_ix_ THEN
+         --rtn_ := pivot_axes_.col_agg_fns(ix_).agg_fn;
+         rtn_ := 'sum'; -- "count" and "sum" are treated the same way in the cache
+      END IF;
+   END LOOP;
    ix_ := pivot_axes_.vrollups.first;
    WHILE ix_ IS NOT null AND rtn_ IS null LOOP
       rtn_ := CASE WHEN pivot_axes_.vrollups(ix_) = col_ix_ THEN 'row' END;
@@ -3421,7 +3449,7 @@ FUNCTION Add_Pivot_Cache (
    src_data_range_ IN OUT NOCOPY tp_cell_range,
    pivot_axes_     IN tp_pivot_axes ) RETURN PLS_INTEGER
 IS
-   cols_to_cache_ tp_col_agg_fns;
+   cols_to_cache_ tp_col_cache_method;
 BEGIN
    Add_Col_Headings_To_Range (src_data_range_); -- easier to access column names later
    FOR c_ IN src_data_range_.col_names.first .. src_data_range_.col_names.last LOOP
@@ -4545,9 +4573,16 @@ BEGIN
 
 END Finish_Pivot_Caches;
 
+-----
+-- Combine_Arrays()
+--   Combines interger-indexed arrays of strings
+--     -> [1 = 'a', 3 => 'b'] + [2 => 'c'] becomes [1 => 'a', 2 => 'c', 3 => 'b']
+--
 FUNCTION Combine_Arrays (
    arr1_ IN tp_col_filters,
-   arr2_ IN tp_col_filters ) RETURN tp_col_filters
+   arr2_ IN tp_col_filters,
+   arr3_ IN tp_col_filters := tp_col_filters(),
+   arr4_ IN tp_col_filters := tp_col_filters() ) RETURN tp_col_filters
 IS
    ix_  PLS_INTEGER;
    ret_ tp_col_filters;
@@ -4564,6 +4599,20 @@ BEGIN
       END IF;
       ret_(ix_) := arr2_(ix_);
       ix_ := arr2_.next(ix_);
+   END LOOP;
+   ix_ := arr3_.first;
+   WHILE ix_ IS NOT null LOOP
+      IF ret_.exists(ix_) THEN
+         Raise_App_Error ('Duplicate indexes :P1 when combining arrays', to_char(ix_));
+      END IF;
+      ix_ := arr3_.next(ix_);
+   END LOOP;
+   ix_ := arr4_.first;
+   WHILE ix_ IS NOT null LOOP
+      IF ret_.exists(ix_) THEN
+         Raise_App_Error ('Duplicate indexes :P1 when combining arrays', to_char(ix_));
+      END IF;
+      ix_ := arr4_.next(ix_);
    END LOOP;
    RETURN ret_;
 END Combine_Arrays;
@@ -4584,10 +4633,34 @@ END Check_Cell_Not_Exist;
 
 
 -----
+-- Prep_Pivot_Table_For_Rollup()
+--   Build out the combined attributes that are useful for calculating how our
+--   pivot will appear on the sheet.  These "combined" values are to be worked
+--   out from those given by the calling function
+--
+/*PROCEDURE Prep_Pivot_Table_For_Rollup (
+   pid_ IN PLS_INTEGER )
+IS
+   ix_ PLS_INTEGER := 0;
+BEGIN
+   FOR h_ IN 1 .. wb_.pivot_tables(pid_).pivot_axes.hrollups.count LOOP
+      ix_ := ix_ + 1;
+      wb_.pivot_tables(pid_).pivot_axes.hvrollups(ix_).col_id := wb_.pivot_tables(pid_).pivot_axes.hrollups(h_);
+      wb_.pivot_tables(pid_).pivot_axes.hvrollups(ix_).hv     := 'h';
+   END LOOP;
+   FOR v_ IN 1 .. wb_.pivot_tables(pid_).pivot_axes.vrollups.count LOOP
+      ix_ := ix_ + 1;
+      wb_.pivot_tables(pid_).pivot_axes.hvrollups(ix_).col_id := wb_.pivot_tables(pid_).pivot_axes.vrollups(v_);
+      wb_.pivot_tables(pid_).pivot_axes.hvrollups(ix_).hv     := 'v';
+   END LOOP;
+END Prep_Pivot_Table_For_Rollup;*/
+
+-----
 -- Unravel_Json_To_Sheet()
 --   Once rolled up, we first need to use the JSON to populate this workbook's
 --   sheets.  Dependant on the pivot caches, it may well be that the new pivot
---   tables overwirte existing cells, which should not be allowed.
+--   tables overwirte existing cells, which raises an exception in our program
+--   just as it does in actual Excel.
 --   There are 2 versions of this function, the second is the initiator, while
 --   the first is the recursor.
 --
@@ -4603,6 +4676,10 @@ IS
    keys_     json_key_list := j_node_.get_keys;
    s_keys_   json_key_list;
 BEGIN
+
+/*Dbms_Output.Put_Line ('== returning JSON object ==>');
+Dbms_Output.Put_Line (results_obj_.stringify);
+Raise_App_Error ('chickens');*/
 
    FOR k_ IN keys_.first .. keys_.last LOOP
 
@@ -4621,8 +4698,8 @@ BEGIN
       END LOOP;
       row_ := row_ + 1;
 
-      IF k_obj_.has('breakdown') THEN
-         Unravel_Json_To_Sheet (sh_, k_obj_.get_object('breakdown'), init_col_, row_);
+      IF k_obj_.has('sharedItems') THEN
+         Unravel_Json_To_Sheet (sh_, k_obj_.get_object('sharedItems'), init_col_, row_);
       END IF;
 
    END LOOP;   
@@ -4643,23 +4720,33 @@ IS
    row_      PLS_INTEGER    := loc_.r;
    desc_     VARCHAR2(2000);
    ix_       PLS_INTEGER;
+   col_ix_   PLS_INTEGER;
    sum_obj_  json_object_t;
    keys_     json_key_list;
 BEGIN
 
+-- more to-do => start here
+-- we need to unravel the data.  Start by defining the extent of the sheet
+--
+--
+--
+--
    CellS (col_, row_, 'Row Labels', sheet_ => sh_);
    ix_ := aggs_arr_.first;
    WHILE ix_ IS NOT null LOOP
-      desc_ := CASE aggs_arr_(ix_)
+      col_ix_ := aggs_arr_(ix_).colid;
+      desc_ := CASE aggs_arr_(ix_).agg_fn
          WHEN 'sum'   THEN 'Sum of '
          WHEN 'count' THEN 'Count of '
-      END || Range_Col_Head_Name (ds_range_, ix_);
+      END || Range_Col_Head_Name (ds_range_, col_ix_);
       col_ := col_ + 1;
       CellS (col_, row_, desc_, sheet_ => sh_);
       ix_ := aggs_arr_.next(ix_);
    END LOOP;
    row_ := row_ + 1;
-   Unravel_Json_To_Sheet (sh_, j_piv_.get_object('breakdown'), init_col_, row_);
+
+Debug (j_piv_.stringify);
+   Unravel_Json_To_Sheet (sh_, j_piv_.get_object('sharedItems'), init_col_, row_);
 
    col_ := init_col_;
    CellS (col_, row_, 'Grand Total', sheet_ => sh_);
@@ -4717,8 +4804,8 @@ BEGIN
 
    END IF;
 
-   IF j_node_.has('breakdown') THEN
-      bkdn_obj_ := j_node_.get_object ('breakdown');
+   IF j_node_.has('sharedItems') THEN
+      bkdn_obj_ := j_node_.get_object ('sharedItems');
       keys_     := bkdn_obj_.get_keys;
       FOR k_ IN keys_.first .. keys_.last LOOP
          Unravel_Json_Pivot_Table_Xml (
@@ -4742,6 +4829,187 @@ END Unravel_Json_Pivot_Table_Xml;
 
 
 -----
+-- Initiate_Sum_Object()
+--   We need to initiate and update the sums object, which is a bit of a faff!
+--   It's because technically, a pivot table can calculate sums, averages, and
+--   many more types of aggregates over several columns.
+--   Only 'sum' is supported at the moment!!
+--
+PROCEDURE Initiate_Agg_Obj (
+   aggs_rec_ IN     tp_col_agg_fns,
+   aggs_obj_ IN OUT NOCOPY json_object_t )
+IS
+   agg_obj_    json_object_t := json_object_t();
+   aggs_list_  json_array_t  := json_array_t();
+BEGIN
+   aggs_obj_    := json_object_t();
+   FOR ix_ IN 1 .. aggs_rec_.count LOOP
+      agg_obj_.put ('colId', aggs_rec_(ix_).colid);
+      agg_obj_.put ('fn',    aggs_rec_(ix_).agg_fn);
+      agg_obj_.put ('value', 0);
+      aggs_list_.append(agg_obj_);
+   END LOOP;
+   aggs_obj_.put ('aggregatesCount', aggs_rec_.count);
+   aggs_obj_.put ('aggregateCols', aggs_list_);
+END Initiate_Agg_Obj;
+
+PROCEDURE Increment_Agg_Obj_From_Data (
+   data_range_ IN     tp_cell_range,
+   row_        IN     PLS_INTEGER,
+   aggs_obj_   IN OUT NOCOPY json_object_t )
+IS
+   aggs_list_    json_array_t  := aggs_obj_.get_array('aggregateCols');
+   agg_obj_      json_object_t;
+   col_          PLS_INTEGER;
+   rg_col_start_ PLS_INTEGER   := data_range_.tl.c - 1;
+BEGIN
+   FOR ix_ IN 0 .. aggs_list_.get_size-1 LOOP
+      agg_obj_ := treat (aggs_list_.get(ix_) as json_object_t);
+      CASE agg_obj_.get_string('fn')
+         WHEN 'count' THEN
+            agg_obj_.put ('value', agg_obj_.get_number('value') + 1);
+         WHEN 'sum' THEN
+            col_ := rg_col_start_ + agg_obj_.get_number('colId');
+            agg_obj_.put (
+               'value',
+               agg_obj_.get_number('value') + Get_Cell_Value_Num (col_, row_, data_range_.sheet_id)
+            );
+      END CASE;
+      aggs_list_.put (ix_, agg_obj_, true);
+   END LOOP;
+   aggs_obj_.put ('aggregateCols', aggs_list_);
+END Increment_Agg_Obj_From_Data;
+
+PROCEDURE Increment_Agg_Obj (
+   accum_aggs_obj_ IN OUT NOCOPY json_object_t,
+   new_agg_values_ IN            json_object_t )
+IS
+/*
+"aggregates": {
+    "aggregatesCount": 2,
+    "aggregateCols": [
+        {"colId": 4, "fn": "sum", "value": 333.34 },
+        {"colId": 4, "fn": "count", "value": 1}
+    ]
+}
+*/
+   changed_        BOOLEAN      := false;
+   accum_aggs_arr_ json_array_t := accum_aggs_obj_.get_array('aggregateCols');
+   new_aggs_arr_   json_array_t := new_agg_values_.get_array('aggregateCols');
+   accum_agg_      json_object_t;
+   accum_val_      NUMBER;
+   new_val_        NUMBER;
+
+BEGIN
+
+   FOR ix_ IN 0 .. accum_aggs_arr_.get_size-1 LOOP
+      accum_agg_ := treat (accum_aggs_arr_.get(ix_) as json_object_t);
+      IF accum_agg_.get_string('fn') IN ('count','sum') THEN
+         changed_   := true;
+         accum_val_ := accum_agg_.get_number('value');
+         new_val_   := treat (new_aggs_arr_.get(ix_) as json_object_t).get_number('value');
+         accum_agg_.put ('value', accum_val_ + new_val_); -- .get() fetches a reference, so updating a property will update the owning array 
+      END IF;
+   END LOOP;
+   IF changed_ THEN
+      accum_aggs_obj_.put ('aggregateCols', accum_aggs_arr_);
+   END IF;
+/*
+   FOR ix_ IN 0 .. aggs_list_.get_size-1 LOOP
+      agg_obj_ := treat (aggs_list_.get(ix_) as json_object_t);
+      CASE agg_obj_.get_string('fn')
+         WHEN 'count' THEN
+            agg_obj_.put ('value', agg_obj_.get_number('value') + 1);
+         WHEN 'sum' THEN
+            col_ := rg_col_start_ + agg_obj_.get_number('colId');
+            agg_obj_.put (
+               'value',
+               agg_obj_.get_number('value') + Get_Cell_Value_Num (col_, row_, data_range_.sheet_id)
+            );
+      END CASE;
+      aggs_list_.put (ix_, agg_obj_, true);
+   END LOOP;
+   aggs_obj_.put ('aggregateCols', aggs_list_);
+*/
+   -------------------------------
+   /*IF accum_agg_obj_.has('count') THEN
+      accum_obj_    := accum_agg_obj_.get_object('count');
+      new_vals_obj_ := new_agg_values_.get_object('count');
+      keys_         := new_vals_obj_.get_keys;
+      FOR k_ IN 1 .. keys_.count LOOP
+         accum_obj_.put (
+            keys_(k_),
+            accum_obj_.get_number(keys_(k_)) + new_vals_obj_.get_number(keys_(k_))
+         );
+      END LOOP;
+      accum_agg_obj_.put ('count', accum_obj_);
+   END IF;
+   IF accum_agg_obj_.has('sum') THEN
+      accum_obj_    := accum_agg_obj_.get_object('sum');
+      new_vals_obj_ := new_agg_values_.get_object('sum');
+      keys_         := new_vals_obj_.get_keys;
+      FOR k_ IN 1 .. keys_.count LOOP
+         accum_obj_.put (
+            keys_(k_),
+            accum_obj_.get_number(keys_(k_)) + new_vals_obj_.get_number(keys_(k_))
+         );
+      END LOOP;
+      accum_agg_obj_.put ('sum', accum_obj_);
+   END IF;*/
+END Increment_Agg_Obj;
+
+-----
+-- Build_Leaf_Json_Obj()
+--   Fetch data from a cache's data-source according to filters provided, then
+--   pass the results back as JSON
+--
+PROCEDURE Build_Leaf_Json_Obj (
+   pivot_id_    IN PLS_INTEGER,
+   filters_     IN tp_col_filters, -- [(colid) => "srch"]
+   results_obj_ IN OUT NOCOPY json_object_t )
+IS
+   pt_            tp_pivot_table := wb_.pivot_tables(pivot_id_);
+   cache_         tp_pivot_cache := wb_.pivot_caches(pt_.cache_id);
+   range_         tp_cell_range  := cache_.ds_range;
+   aggregates_    tp_col_agg_fns := pt_.pivot_axes.col_agg_fns; -- (1) => tp_agg_fn(colid:3, agg_fn:sum);--(3) => 'sum'
+   aggs_obj_      json_object_t  := json_object_t();
+
+   fc_offset_     PLS_INTEGER; -- fc:filter-column
+   rg_row_start_  PLS_INTEGER := range_.tl.r + 1;
+   rg_row_end_    PLS_INTEGER := range_.br.r;
+   rg_col_start_  PLS_INTEGER := range_.tl.c - 1;
+   rec_count_     PLS_INTEGER := 0;
+   col_           PLS_INTEGER;
+   keep_          BOOLEAN;
+BEGIN
+
+   Initiate_Agg_Obj (aggregates_, aggs_obj_);
+
+   -- Interogate the "database" (built into the Excel sheet) in order to build
+   -- the aggregates object
+   FOR r_ IN rg_row_start_ .. rg_row_end_ LOOP -- loop on dataset rows
+      keep_      := true;
+      fc_offset_ := filters_.first;
+      WHILE fc_offset_ IS NOT null AND keep_ LOOP -- loop on search criteria
+         col_ := rg_col_start_ + fc_offset_;
+         keep_ := keep_ AND Get_Cell_Value_Raw (col_, r_, range_.sheet_id, false) = filters_(fc_offset_);
+         fc_offset_ := filters_.next(fc_offset_);
+      END LOOP;
+      IF keep_ THEN
+         rec_count_ := rec_count_ + 1;
+         Increment_Agg_Obj_From_Data (range_, r_, aggs_obj_);
+      END IF;
+   END LOOP;
+
+   results_obj_.put ('isLeaf',      true);
+   results_obj_.put ('recordCount', rec_count_);
+   results_obj_.put ('width',       aggs_obj_.get_number('aggregatesCount'));
+   results_obj_.put ('aggregates',  aggs_obj_);
+
+END Build_Leaf_Json_Obj;
+
+
+-----
 -- Json_Aggregates_From_Filters()
 --   Given a cell-range (where our base-data is to be found) plus some filters
 --   upon which we would like that data to be sieved, we can build a matrix of
@@ -4751,146 +5019,140 @@ END Unravel_Json_Pivot_Table_Xml;
 --
 FUNCTION Json_Aggregates_From_Filters (
    pivot_id_      IN PLS_INTEGER,
-   level_         IN PLS_INTEGER,
-   filter_vals_   IN tp_col_filters := tp_col_filters(), -- should be of length `level_`
-   extra_filters_ IN tp_col_filters := tp_col_filters() ) RETURN json_object_t
+   h_level_       IN PLS_INTEGER    := 0,
+   v_level_       IN PLS_INTEGER    := 0,
+   h_filter_vals_ IN tp_col_filters := tp_col_filters(), -- should be length(h_level_); [(2) => "val1", (3) => "val2"]
+   v_filter_vals_ IN tp_col_filters := tp_col_filters(), -- should be length(v_level_)
+   extra_filters_ IN tp_col_filters := tp_col_filters(),
+   direction_     IN VARCHAR2       := 'top' ) RETURN json_object_t
 IS
 
-   pivot_            tp_pivot_table := wb_.pivot_tables(pivot_id_);
-   cache_            tp_pivot_cache := wb_.pivot_caches(pivot_.cache_id);
-   range_            tp_cell_range  := cache_.ds_range;
-   vrollup_          tp_pivot_cols  := pivot_.pivot_axes.vrollups;
-   aggregates_       tp_col_agg_fns := pivot_.pivot_axes.col_agg_fns;
-   filters_          tp_col_filters := Combine_Arrays (filter_vals_, extra_filters_);
-   agg_offset_       PLS_INTEGER;
-   fc_offset_        PLS_INTEGER;
+   pt_             tp_pivot_table := wb_.pivot_tables(pivot_id_);
+   cache_          tp_pivot_cache := wb_.pivot_caches(pt_.cache_id);
+   sis_obj_        json_object_t  := json_object_t();
+   results_obj_    json_object_t  := json_object_t();
+   child_obj_      json_object_t  := json_object_t();
+   node_agg_obj_   json_object_t;
 
-   is_leaf_          BOOLEAN       := vrollup_.count = level_;
-   results_obj_      json_object_t := json_object_t();
-   sum_obj_          json_object_t := json_object_t();
-   breakdown_obj_    json_object_t := json_object_t();
-   child_obj_        json_object_t;
-   sum_val_          NUMBER        := 0;
-   rec_count_        PLS_INTEGER   := 0;
-   direct_sub_recs_  PLS_INTEGER   := 0;
-   accum_sub_recs_   PLS_INTEGER   := 0;
+   next_h_level_   PLS_INTEGER;
+   next_v_level_   PLS_INTEGER;
+   h_depth_        PLS_INTEGER    := pt_.pivot_axes.hrollups.count; -- [1 => 3, 2 => 4, 3 => 1], key is always sequential
+   v_depth_        PLS_INTEGER    := pt_.pivot_axes.vrollups.count;
+   h_filters_      tp_col_filters := h_filter_vals_; -- order not important, only a filter
+   v_filters_      tp_col_filters := v_filter_vals_;
 
-   rg_row_start_     PLS_INTEGER := range_.tl.r + 1;
-   rg_row_end_       PLS_INTEGER := range_.br.r;
-   rg_col_start_     PLS_INTEGER := range_.tl.c - 1;
-   col_              PLS_INTEGER;
-   keep_             BOOLEAN;
-
-   next_filter_vals_ tp_col_filters  := filter_vals_;
-   next_level_       PLS_INTEGER     := level_ + 1;
-   next_colid_       PLS_INTEGER;
-   next_col_name_    VARCHAR2(32000);
-   shared_item_      VARCHAR2(32000);
+   is_h_leaf_      BOOLEAN        := h_depth_ = h_level_-1;
+   next_is_h_leaf_ BOOLEAN        := h_depth_ = h_level_;
+   is_v_leaf_      BOOLEAN        := v_depth_ = v_level_-1;
+   next_is_v_leaf_ BOOLEAN        := v_depth_ = v_level_;
+   build_vertical_ BOOLEAN        := not is_v_leaf_ AND direction_ != 'horizontal';
+   build_horizntl_ BOOLEAN        := not is_h_leaf_ AND direction_ != 'vertical';
+   direct_nodes_   PLS_INTEGER    := 0;
+   record_count_   PLS_INTEGER    := 0;
+   width_          PLS_INTEGER    := 0;
+   col_id_         PLS_INTEGER;
+   col_name_       VARCHAR2(32000);
+   shared_item_    VARCHAR2(32000);
 
 BEGIN
 
-   IF vrollup_.count = 0 THEN
-      Raise_App_Error ('There must be at least 1 rollup in a Pivot Table!');
-   END IF;
+   -- root level initiator
+   IF h_level_ = 0 AND v_level_ = 0 THEN
 
-   -- initiate values
-   results_obj_.put ('level', level_);
-   results_obj_.put ('isLeaf', is_leaf_);
-   results_obj_.put ('count', 0);
+      results_obj_.put ('h-tree', CASE
+         WHEN h_depth_ = 0 THEN json_object_t()
+         ELSE Json_Aggregates_From_Filters (
+            pivot_id_, h_level_+1, v_level_, extra_filters_ => extra_filters_, direction_ => 'horizontal'
+         )
+      END);
+      results_obj_.put ('v-tree', CASE
+         WHEN v_depth_ = 0 THEN json_object_t()
+         ELSE Json_Aggregates_From_Filters (
+            pivot_id_, h_level_, v_level_+1, extra_filters_ => extra_filters_, direction_ => 'vertical'
+         )
+      END);
+      results_obj_.put ('full-grid', CASE
+         WHEN v_depth_ = 0 THEN json_object_t()
+         ELSE Json_Aggregates_From_Filters (
+            pivot_id_, h_level_, v_level_+1, extra_filters_ => extra_filters_, direction_ => 'full-grid'
+         )
+      END);
 
-   agg_offset_ := aggregates_.first;
-   WHILE agg_offset_ IS NOT null LOOP
-      IF aggregates_(agg_offset_) = 'sum' THEN
-         sum_obj_.put (to_char(agg_offset_), 0);
+   -- build a mid-level node
+   ELSIF build_vertical_ OR build_horizntl_ THEN
+
+      IF build_vertical_ THEN
+         col_id_       := pt_.pivot_axes.vrollups(v_level_);
+         next_h_level_ := CASE WHEN next_is_v_leaf_ THEN h_level_+1 ELSE h_level_ END;
+         next_v_level_ := v_level_ + 1;
+      ELSE
+         col_id_       := pt_.pivot_axes.hrollups(h_level_);
+         next_h_level_ := h_level_ + 1;
+         next_v_level_ := v_level_;
       END IF;
-      agg_offset_ := aggregates_.next(agg_offset_);
-   END LOOP;
 
-   IF is_leaf_ THEN
+      col_name_ := Range_Col_Head_Name (cache_.ds_range, col_id_);
+      Initiate_Agg_Obj (pt_.pivot_axes.col_agg_fns, node_agg_obj_);
 
-      -- For leaf elements, we revert to the data-source already inserted into
-      -- our Excel sheet.  We do our own filtering of this data to find out if
-      -- each record is of interest to us or not, and then base our pivot math
-      -- calculations on that.  Parent elements will base their aggregation on
-      -- this data as well.
-
-      FOR r_ IN rg_row_start_ .. rg_row_end_ LOOP -- loop on dataset rows
-         keep_      := true;
-         fc_offset_ := filters_.first;
-         WHILE fc_offset_ IS NOT null AND keep_ LOOP -- loop on each search criteria
-            col_ := rg_col_start_ + fc_offset_;
-            keep_ := keep_ AND Get_Cell_Value_Raw (col_, r_, range_.sheet_id, false) = filters_(fc_offset_);
-            fc_offset_ := filters_.next(fc_offset_);
-         END LOOP;
-         IF keep_ THEN
-            agg_offset_ := aggregates_.first;
-            rec_count_  := rec_count_ + 1;
-            WHILE agg_offset_ IS NOT null LOOP -- loop on aggregation array to print the results out
-               col_ := rg_col_start_ + agg_offset_;
-               sum_val_ := sum_obj_.get_number(to_char(agg_offset_)) + Get_Cell_Value_Num (col_, r_, range_.sheet_id);
-               sum_obj_.put (to_char(agg_offset_), sum_val_);
-               agg_offset_ := aggregates_.next(agg_offset_);
-            END LOOP;
-         END IF;
-      END LOOP;
-      results_obj_.put ('count', rec_count_);
-      results_obj_.put ('sum', sum_obj_);
-
-   ELSE
-      -- If this is not the leaf, we need to recurse down to the next level of
-      -- rollup.  Aggregations are added up from leaf-nodes, in order to limit
-      -- looping on the source data as much as possible
-
-      next_colid_    := vrollup_(next_level_);
-      next_col_name_ := Range_Col_Head_Name (cache_.ds_range, next_colid_);
-      results_obj_.put ('colId',   next_colid_);
-      results_obj_.put ('colDesc', next_col_name_);
-
-      -- Loop on each "shared item" already built into the cache
-      shared_item_ := cache_.cached_fields(next_col_name_).shared_items.first;
+      shared_item_ := cache_.cached_fields(col_name_).shared_items.first;
       WHILE shared_item_ IS NOT null LOOP
-
-         next_filter_vals_(next_colid_) := shared_item_;
+         IF build_vertical_ THEN
+            v_filters_(col_id_) := shared_item_;
+         ELSE
+            h_filters_(col_id_) := shared_item_;
+         END IF;
          child_obj_ := Json_Aggregates_From_Filters (
             pivot_id_      => pivot_id_,
-            level_         => next_level_,
-            filter_vals_   => next_filter_vals_, -- varchar index-by col_ix_, should be same length as `level_`
-            extra_filters_ => extra_filters_
+            h_level_       => next_h_level_,
+            v_level_       => next_v_level_,
+            h_filter_vals_ => h_filters_,
+            v_filter_vals_ => v_filters_,
+            extra_filters_ => extra_filters_,
+            direction_     => direction_
          );
-
-         -- We only attach elements that have records in this filter criteria
-         IF child_obj_.get_number('count') > 0 THEN
-
-            breakdown_obj_.put (shared_item_, child_obj_);
-
-            direct_sub_recs_  := direct_sub_recs_ + 1;
-            IF child_obj_.has('accum-sub-records') THEN
-               accum_sub_recs_ := accum_sub_recs_ + child_obj_.get_number('accum-sub-records');
-            END IF;
-            rec_count_ := rec_count_ + child_obj_.get_number('count');
-            agg_offset_ := aggregates_.first;
-            WHILE agg_offset_ IS NOT null LOOP
-               sum_val_ := sum_obj_.get_number(to_char(agg_offset_));
-               sum_val_ := sum_val_ + child_obj_.get_object('sum').get_number(to_char(agg_offset_));
-               sum_obj_.put (to_char(agg_offset_), sum_val_);
-               agg_offset_ := aggregates_.next(agg_offset_);
-            END LOOP;
+         IF direction_ = 'full-grid' OR child_obj_.get_number('recordCount') > 0 THEN
+            sis_obj_.put (shared_item_, child_obj_);
+            Increment_Agg_Obj (node_agg_obj_, child_obj_.get_object('aggregates'));
+            direct_nodes_ := direct_nodes_ + 1;
+            record_count_ := record_count_ + child_obj_.get_number('recordCount');
+            width_        := width_        + child_obj_.get_number('width');
          END IF;
 
-         shared_item_ := cache_.cached_fields(next_col_name_).shared_items.next(shared_item_);
+         shared_item_ := cache_.cached_fields(col_name_).shared_items.next(shared_item_);
       END LOOP;
+      width_ := width_ + node_agg_obj_.get_number('aggregatesCount');
+      sis_obj_.put ('[[Totals]]', node_agg_obj_);
 
-      results_obj_.put ('direct-sub-records', direct_sub_recs_);
-      results_obj_.put ('accum-sub-records', accum_sub_recs_ + direct_sub_recs_);
-      results_obj_.put ('count', rec_count_);
-      results_obj_.put ('sum', sum_obj_);
-      results_obj_.put ('breakdown', breakdown_obj_);
+      results_obj_.put ('direction',       CASE WHEN build_vertical_ THEN 'vertical' ELSE 'horizontal' END);
+      results_obj_.put ('colId',           col_id_);
+      results_obj_.put ('colDesc',         col_name_);
+      results_obj_.put ('h-level',         h_level_);
+      results_obj_.put ('v-level',         v_level_);
+      results_obj_.put ('is-hLeaf',        next_is_h_leaf_);
+      results_obj_.put ('is-vLeaf',        next_is_v_leaf_);
+      results_obj_.put ('sharedItemCount', direct_nodes_);
+      results_obj_.put ('recordCount',     record_count_);
+      results_obj_.put ('width',           width_);
+      results_obj_.put ('aggregates',      node_agg_obj_);
+      results_obj_.put ('sharedItems',     sis_obj_);
+
+
+   -- build the leaf node
+   ELSE
+      Build_Leaf_Json_Obj (
+         pivot_id_    => pivot_id_,
+         filters_     => Combine_Arrays (v_filter_vals_, h_filter_vals_),
+         results_obj_ => results_obj_
+      );
 
    END IF;
 
-   IF level_ = 0 THEN
+   IF h_level_ = 0 AND v_level_ = 0 THEN
+      Dbms_Output.Put_Line ('Final object output from Json_Aggregates_From_Filters() ===>');
+      Dbms_Output.Put_Line (results_obj_.stringify);
       Unravel_Json_To_Sheet (pivot_id_, results_obj_);
    END IF;
+
    RETURN results_obj_;
 
 END Json_Aggregates_From_Filters;
@@ -4928,8 +5190,11 @@ BEGIN
 
    FOR pt_ IN 1 .. wb_.pivot_tables.count LOOP
 
-      j_piv_ := Json_Aggregates_From_Filters (pivot_id_ => pt_, level_ => 0);
-      Trace ('Pivot table :P1: ' || j_piv_.stringify);
+      j_piv_ := Json_Aggregates_From_Filters (pivot_id_ => pt_);
+
+      Dbms_Output.Put_Line ('== returning JSON object ==>');
+      Dbms_Output.Put_Line (j_piv_.stringify);
+Raise_App_Error ('chickens');
 
       cache_ := wb_.pivot_caches(wb_.pivot_tables(pt_).cache_id);
 
@@ -4962,7 +5227,7 @@ BEGIN
       attr ('multipleFieldFilters', '0', attrs_);
       nd_ptd_ := Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'pivotTableDefinition', attrs_);
 
-      wb_.pivot_tables(pt_).pivot_height := j_piv_.get_number('accum-sub-records') + 2; -- +header, +grand-totals rows
+      wb_.pivot_tables(pt_).pivot_height := j_piv_.get_number('accum-records') + 2; -- +header, +grand-totals rows
       wb_.pivot_tables(pt_).pivot_width  := wb_.pivot_tables(pt_).pivot_axes.col_agg_fns.count + 1; -- assume for now that we only do v-rollups
       pt_region_ := tp_cell_range (
          sheet_id => wb_.pivot_tables(pt_).on_sheet,
@@ -5021,7 +5286,7 @@ BEGIN
          Xml_Node (doc_, nd_pfs_, 'field', attrs_);
       END LOOP;
 
-      natr ('count', to_char(j_piv_.get_number('accum-sub-records') + 1), attrs_);
+      natr ('count', to_char(j_piv_.get_number('accum-records') + 1), attrs_);
       nd_ri_ := Xml_Node (doc_, nd_ptd_, 'rowItems', attrs_);
 
       Unravel_Json_Pivot_Table_Xml (doc_, nd_ri_, j_piv_, cache_);
@@ -5032,17 +5297,17 @@ BEGIN
       natr ('count', to_char(wb_.pivot_tables(pt_).pivot_axes.col_agg_fns.count), attrs_);
       nd_dfs_ := Xml_Node (doc_, nd_ptd_, 'dataFields', attrs_);
 
-      agg_col_ := wb_.pivot_tables(pt_).pivot_axes.col_agg_fns.first;
-      WHILE agg_col_ IS NOT null LOOP
-         prefix_ := CASE wb_.pivot_tables(pt_).pivot_axes.col_agg_fns(agg_col_)
-            WHEN 'sum' THEN 'Sum of '
+      FOR ix_ IN 1 .. wb_.pivot_tables(pt_).pivot_axes.col_agg_fns.count LOOP
+         agg_col_ := wb_.pivot_tables(pt_).pivot_axes.col_agg_fns(ix_).colid;
+         prefix_ := CASE wb_.pivot_tables(pt_).pivot_axes.col_agg_fns(agg_col_).agg_fn
+            WHEN 'count' THEN 'Count of '
+            WHEN 'sum'   THEN 'Sum of '
          END;
          natr ('name', prefix_ || Range_Col_Head_Name (cache_.ds_range, agg_col_), attrs_);
          attr ('fld', agg_col_ - 1, attrs_); -- zero based, I think
          attr ('baseField', '0', attrs_); -- used with showDataAs, which we aren't using for now
          attr ('baseItem', '0', attrs_);
          Xml_Node (doc_, nd_dfs_, 'dataField', attrs_);
-         agg_col_ := wb_.pivot_tables(pt_).pivot_axes.col_agg_fns.next(agg_col_);
       END LOOP;
 
       natr ('name', 'PivotStyleLight16', attrs_);

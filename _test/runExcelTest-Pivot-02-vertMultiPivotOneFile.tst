@@ -1,8 +1,8 @@
 PL/SQL Developer Test script 3.0
-101
+93
 DECLARE
-   test_name_   CONSTANT VARCHAR2(30) := 'PivotTableColSolocache';
-   file_start_  CONSTANT VARCHAR2(20) := 'TestOut_';
+   test_name_   CONSTANT VARCHAR2(30) := 'PivotTableVerticalMulticache';
+   file_start_  CONSTANT VARCHAR2(20) := 't02_';
    file_end_    CONSTANT VARCHAR2(20) := to_char(sysdate,'YYYYMMDD-HH24MI');
    file_name_   VARCHAR2(60);
    sheet_       PLS_INTEGER := 1;
@@ -51,23 +51,14 @@ BEGIN
       tl           => as_xlsx.tp_cell_loc (col_, init_row_, true, true),
       br           => as_xlsx.tp_cell_loc (col_end_, row_, true, true)
    );
-
-   -- Then create the pivot cache
-   piv_axes_.vrollups       := as_xlsx.tp_pivot_cols(1, 2, 3);
-   piv_axes_.col_agg_fns(4) := 'sum';
-   cache_id_ := As_Xlsx.Add_Pivot_Cache (data_range_, piv_axes_);
-
-   -- some formatting of the sheet
    As_Xlsx.Set_Column_Width (col_,   15, sheet_);
    As_Xlsx.Set_Column_Width (col_+1, 15, sheet_);
    As_Xlsx.Set_Column_Width (col_+2, 15, sheet_);
    As_Xlsx.Set_Column_Width (col_+3, 15, sheet_);
-
-   piv_axes_.vrollups := as_xlsx.tp_pivot_cols();  -- reset, to be rebuilt in the loop
-
-   -- loop to create the pivot tables
+   
    FOR i_ IN 1 .. 3 LOOP
 
+      cache_id_ := null;
       IF i_ = 1 THEN
          sheet_  := i_;
          pt_col_ := 8;
@@ -79,7 +70,8 @@ BEGIN
       END IF;
 
       arr_(i_) := i_;
-      piv_axes_.vrollups       := arr_;
+      dbms_output.put_line ('loop: ' || i_);
+      piv_axes_.vrollups       := arr_; --as_xlsx.tp_pivot_cols(1, 3);
       piv_axes_.col_agg_fns(4) := 'sum';
 
       loc_ := as_xlsx.tp_cell_loc (c => pt_col_, r => pt_row_);
@@ -104,10 +96,10 @@ END;
 0
 14
 value_
-pivot_axes_.vrollups(ix_)
-ix_
-rtn_
-agg_
+
+
+
+
 
 
 
