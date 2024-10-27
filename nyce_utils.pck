@@ -1,20 +1,4 @@
-CREATE OR REPLACE PACKAGE CBH_UTILS_API IS
-
-   module_  CONSTANT VARCHAR2(25) := 'FNDBAS';
-   lu_name_ CONSTANT VARCHAR2(25) := 'CbhUtils';
-   lu_type_ CONSTANT VARCHAR2(25) := 'Custom';
-
-   TYPE pipeline_rec IS RECORD (
-      report_id       VARCHAR2(200),
-      report_category VARCHAR2(200),
-      db_name         VARCHAR2(20),
-      user_id         VARCHAR2(30),
-      db_timestamp    DATE,
-      cli_timestamp   TIMESTAMP WITH TIME ZONE,
-      chr_cli_tstamp  VARCHAR2(50),
-      report_info     VARCHAR2(2000)
-   );
-   TYPE pipeline_table IS TABLE OF pipeline_rec;
+CREATE OR REPLACE PACKAGE nyce_utils IS
 
    ---
    -- Author  : Osian ap Garth
@@ -195,9 +179,9 @@ CREATE OR REPLACE PACKAGE CBH_UTILS_API IS
    FUNCTION Is_Prod RETURN BOOLEAN;
 
 
-END CBH_UTILS_API;
+END nyce_utils;
 /
-CREATE OR REPLACE PACKAGE BODY CBH_UTILS_API IS
+CREATE OR REPLACE PACKAGE BODY nyce_utils IS
 
 
 ------------------------------------------------------------------------------
@@ -503,5 +487,5 @@ IS BEGIN
    RETURN Env = 'LIVE';
 END Is_Prod;
 
-END CBH_UTILS_API;
+END nyce_utils;
 /

@@ -10,7 +10,7 @@ DECLARE
    feb28_      DATE := to_date ('1900-02-28','YYYY-MM-DD');
    --feb29_      DATE := to_date ('1900-02-29','YYYY-MM-DD');
    -- excel thinks there's a 29/02/1900, Oracle bugs out if you try to declare this date.
-   -- Note the output from Excel for the dates above!!
+   -- Go see how the above data is displayed in the output Excel file for those dates above!!
    mar1_       DATE := to_date ('1900-03-01','YYYY-MM-DD');
    mar2_       DATE := to_date ('1900-03-02','YYYY-MM-DD');
    test_date_  DATE := to_date ('2024-01-01 14:23:56', 'YYYY-MM-DD HH24:MI:SS');

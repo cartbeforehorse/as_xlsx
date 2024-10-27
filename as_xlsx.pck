@@ -27,8 +27,9 @@ CREATE OR REPLACE PACKAGE as_xlsx IS
 --
 TYPE tp_pivot_cols  IS TABLE OF PLS_INTEGER INDEX BY PLS_INTEGER;
 TYPE tp_agg_fn IS RECORD (
-   colid  PLS_INTEGER,
-   agg_fn VARCHAR2(20) -- [sum,avg,count...]
+   colid    PLS_INTEGER,
+   agg_fn   VARCHAR2(20), -- [sum,avg,count...]
+   col_name VARCHAR2(2000)
 );
 TYPE tp_col_agg_fns IS TABLE OF tp_agg_fn INDEX BY PLS_INTEGER;
 TYPE tp_pivot_axes IS RECORD (
@@ -913,14 +914,6 @@ wb_                   tp_book;
 g_useXf_              BOOLEAN := true;
 g_addtxt2utf8blob_tmp VARCHAR2(32767);
 
-TYPE xml_attr IS RECORD (
-   key   VARCHAR2(200),
-   val   VARCHAR2(2000)
-);
-TYPE xml_attrs_arr IS TABLE OF xml_attr INDEX BY PLS_INTEGER;
---TYPE xml_attrs_arr IS TABLE OF VARCHAR2(2000) INDEX BY VARCHAR2(200);
-
-
 
 ---------------------------------------
 ---------------------------------------
@@ -947,7 +940,7 @@ PROCEDURE Raise_App_Error (
    repl_nl_  IN BOOLEAN  := true )
 IS
 BEGIN
-   Cbh_Utils_API.Raise_App_Error (
+   Nyce_Utils.Raise_App_Error (
       err_text_, p1_, p2_, p3_, p4_, p5_, p6_, p7_, p8_, p9_, p0_, repl_nl_
    );
 END Raise_App_Error;
@@ -1002,7 +995,7 @@ PROCEDURE Trace (
 IS
    m_  CLOB := lpad (' ', indent_ * 3) || msg_;
 BEGIN
-   Cbh_Utils_API.Trace (m_, p1_, p2_, p3_, p4_, p5_, p6_, p7_, p8_, p9_, p0_, repl_nl_, quiet_);
+   Nyce_Utils.Trace (m_, p1_, p2_, p3_, p4_, p5_, p6_, p7_, p8_, p9_, p0_, repl_nl_, quiet_);
 END Trace;
 PROCEDURE Debug (
    msg_     IN CLOB,
@@ -1036,7 +1029,7 @@ FUNCTION Rep (
    p0_      IN VARCHAR2 := null,
    repl_nl_ IN BOOLEAN  := true ) RETURN VARCHAR2
 IS BEGIN
-   RETURN Cbh_Utils_API.Rep (msg_, p1_, p2_, p3_, p4_, p5_, p6_, p7_, p8_, p9_, p0_, repl_nl_);
+   RETURN Nyce_Utils.Rep (msg_, p1_, p2_, p3_, p4_, p5_, p6_, p7_, p8_, p9_, p0_, repl_nl_);
 END Rep;
 
 
@@ -1055,176 +1048,6 @@ BEGIN
       substr (guid_, 13, 4) || '-' || substr (guid_, 17, 4) || '-' ||
       substr (guid_, 21, 12) || '}';
 END Get_Guid;
-
-
----------------------------------------
----------------------------------------
---
--- XML generators and helpers
---
---
-FUNCTION Xml_Date_Time (
-   dt_ IN DATE ) RETURN VARCHAR2
-IS BEGIN
-   RETURN replace (to_char(dt_, 'YYYY-MM-DD_HH24:MI:SS'),'_','T');
-END Xml_Date_Time;
-
-FUNCTION Xml_Number (
-   num_ IN NUMBER,
-   fm_  IN VARCHAR2 := null ) RETURN VARCHAR2
-IS
-   mask_ VARCHAR2(99) := nvl (fm_, 'fm99999999999999999999.99999');
-BEGIN
-   RETURN rtrim (to_char (num_, mask_), '.');
-END Xml_Number;
-
-PROCEDURE Attr (
-   key_   IN VARCHAR2,
-   val_   IN VARCHAR2,
-   attrs_ IN OUT NOCOPY xml_attrs_arr )
-IS
-   next_ix_ PLS_INTEGER := attrs_.count + 1;
-BEGIN
-   attrs_(next_ix_) := xml_attr ( key => key_, val => val_);
-END Attr;
-
-PROCEDURE nAtr (
-   key_   IN VARCHAR2,
-   val_   IN VARCHAR2,
-   attrs_ IN OUT NOCOPY xml_attrs_arr )
-IS BEGIN
-   attrs_.delete;
-   Attr (key_, val_, attrs_);
-END nAtr;
-
-FUNCTION Make_Tag (
-   doc_      IN OUT NOCOPY dbms_XmlDom.DomDocument,
-   tag_name_ IN VARCHAR2,
-   ns_       IN VARCHAR2      := '',
-   attrs_    IN xml_attrs_arr := xml_attrs_arr() ) RETURN dbms_XmlDom.DomElement
-IS
-   el_ dbms_XmlDom.DomElement;
-   ix_ VARCHAR2(200) := attrs_.first;
-BEGIN
-   el_ := CASE
-      WHEN ns_ IS NOT null THEN Dbms_XmlDom.createElement (doc_, tag_name_, ns_)
-      ELSE Dbms_XmlDom.createElement (doc_, tag_name_)
-   END;
-   FOR ix_ IN 1 .. attrs_.count LOOP
-      Dbms_XmlDom.setAttribute (el_, attrs_(ix_).key, attrs_(ix_).val);
-   END LOOP;
-   RETURN el_;
-END Make_Tag;
-
-FUNCTION Make_Node (
-   doc_      IN OUT NOCOPY dbms_XmlDom.DomDocument,
-   tag_name_ IN VARCHAR2,
-   ns_       IN VARCHAR2      := '',
-   attrs_    IN xml_attrs_arr := xml_attrs_arr() ) RETURN dbms_XmlDom.DomNode
-IS
-   nd_ dbms_XmlDom.DomNode := Dbms_XmlDom.makeNode (Make_Tag (doc_, tag_name_, ns_, attrs_));
-BEGIN
-   IF ns_ IS NOT null THEN
-      Dbms_XmlDom.setPrefix (nd_, ns_);
-   END IF;
-   RETURN nd_;
-END Make_Node;
-
-PROCEDURE Make_Node (
-   doc_      IN OUT NOCOPY dbms_XmlDom.DomDocument,
-   tag_name_ IN VARCHAR2,
-   ns_       IN VARCHAR2      := '',
-   attrs_    IN xml_attrs_arr := xml_attrs_arr() )
-IS
-   throw_nd_ dbms_XmlDom.DomNode;
-BEGIN
-   throw_nd_ := Make_Node (doc_, tag_name_, ns_, attrs_);
-END Make_Node;
-
-FUNCTION Xml_Node (
-   doc_       IN OUT NOCOPY dbms_XmlDom.DomDocument,
-   append_to_ IN dbms_XmlDom.DomNode,
-   tag_name_  IN VARCHAR2,
-   ns_        IN VARCHAR2,
-   attrs_     IN xml_attrs_arr := xml_attrs_arr() ) RETURN dbms_XmlDom.DomNode
-IS BEGIN
-   RETURN Dbms_XmlDom.appendChild (append_to_, Make_Node(doc_,tag_name_,ns_,attrs_));
-END Xml_Node;
-
-FUNCTION Xml_Node (
-   doc_       IN OUT NOCOPY dbms_XmlDom.DomDocument,
-   append_to_ IN dbms_XmlDom.DomNode,
-   tag_name_  IN VARCHAR2,
-   attrs_     IN xml_attrs_arr := xml_attrs_arr() ) RETURN dbms_XmlDom.DomNode
-IS BEGIN
-   RETURN Xml_Node (doc_, append_to_, tag_name_, '', attrs_);
-END Xml_Node;
-
-PROCEDURE Xml_Node (
-   doc_       IN OUT NOCOPY dbms_XmlDom.DomDocument,
-   append_to_ IN dbms_XmlDom.DomNode,
-   tag_name_  IN VARCHAR2,
-   ns_        IN VARCHAR2,
-   attrs_     IN xml_attrs_arr := xml_attrs_arr() )
-IS
-   throw_nd_ dbms_XmlDom.DomNode;
-BEGIN
-   throw_nd_ := Dbms_XmlDom.appendChild (append_to_, Make_Node(doc_,tag_name_,ns_,attrs_));
-END Xml_Node;
-
-PROCEDURE Xml_Node (
-   doc_       IN OUT NOCOPY dbms_XmlDom.DomDocument,
-   append_to_ IN dbms_XmlDom.DomNode,
-   tag_name_  IN VARCHAR2,
-   attrs_     IN xml_attrs_arr := xml_attrs_arr() )
-IS BEGIN
-   Xml_Node (doc_, append_to_, tag_name_, '', attrs_);
-END Xml_Node;
-
-PROCEDURE Xml_Text_Node (
-   doc_          IN OUT NOCOPY dbms_XmlDom.DomDocument,
-   append_to_    IN dbms_XmlDom.DomNode,
-   tag_name_     IN VARCHAR2,
-   text_content_ IN VARCHAR2,
-   ns_           IN VARCHAR2,
-   attrs_        IN xml_attrs_arr := xml_attrs_arr() )
-IS
-   throw_nd_ dbms_XmlDom.DomNode;
-BEGIN
-   throw_nd_ := Dbms_XmlDom.appendChild (
-      Dbms_XmlDom.appendChild (append_to_, Make_Node(doc_,tag_name_,ns_,attrs_)),
-      Dbms_XmlDom.makeNode (Dbms_XmlDom.createTextNode (doc_, text_content_))
-   );
-END Xml_Text_Node;
-
-PROCEDURE Xml_Text_Node (
-   doc_          IN OUT NOCOPY dbms_XmlDom.DomDocument,
-   append_to_    IN dbms_XmlDom.DomNode,
-   tag_name_     IN VARCHAR2,
-   text_content_ IN VARCHAR2,
-   attrs_        IN xml_attrs_arr := xml_attrs_arr() )
-IS BEGIN
-   Xml_Text_Node (doc_, append_to_, tag_name_, text_content_, '', attrs_);
-END Xml_Text_Node;
-
-PROCEDURE Xml_Text_Node (
-   doc_         IN OUT NOCOPY dbms_XmlDom.DomDocument,
-   append_to_   IN dbms_XmlDom.DomNode,
-   tag_name_    IN VARCHAR2,
-   num_content_ IN NUMBER,
-   decimals_    IN NUMBER        := 0,
-   ns_          IN VARCHAR2      := '',
-   attrs_       IN xml_attrs_arr := xml_attrs_arr() )
-IS BEGIN
-   Xml_Text_Node (
-      doc_          => doc_,
-      append_to_    => append_to_,
-      tag_name_     => tag_name_,
-      text_content_ => Xml_Number (num_content_, decimals_),
-      ns_           => ns_,
-      attrs_        => attrs_
-   );
-END Xml_Text_Node;
 
 
 ---------------------------------------
@@ -3438,12 +3261,12 @@ BEGIN
    RETURN rtn_;
 END Get_Agg_Fn_From_Axes;
 
-FUNCTION Get_Pivot_Source (
+FUNCTION Get_Pivot_Table_Data_Source (
    pivot_id_ IN PLS_INTEGER ) RETURN tp_cell_range
 IS
 BEGIN
    RETURN wb_.pivot_caches(wb_.pivot_tables(pivot_id_).cache_id).ds_range;
-END Get_Pivot_Source;
+END Get_Pivot_Table_Data_Source;
 
 FUNCTION Add_Pivot_Cache (
    src_data_range_ IN OUT NOCOPY tp_cell_range,
@@ -3565,7 +3388,7 @@ IS
    s_         PLS_INTEGER;
    doc_       dbms_XmlDom.DomDocument := Dbms_XmlDom.newDomDocument;
    nd_types_  dbms_XmlDom.DomNode;
-   attrs_     xml_attrs_arr;
+   attrs_     nyce_xml.xml_attrs_arr;
    img_exts_  tp_strings;
    ext_       VARCHAR2(5);
    pt_        PLS_INTEGER;
@@ -3573,87 +3396,87 @@ BEGIN
 
    -- [Content_Types].xml
    Dbms_XmlDom.setVersion (doc_, '1.0" encoding="UTF-8" standalone="yes');
-   natr ('xmlns', 'http://schemas.openxmlformats.org/package/2006/content-types', attrs_);
-   nd_types_ := Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'Types', attrs_);
+   nyce_xml.natr ('xmlns', 'http://schemas.openxmlformats.org/package/2006/content-types', attrs_);
+   nd_types_ := Nyce_Xml.Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'Types', attrs_);
 
    IF wb_.images.count > 0 THEN
       FOR img_ IN wb_.images.first .. wb_.images.last LOOP
          ext_ := wb_.images(img_).extension;
          IF ext_ IS NOT null AND not img_exts_.exists(ext_) THEN
-            natr ('ContentType', 'image/' || ext_, attrs_);
-            attr ('Extension', ext_, attrs_);
-            Xml_Node (doc_, nd_types_, 'Default', attrs_);
+            nyce_xml.natr ('ContentType', 'image/' || ext_, attrs_);
+            nyce_xml.attr ('Extension', ext_, attrs_);
+            Nyce_Xml.Xml_Node (doc_, nd_types_, 'Default', attrs_);
             img_exts_(ext_) := 1;
          END IF;
       END LOOP;
    END IF;
 
-   natr ('Extension',   'rels', attrs_);
-   attr ('ContentType', 'application/vnd.openxmlformats-package.relationships+xml', attrs_);
-   Xml_Node (doc_, nd_types_, 'Default', attrs_);
+   nyce_xml.natr ('Extension',   'rels', attrs_);
+   nyce_xml.attr ('ContentType', 'application/vnd.openxmlformats-package.relationships+xml', attrs_);
+   Nyce_Xml.Xml_Node (doc_, nd_types_, 'Default', attrs_);
 
-   natr ('Extension',   'xml', attrs_);
-   attr ('ContentType', 'application/xml', attrs_);
-   Xml_Node (doc_, nd_types_, 'Default', attrs_);
+   nyce_xml.natr ('Extension',   'xml', attrs_);
+   nyce_xml.attr ('ContentType', 'application/xml', attrs_);
+   Nyce_Xml.Xml_Node (doc_, nd_types_, 'Default', attrs_);
 
-   natr ('Extension',   'vml', attrs_);
-   attr ('ContentType', 'application/vnd.openxmlformats-officedocument.vmlDrawing', attrs_);
-   Xml_Node (doc_, nd_types_, 'Default', attrs_);
+   nyce_xml.natr ('Extension',   'vml', attrs_);
+   nyce_xml.attr ('ContentType', 'application/vnd.openxmlformats-officedocument.vmlDrawing', attrs_);
+   Nyce_Xml.Xml_Node (doc_, nd_types_, 'Default', attrs_);
 
-   natr ('PartName', '/xl/workbook.xml', attrs_);
-   attr ('ContentType', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml', attrs_);
-   Xml_Node (doc_, nd_types_, 'Override', attrs_);
+   nyce_xml.natr ('PartName', '/xl/workbook.xml', attrs_);
+   nyce_xml.attr ('ContentType', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml', attrs_);
+   Nyce_Xml.Xml_Node (doc_, nd_types_, 'Override', attrs_);
 
    FOR pc_ IN 0 .. wb_.pivot_caches.count-1 LOOP
-      natr ('PartName',    rep('/xl/pivotCache/pivotCacheDefinition:P1.xml', pc_), attrs_);
-      attr ('ContentType', 'application/vnd.openxmlformats-officedocument.spreadsheetml.pivotCacheDefinition+xml', attrs_);
-      Xml_Node (doc_, nd_types_, 'Override', attrs_);
-      natr ('PartName', rep('/xl/pivotCache/pivotCacheRecords:P1.xml', pc_), attrs_);
-      attr ('ContentType', 'application/vnd.openxmlformats-officedocument.spreadsheetml.pivotCacheRecords+xml', attrs_);
-      Xml_Node (doc_, nd_types_, 'Override', attrs_);
+      nyce_xml.natr ('PartName',    rep('/xl/pivotCache/pivotCacheDefinition:P1.xml', pc_), attrs_);
+      nyce_xml.attr ('ContentType', 'application/vnd.openxmlformats-officedocument.spreadsheetml.pivotCacheDefinition+xml', attrs_);
+      Nyce_Xml.Xml_Node (doc_, nd_types_, 'Override', attrs_);
+      nyce_xml.natr ('PartName', rep('/xl/pivotCache/pivotCacheRecords:P1.xml', pc_), attrs_);
+      nyce_xml.attr ('ContentType', 'application/vnd.openxmlformats-officedocument.spreadsheetml.pivotCacheRecords+xml', attrs_);
+      Nyce_Xml.Xml_Node (doc_, nd_types_, 'Override', attrs_);
    END LOOP;
    FOR pt_ IN 1 .. wb_.pivot_tables.count LOOP
-      natr ('PartName', rep('/xl/pivotTables/pivotTable:P1.xml', pt_), attrs_);
-      attr ('ContentType', 'application/vnd.openxmlformats-officedocument.spreadsheetml.pivotTable+xml', attrs_);
-      Xml_Node (doc_, nd_types_, 'Override', attrs_);
+      nyce_xml.natr ('PartName', rep('/xl/pivotTables/pivotTable:P1.xml', pt_), attrs_);
+      nyce_xml.attr ('ContentType', 'application/vnd.openxmlformats-officedocument.spreadsheetml.pivotTable+xml', attrs_);
+      Nyce_Xml.Xml_Node (doc_, nd_types_, 'Override', attrs_);
    END LOOP;
 
    s_ := wb_.sheets.first;
    WHILE s_ IS NOT null LOOP
-      natr ('PartName', rep('/xl/worksheets/sheet:P1.xml', to_char(s_)), attrs_);
-      attr ('ContentType', 'application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml', attrs_);
-      Xml_Node (doc_, nd_types_, 'Override', attrs_);
+      nyce_xml.natr ('PartName', rep('/xl/worksheets/sheet:P1.xml', to_char(s_)), attrs_);
+      nyce_xml.attr ('ContentType', 'application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml', attrs_);
+      Nyce_Xml.Xml_Node (doc_, nd_types_, 'Override', attrs_);
       s_ := wb_.sheets.next(s_);
    END LOOP;
 
-   natr ('PartName', '/xl/theme/theme1.xml', attrs_);
-   attr ('ContentType', 'application/vnd.openxmlformats-officedocument.theme+xml', attrs_);
-   Xml_Node (doc_, nd_types_, 'Override', attrs_);
-   natr ('PartName', '/xl/styles.xml', attrs_);
-   attr ('ContentType', 'application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml', attrs_);
-   Xml_Node (doc_, nd_types_, 'Override', attrs_);
-   natr ('PartName', '/xl/sharedStrings.xml', attrs_);
-   attr ('ContentType', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml', attrs_);
-   Xml_Node (doc_, nd_types_, 'Override', attrs_);
+   nyce_xml.natr ('PartName', '/xl/theme/theme1.xml', attrs_);
+   nyce_xml.attr ('ContentType', 'application/vnd.openxmlformats-officedocument.theme+xml', attrs_);
+   Nyce_Xml.Xml_Node (doc_, nd_types_, 'Override', attrs_);
+   nyce_xml.natr ('PartName', '/xl/styles.xml', attrs_);
+   nyce_xml.attr ('ContentType', 'application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml', attrs_);
+   Nyce_Xml.Xml_Node (doc_, nd_types_, 'Override', attrs_);
+   nyce_xml.natr ('PartName', '/xl/sharedStrings.xml', attrs_);
+   nyce_xml.attr ('ContentType', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml', attrs_);
+   Nyce_Xml.Xml_Node (doc_, nd_types_, 'Override', attrs_);
 
-   natr ('PartName', '/docProps/core.xml', attrs_);
-   attr ('ContentType', 'application/vnd.openxmlformats-package.core-properties+xml', attrs_);
-   Xml_Node (doc_, nd_types_, 'Override', attrs_);
-   natr ('PartName', '/docProps/app.xml', attrs_);
-   attr ('ContentType', 'application/vnd.openxmlformats-officedocument.extended-properties+xml', attrs_);
-   Xml_Node (doc_, nd_types_, 'Override', attrs_);
+   nyce_xml.natr ('PartName', '/docProps/core.xml', attrs_);
+   nyce_xml.attr ('ContentType', 'application/vnd.openxmlformats-package.core-properties+xml', attrs_);
+   Nyce_Xml.Xml_Node (doc_, nd_types_, 'Override', attrs_);
+   nyce_xml.natr ('PartName', '/docProps/app.xml', attrs_);
+   nyce_xml.attr ('ContentType', 'application/vnd.openxmlformats-officedocument.extended-properties+xml', attrs_);
+   Nyce_Xml.Xml_Node (doc_, nd_types_, 'Override', attrs_);
 
    s_ := wb_.sheets.first;
    WHILE s_ IS NOT null LOOP
       IF wb_.sheets(s_).comments.count > 0 THEN
-         natr ('PartName', rep('/xl/comments:P1.xml', s_), attrs_);
-         attr ('ContentType', 'application/vnd.openxmlformats-officedocument.spreadsheetml.comments+xml', attrs_);
-         Xml_Node (doc_, nd_types_, 'Override', attrs_);
+         nyce_xml.natr ('PartName', rep('/xl/comments:P1.xml', s_), attrs_);
+         nyce_xml.attr ('ContentType', 'application/vnd.openxmlformats-officedocument.spreadsheetml.comments+xml', attrs_);
+         Nyce_Xml.Xml_Node (doc_, nd_types_, 'Override', attrs_);
       END IF;
       IF wb_.sheets(s_).drawings.count > 0 THEN
-         natr ('PartName', rep('/xl/drawings/drawing:P1.xml', s_), attrs_);
-         attr ('ContentType', 'application/vnd.openxmlformats-officedocument.drawing+xml', attrs_);
-         Xml_Node (doc_, nd_types_, 'Override', attrs_);
+         nyce_xml.natr ('PartName', rep('/xl/drawings/drawing:P1.xml', s_), attrs_);
+         nyce_xml.attr ('ContentType', 'application/vnd.openxmlformats-officedocument.drawing+xml', attrs_);
+         Nyce_Xml.Xml_Node (doc_, nd_types_, 'Override', attrs_);
       END IF;
       s_ := wb_.sheets.next(s_);
    END LOOP;
@@ -3668,26 +3491,26 @@ PROCEDURE Finish_Rels (
 IS
    doc_      dbms_XmlDom.DomDocument := Dbms_XmlDom.newDomDocument;
    nd_rels_  dbms_XmlDom.DomNode;
-   attrs_    xml_attrs_arr;
+   attrs_    nyce_xml.xml_attrs_arr;
 BEGIN
 
    -- _rels/.rels
    Dbms_XmlDom.setVersion (doc_, '1.0" encoding="UTF-8" standalone="yes');
-   natr ('xmlns', 'http://schemas.openxmlformats.org/package/2006/relationships', attrs_);
-   nd_rels_ := Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'Relationships', attrs_);
+   nyce_xml.natr ('xmlns', 'http://schemas.openxmlformats.org/package/2006/relationships', attrs_);
+   nd_rels_ := Nyce_Xml.Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'Relationships', attrs_);
 
-   natr ('Id', 'rId1', attrs_);
-   attr ('Type', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument', attrs_);
-   attr ('Target', 'xl/workbook.xml', attrs_);
-   Xml_Node (doc_, nd_rels_, 'Relationship', attrs_);
-   natr ('Id', 'rId2', attrs_);
-   attr ('Type', 'http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties', attrs_);
-   attr ('Target', 'docProps/core.xml', attrs_);
-   Xml_Node (doc_, nd_rels_, 'Relationship', attrs_);
-   natr ('Id', 'rId3', attrs_);
-   attr ('Type', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties', attrs_);
-   attr ('Target', 'docProps/app.xml', attrs_);
-   Xml_Node (doc_, nd_rels_, 'Relationship', attrs_);
+   nyce_xml.natr ('Id', 'rId1', attrs_);
+   nyce_xml.attr ('Type', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument', attrs_);
+   nyce_xml.attr ('Target', 'xl/workbook.xml', attrs_);
+   Nyce_Xml.Xml_Node (doc_, nd_rels_, 'Relationship', attrs_);
+   nyce_xml.natr ('Id', 'rId2', attrs_);
+   nyce_xml.attr ('Type', 'http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties', attrs_);
+   nyce_xml.attr ('Target', 'docProps/core.xml', attrs_);
+   Nyce_Xml.Xml_Node (doc_, nd_rels_, 'Relationship', attrs_);
+   nyce_xml.natr ('Id', 'rId3', attrs_);
+   nyce_xml.attr ('Type', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties', attrs_);
+   nyce_xml.attr ('Target', 'docProps/app.xml', attrs_);
+   Nyce_Xml.Xml_Node (doc_, nd_rels_, 'Relationship', attrs_);
 
    Add1Xml (excel_, '_rels/.rels', Dbms_XmlDom.getXmlType(doc_).getClobVal);
    Dbms_XmlDom.freeDocument (doc_);
@@ -3705,25 +3528,25 @@ IS
    nd_vec_   dbms_XmlDom.DomNode;
    nd_var_   dbms_XmlDom.DomNode;
    nd_top_   dbms_XmlDom.DomNode;
-   attrs_    xml_attrs_arr;
+   attrs_    nyce_xml.xml_attrs_arr;
 BEGIN
 
    -- docProps/core.xml
    Dbms_XmlDom.setVersion (doc_, '1.0" encoding="UTF-8" standalone="yes');
-   natr ('xmlns:cp', 'http://schemas.openxmlformats.org/package/2006/metadata/core-properties', attrs_);
-   attr ('xmlns:dc', 'http://purl.org/dc/elements/1.1/', attrs_);
-   attr ('xmlns:dcterms', 'http://purl.org/dc/terms/', attrs_);
-   attr ('xmlns:dcmitype', 'http://purl.org/dc/dcmitype/', attrs_);
-   attr ('xmlns:xsi', 'http://www.w3.org/2001/XMLSchema-instance', attrs_);
-   nd_cprop_ := Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'coreProperties', 'cp', attrs_);
+   nyce_xml.natr ('xmlns:cp', 'http://schemas.openxmlformats.org/package/2006/metadata/core-properties', attrs_);
+   nyce_xml.attr ('xmlns:dc', 'http://purl.org/dc/elements/1.1/', attrs_);
+   nyce_xml.attr ('xmlns:dcterms', 'http://purl.org/dc/terms/', attrs_);
+   nyce_xml.attr ('xmlns:dcmitype', 'http://purl.org/dc/dcmitype/', attrs_);
+   nyce_xml.attr ('xmlns:xsi', 'http://www.w3.org/2001/XMLSchema-instance', attrs_);
+   nd_cprop_ := Nyce_Xml.Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'coreProperties', 'cp', attrs_);
 
-   Xml_Text_Node (doc_, nd_cprop_, 'creator',        sys_context('userenv','os_user'), 'dc');
-   Xml_Text_Node (doc_, nd_cprop_, 'description',    rep('Build by version: :P1', VERSION_), 'dc');
-   Xml_Text_Node (doc_, nd_cprop_, 'lastModifiedBy', sys_context('userenv','os_user'), 'cp');
+   Nyce_Xml.Xml_Text_Node (doc_, nd_cprop_, 'creator',        sys_context('userenv','os_user'), 'dc');
+   Nyce_Xml.Xml_Text_Node (doc_, nd_cprop_, 'description',    rep('Build by version: :P1', VERSION_), 'dc');
+   Nyce_Xml.Xml_Text_Node (doc_, nd_cprop_, 'lastModifiedBy', sys_context('userenv','os_user'), 'cp');
 
-   natr ('xsi:type', 'dcterms:W3CDTF', attrs_);
-   Xml_Text_Node (doc_, nd_cprop_, 'created',  to_char(current_timestamp,'yyyy-mm-dd"T"hh24:mi:ssTZH:TZM'), 'dcterms', attrs_);
-   Xml_Text_Node (doc_, nd_cprop_, 'modified', to_char(current_timestamp,'yyyy-mm-dd"T"hh24:mi:ssTZH:TZM'), 'dcterms', attrs_);
+   nyce_xml.natr ('xsi:type', 'dcterms:W3CDTF', attrs_);
+   Nyce_Xml.Xml_Text_Node (doc_, nd_cprop_, 'created',  to_char(current_timestamp,'yyyy-mm-dd"T"hh24:mi:ssTZH:TZM'), 'dcterms', attrs_);
+   Nyce_Xml.Xml_Text_Node (doc_, nd_cprop_, 'modified', to_char(current_timestamp,'yyyy-mm-dd"T"hh24:mi:ssTZH:TZM'), 'dcterms', attrs_);
 
    Add1Xml (excel_, 'docProps/core.xml', Dbms_XmlDom.getXmlType(doc_).getClobVal);
    Dbms_XmlDom.freeDocument (doc_);
@@ -3733,36 +3556,36 @@ BEGIN
    doc_ := Dbms_XmlDom.newDomDocument;
    Dbms_XmlDom.setVersion (doc_, '1.0" encoding="UTF-8" standalone="yes');
 
-   natr ('xmlns', 'http://schemas.openxmlformats.org/officeDocument/2006/extended-properties', attrs_);
-   attr ('xmlns:vt', 'http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes', attrs_);
-   nd_prop_ := Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'Properties', attrs_);
+   nyce_xml.natr ('xmlns', 'http://schemas.openxmlformats.org/officeDocument/2006/extended-properties', attrs_);
+   nyce_xml.attr ('xmlns:vt', 'http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes', attrs_);
+   nd_prop_ := Nyce_Xml.Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'Properties', attrs_);
 
-   Xml_Text_Node (doc_, nd_prop_, 'Application', 'Microsoft Excel');
-   Xml_Text_Node (doc_, nd_prop_, 'DocSecurity', '0');
-   Xml_Text_Node (doc_, nd_prop_, 'ScaleCrop', 'false');
-   nd_hd_  := Xml_Node (doc_, nd_prop_, 'HeadingPairs');
+   Nyce_Xml.Xml_Text_Node (doc_, nd_prop_, 'Application', 'Microsoft Excel');
+   Nyce_Xml.Xml_Text_Node (doc_, nd_prop_, 'DocSecurity', '0');
+   Nyce_Xml.Xml_Text_Node (doc_, nd_prop_, 'ScaleCrop', 'false');
+   nd_hd_  := Nyce_Xml.Xml_Node (doc_, nd_prop_, 'HeadingPairs');
 
-   natr ('size',     '2', attrs_);
-   attr ('baseType', 'variant', attrs_);
-   nd_vec_ := Xml_Node (doc_, nd_hd_, 'vector', 'vt', attrs_);
-   nd_var_ := Xml_Node (doc_, nd_vec_, 'variant', 'vt');
-   Xml_Text_Node (doc_, nd_var_, 'lpstr', 'Worksheets', 'vt');
-   nd_var_ := Xml_Node (doc_, nd_vec_, 'variant', 'vt');
-   Xml_Text_Node (doc_, nd_var_, 'i4', to_char(wb_.sheets.count), 'vt');
+   nyce_xml.natr ('size',     '2', attrs_);
+   nyce_xml.attr ('baseType', 'variant', attrs_);
+   nd_vec_ := Nyce_Xml.Xml_Node (doc_, nd_hd_, 'vector', 'vt', attrs_);
+   nd_var_ := Nyce_Xml.Xml_Node (doc_, nd_vec_, 'variant', 'vt');
+   Nyce_Xml.Xml_Text_Node (doc_, nd_var_, 'lpstr', 'Worksheets', 'vt');
+   nd_var_ := Nyce_Xml.Xml_Node (doc_, nd_vec_, 'variant', 'vt');
+   Nyce_Xml.Xml_Text_Node (doc_, nd_var_, 'i4', to_char(wb_.sheets.count), 'vt');
 
-   nd_top_ := Xml_Node (doc_, nd_prop_, 'TitlesOfParts');
-   natr ('size', wb_.sheets.count, attrs_);
-   attr ('baseType', 'lpstr', attrs_);
-   nd_vec_ := Xml_Node (doc_, nd_top_, 'vector', 'vt', attrs_);
+   nd_top_ := Nyce_Xml.Xml_Node (doc_, nd_prop_, 'TitlesOfParts');
+   nyce_xml.natr ('size', wb_.sheets.count, attrs_);
+   nyce_xml.attr ('baseType', 'lpstr', attrs_);
+   nd_vec_ := Nyce_Xml.Xml_Node (doc_, nd_top_, 'vector', 'vt', attrs_);
    s_ := wb_.sheets.first;
    WHILE s_ IS NOT null LOOP
-      Xml_Text_Node (doc_, nd_vec_, 'lpstr', wb_.sheets(s_).name, 'vt');
+      Nyce_Xml.Xml_Text_Node (doc_, nd_vec_, 'lpstr', wb_.sheets(s_).name, 'vt');
       s_ := wb_.sheets.next(s_);
    END LOOP;
-   Xml_Text_Node (doc_, nd_prop_, 'LinksUpToDate', 'false');
-   Xml_Text_Node (doc_, nd_prop_, 'SharedDoc', 'false');
-   Xml_Text_Node (doc_, nd_prop_, 'HyperlinksChanged', 'false');
-   Xml_Text_Node (doc_, nd_prop_, 'AppVersion', '14.0300');
+   Nyce_Xml.Xml_Text_Node (doc_, nd_prop_, 'LinksUpToDate', 'false');
+   Nyce_Xml.Xml_Text_Node (doc_, nd_prop_, 'SharedDoc', 'false');
+   Nyce_Xml.Xml_Text_Node (doc_, nd_prop_, 'HyperlinksChanged', 'false');
+   Nyce_Xml.Xml_Text_Node (doc_, nd_prop_, 'AppVersion', '14.0300');
 
    Add1Xml (excel_, 'docProps/app.xml', Dbms_XmlDom.getXmlType(doc_).getClobVal);
    Dbms_XmlDom.freeDocument (doc_);
@@ -3774,20 +3597,20 @@ PROCEDURE Finish_Shared_Strings (
 IS
    doc_    dbms_XmlDom.DomDocument := Dbms_XmlDom.newDomDocument;
    nd_sst_ dbms_XmlDom.DomNode;
-   attrs_  xml_attrs_arr;
+   attrs_  nyce_xml.xml_attrs_arr;
 BEGIN
 
    -- xl/sharedStrings.xml
    Dbms_XmlDom.setVersion (doc_, '1.0" encoding="UTF-8" standalone="yes');
-   natr ('xmlns', 'http://schemas.openxmlformats.org/spreadsheetml/2006/main', attrs_);
-   attr ('count', to_char(wb_.str_cnt), attrs_);
-   attr ('uniqueCount', wb_.strings.count, attrs_);
-   nd_sst_ := Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'sst', attrs_);
+   nyce_xml.natr ('xmlns', 'http://schemas.openxmlformats.org/spreadsheetml/2006/main', attrs_);
+   nyce_xml.attr ('count', to_char(wb_.str_cnt), attrs_);
+   nyce_xml.attr ('uniqueCount', wb_.strings.count, attrs_);
+   nd_sst_ := Nyce_Xml.Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'sst', attrs_);
 
-   natr ('xml:space', 'preserve', attrs_);
+   nyce_xml.natr ('xml:space', 'preserve', attrs_);
    FOR str_ix_ IN 0 .. wb_.str_ind.count - 1 LOOP
-      Xml_Text_Node (
-         doc_ => doc_, append_to_ => Xml_Node(doc_,nd_sst_,'si'), tag_name_ => 't',
+      Nyce_Xml.Xml_Text_Node (
+         doc_ => doc_, append_to_ => Nyce_Xml.Xml_Node(doc_,nd_sst_,'si'), tag_name_ => 't',
          text_content_ => Dbms_XmlGen.Convert (substr(wb_.str_ind(str_ix_), 1, 32000)),
          attrs_ => attrs_
       );
@@ -3815,141 +3638,141 @@ IS
    nd_sxfs_     dbms_XmlDom.DomNode;
    nd_xfs_      dbms_XmlDom.DomNode;
    nd_xf_       dbms_XmlDom.DomNode;
-   attrs_       xml_attrs_arr;
+   attrs_       nyce_xml.xml_attrs_arr;
 BEGIN
 
    -- xl/styles.xml
    Dbms_XmlDom.setVersion (doc_, '1.0" encoding="UTF-8" standalone="yes');
-   attr ('xmlns', 'http://schemas.openxmlformats.org/spreadsheetml/2006/main', attrs_);
-   attr ('xmlns:mc', 'http://schemas.openxmlformats.org/markup-compatibility/2006', attrs_);
-   attr ('mc:Ignorable', 'x14ac', attrs_);
-   attr ('xmlns:x14ac', 'http://schemas.microsoft.com/office/spreadsheetml/2009/9/ac', attrs_);
-   nd_stl_ := Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'styleSheet', attrs_);
+   nyce_xml.attr ('xmlns', 'http://schemas.openxmlformats.org/spreadsheetml/2006/main', attrs_);
+   nyce_xml.attr ('xmlns:mc', 'http://schemas.openxmlformats.org/markup-compatibility/2006', attrs_);
+   nyce_xml.attr ('mc:Ignorable', 'x14ac', attrs_);
+   nyce_xml.attr ('xmlns:x14ac', 'http://schemas.microsoft.com/office/spreadsheetml/2009/9/ac', attrs_);
+   nd_stl_ := Nyce_Xml.Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'styleSheet', attrs_);
 
    IF wb_.numFmts.count > 0 THEN
-      natr ('count', to_char(wb_.numFmts.count), attrs_);
-      nd_numf_ := Xml_Node (doc_, nd_stl_, 'numFmts', attrs_);
+      nyce_xml.natr ('count', to_char(wb_.numFmts.count), attrs_);
+      nd_numf_ := Nyce_Xml.Xml_Node (doc_, nd_stl_, 'numFmts', attrs_);
       format_mask_ := wb_.numFmts.first;
       WHILE format_mask_ IS NOT null LOOP
-         natr ('numFmtId', wb_.numFmts(format_mask_), attrs_);
-         attr ('formatCode', format_mask_, attrs_);
-         Xml_Node (doc_, nd_numf_, 'numFmt', attrs_);
+         nyce_xml.natr ('numFmtId', wb_.numFmts(format_mask_), attrs_);
+         nyce_xml.attr ('formatCode', format_mask_, attrs_);
+         Nyce_Xml.Xml_Node (doc_, nd_numf_, 'numFmt', attrs_);
          format_mask_ := wb_.numFmts.next(format_mask_);
       END LOOP;
    END IF;
 
-   natr ('count', wb_.fonts.count, attrs_);
-   attr ('x14ac:knownFonts', '1', attrs_);
-   nd_fnts_ := Xml_Node (doc_, nd_stl_, 'fonts', attrs_);
+   nyce_xml.natr ('count', wb_.fonts.count, attrs_);
+   nyce_xml.attr ('x14ac:knownFonts', '1', attrs_);
+   nd_fnts_ := Nyce_Xml.Xml_Node (doc_, nd_stl_, 'fonts', attrs_);
    FOR f_ IN 0 .. wb_.fonts.count-1 LOOP
-      nd_fnt_ := Xml_Node (doc_, nd_fnts_, 'font');
-      IF wb_.fonts(f_).bold     THEN Xml_Node (doc_, nd_fnt_, 'b'); END IF;
-      IF wb_.fonts(f_).italic   THEN Xml_Node (doc_, nd_fnt_, 'i'); END IF;
-      IF wb_.fonts(f_).underline THEN Xml_Node (doc_, nd_fnt_, 'u'); END IF;
+      nd_fnt_ := Nyce_Xml.Xml_Node (doc_, nd_fnts_, 'font');
+      IF wb_.fonts(f_).bold     THEN Nyce_Xml.Xml_Node (doc_, nd_fnt_, 'b'); END IF;
+      IF wb_.fonts(f_).italic   THEN Nyce_Xml.Xml_Node (doc_, nd_fnt_, 'i'); END IF;
+      IF wb_.fonts(f_).underline THEN Nyce_Xml.Xml_Node (doc_, nd_fnt_, 'u'); END IF;
 
-      natr ('val', to_char(wb_.fonts(f_).fontsize, 'TM9', 'NLS_NUMERIC_CHARACTERS=.,'), attrs_);
-      Xml_Node (doc_, nd_fnt_, 'sz', attrs_);
-      attrs_.delete;
+      nyce_xml.natr ('val', to_char(wb_.fonts(f_).fontsize, 'TM9', 'NLS_NUMERIC_CHARACTERS=.,'), attrs_);
+      Nyce_Xml.Xml_Node (doc_, nd_fnt_, 'sz', attrs_);
+      nyce_xml.catr (attrs_);
       IF wb_.fonts(f_).rgb IS NOT null THEN
-         attr ('rgb', wb_.fonts(f_).rgb, attrs_);
+         nyce_xml.attr ('rgb', wb_.fonts(f_).rgb, attrs_);
       ELSE
-         attr ('theme', wb_.fonts(f_).theme, attrs_);
+         nyce_xml.attr ('theme', wb_.fonts(f_).theme, attrs_);
       END IF;
-      Xml_Node (doc_, nd_fnt_, 'color', attrs_);
+      Nyce_Xml.Xml_Node (doc_, nd_fnt_, 'color', attrs_);
 
-      natr ('val', wb_.fonts(f_).name, attrs_);
-      Xml_Node (doc_, nd_fnt_, 'name', attrs_);
-      natr ('val', wb_.fonts(f_).family, attrs_);
-      Xml_Node (doc_, nd_fnt_, 'family', attrs_);
-      natr ('val', 'none', attrs_);
-      Xml_Node (doc_, nd_fnt_, 'scheme', attrs_);
+      nyce_xml.natr ('val', wb_.fonts(f_).name, attrs_);
+      Nyce_Xml.Xml_Node (doc_, nd_fnt_, 'name', attrs_);
+      nyce_xml.natr ('val', wb_.fonts(f_).family, attrs_);
+      Nyce_Xml.Xml_Node (doc_, nd_fnt_, 'family', attrs_);
+      nyce_xml.natr ('val', 'none', attrs_);
+      Nyce_Xml.Xml_Node (doc_, nd_fnt_, 'scheme', attrs_);
    END LOOP;
 
-   natr ('count', wb_.fills.count, attrs_);
-   nd_fills_ := Xml_Node (doc_, nd_stl_, 'fills', attrs_);
+   nyce_xml.natr ('count', wb_.fills.count, attrs_);
+   nd_fills_ := Nyce_Xml.Xml_Node (doc_, nd_stl_, 'fills', attrs_);
    FOR f_ IN 0 .. wb_.fills.count-1 LOOP
-      nd_fill_ := Xml_Node (doc_, nd_fills_, 'fill');
-      natr ('patternType', wb_.fills(f_).patternType, attrs_);
-      nd_pf_ := Xml_Node (doc_, nd_fill_, 'patternFill', attrs_);
-      attrs_.delete;
+      nd_fill_ := Nyce_Xml.Xml_Node (doc_, nd_fills_, 'fill');
+      nyce_xml.natr ('patternType', wb_.fills(f_).patternType, attrs_);
+      nd_pf_ := Nyce_Xml.Xml_Node (doc_, nd_fill_, 'patternFill', attrs_);
+      nyce_xml.catr (attrs_);
       IF wb_.fills(f_).fgRGB IS NOT null THEN
-         attr ('rgb', wb_.fills(f_).fgRGB, attrs_);
-         Xml_Node (doc_, nd_pf_, 'fgColor', attrs_);
+         nyce_xml.attr ('rgb', wb_.fills(f_).fgRGB, attrs_);
+         Nyce_Xml.Xml_Node (doc_, nd_pf_, 'fgColor', attrs_);
       END IF;
       IF wb_.fills(f_).bgRGB IS NOT null THEN
-         attr ('rgb', wb_.fills(f_).bgRGB, attrs_);
-         Xml_Node (doc_, nd_pf_, 'bgColor', attrs_);
+         nyce_xml.attr ('rgb', wb_.fills(f_).bgRGB, attrs_);
+         Nyce_Xml.Xml_Node (doc_, nd_pf_, 'bgColor', attrs_);
       END IF;
    END LOOP;
 
-   natr ('count', wb_.borders.count, attrs_);
-   nd_bdrs_ := Xml_Node (doc_, nd_stl_, 'borders', attrs_);
+   nyce_xml.natr ('count', wb_.borders.count, attrs_);
+   nd_bdrs_ := Nyce_Xml.Xml_Node (doc_, nd_stl_, 'borders', attrs_);
    FOR b_ IN 0 .. wb_.borders.count-1 LOOP
-      nd_bdr_ := Xml_Node (doc_, nd_bdrs_, 'border');
-      attrs_.delete;
-      IF wb_.borders(b_).left   IS null THEN attrs_.delete; ELSE attr('style', wb_.borders(b_).left, attrs_); END IF;
-      Xml_Node (doc_, nd_bdr_, 'left', attrs_);
-      IF wb_.borders(b_).right  IS null THEN attrs_.delete; ELSE attr('style', wb_.borders(b_).right, attrs_); END IF;
-      Xml_Node (doc_, nd_bdr_, 'right', attrs_);
-      IF wb_.borders(b_).top    IS null THEN attrs_.delete; ELSE attr('style', wb_.borders(b_).top, attrs_); END IF;
-      Xml_Node (doc_, nd_bdr_, 'top', attrs_);
-      IF wb_.borders(b_).bottom IS null THEN attrs_.delete; ELSE attr('style', wb_.borders(b_).bottom, attrs_); END IF;
-      Xml_Node (doc_, nd_bdr_, 'bottom', attrs_);
+      nd_bdr_ := Nyce_Xml.Xml_Node (doc_, nd_bdrs_, 'border');
+      nyce_xml.catr (attrs_);
+      IF wb_.borders(b_).left   IS null THEN nyce_xml.catr(attrs_); ELSE nyce_xml.attr('style', wb_.borders(b_).left, attrs_); END IF;
+      Nyce_Xml.Xml_Node (doc_, nd_bdr_, 'left', attrs_);
+      IF wb_.borders(b_).right  IS null THEN nyce_xml.catr(attrs_); ELSE nyce_xml.attr('style', wb_.borders(b_).right, attrs_); END IF;
+      Nyce_Xml.Xml_Node (doc_, nd_bdr_, 'right', attrs_);
+      IF wb_.borders(b_).top    IS null THEN nyce_xml.catr(attrs_); ELSE nyce_xml.attr('style', wb_.borders(b_).top, attrs_); END IF;
+      Nyce_Xml.Xml_Node (doc_, nd_bdr_, 'top', attrs_);
+      IF wb_.borders(b_).bottom IS null THEN nyce_xml.catr(attrs_); ELSE nyce_xml.attr('style', wb_.borders(b_).bottom, attrs_); END IF;
+      Nyce_Xml.Xml_Node (doc_, nd_bdr_, 'bottom', attrs_);
    END LOOP;
 
-   natr ('count', '1', attrs_);
-   nd_sxfs_ := Xml_Node (doc_, nd_stl_, 'cellStyleXfs', attrs_);
-   natr ('numFmtId', '0', attrs_);
-   attr ('fontId', '0', attrs_);
-   attr ('fillId', '0', attrs_);
-   attr ('borderId', '0', attrs_);
-   Xml_Node (doc_, nd_sxfs_, 'xf', attrs_);
+   nyce_xml.natr ('count', '1', attrs_);
+   nd_sxfs_ := Nyce_Xml.Xml_Node (doc_, nd_stl_, 'cellStyleXfs', attrs_);
+   nyce_xml.natr ('numFmtId', '0', attrs_);
+   nyce_xml.attr ('fontId', '0', attrs_);
+   nyce_xml.attr ('fillId', '0', attrs_);
+   nyce_xml.attr ('borderId', '0', attrs_);
+   Nyce_Xml.Xml_Node (doc_, nd_sxfs_, 'xf', attrs_);
 
-   natr ('count', wb_.cellXfs.count+1, attrs_);
-   nd_xfs_ := Xml_Node (doc_, nd_stl_, 'cellXfs', attrs_);
+   nyce_xml.natr ('count', wb_.cellXfs.count+1, attrs_);
+   nd_xfs_ := Nyce_Xml.Xml_Node (doc_, nd_stl_, 'cellXfs', attrs_);
 
-   natr ('numFmtId', '0', attrs_);
-   attr ('fontId', '0', attrs_);
-   attr ('fillId', '0', attrs_);
-   attr ('borderId', '0', attrs_);
-   attr ('xfId', '0', attrs_);
-   Xml_Node (doc_, nd_xfs_, 'xf', attrs_);
+   nyce_xml.natr ('numFmtId', '0', attrs_);
+   nyce_xml.attr ('fontId', '0', attrs_);
+   nyce_xml.attr ('fillId', '0', attrs_);
+   nyce_xml.attr ('borderId', '0', attrs_);
+   nyce_xml.attr ('xfId', '0', attrs_);
+   Nyce_Xml.Xml_Node (doc_, nd_xfs_, 'xf', attrs_);
    FOR x_ IN 1 .. wb_.cellXfs.count LOOP
-      attrs_.delete;
-      natr ('numFmtId', wb_.cellXfs(x_).numFmtId, attrs_);
-      attr ('fontId', wb_.cellXfs(x_).fontId, attrs_);
-      attr ('fillId', wb_.cellXfs(x_).fillId, attrs_);
-      attr ('borderId', wb_.cellXfs(x_).borderId, attrs_);
-      nd_xf_ := Xml_Node (doc_, nd_xfs_, 'xf', attrs_);
+      nyce_xml.catr (attrs_);
+      nyce_xml.natr ('numFmtId', wb_.cellXfs(x_).numFmtId, attrs_);
+      nyce_xml.attr ('fontId', wb_.cellXfs(x_).fontId, attrs_);
+      nyce_xml.attr ('fillId', wb_.cellXfs(x_).fillId, attrs_);
+      nyce_xml.attr ('borderId', wb_.cellXfs(x_).borderId, attrs_);
+      nd_xf_ := Nyce_Xml.Xml_Node (doc_, nd_xfs_, 'xf', attrs_);
       IF wb_.cellXfs(x_).alignment.horizontal IS NOT null OR wb_.cellXfs(x_).alignment.vertical IS NOT null OR wb_.cellXfs(x_).alignment.wrapText IS NOT null THEN
-         attrs_.delete;
-         IF wb_.cellXfs(x_).alignment.horizontal IS NOT null THEN attr('horizontal', wb_.cellXfs(x_).alignment.horizontal, attrs_); END IF;
-         IF wb_.cellXfs(x_).alignment.vertical    IS NOT null THEN attr('vertical', wb_.cellXfs(x_).alignment.vertical, attrs_); END IF;
-         IF wb_.cellXfs(x_).alignment.wrapText THEN attr('wrapText', 'true', attrs_); END IF;
-         Xml_Node (doc_, nd_xf_, 'alignment', attrs_);
+         nyce_xml.catr (attrs_);
+         IF wb_.cellXfs(x_).alignment.horizontal IS NOT null THEN nyce_xml.attr('horizontal', wb_.cellXfs(x_).alignment.horizontal, attrs_); END IF;
+         IF wb_.cellXfs(x_).alignment.vertical    IS NOT null THEN nyce_xml.attr('vertical', wb_.cellXfs(x_).alignment.vertical, attrs_); END IF;
+         IF wb_.cellXfs(x_).alignment.wrapText THEN nyce_xml.attr('wrapText', 'true', attrs_); END IF;
+         Nyce_Xml.Xml_Node (doc_, nd_xf_, 'alignment', attrs_);
       END IF;
    END LOOP;
 
-   natr ('count', '1', attrs_);
-   nd_xfs_ := Xml_Node (doc_, nd_stl_, 'cellStyles', attrs_);
+   nyce_xml.natr ('count', '1', attrs_);
+   nd_xfs_ := Nyce_Xml.Xml_Node (doc_, nd_stl_, 'cellStyles', attrs_);
 
-   natr ('name', 'Normal', attrs_);
-   attr ('xfId', '0', attrs_);
-   attr ('builtinId', '0', attrs_);
-   Xml_Node (doc_, nd_xfs_, 'cellStyle', attrs_);
+   nyce_xml.natr ('name', 'Normal', attrs_);
+   nyce_xml.attr ('xfId', '0', attrs_);
+   nyce_xml.attr ('builtinId', '0', attrs_);
+   Nyce_Xml.Xml_Node (doc_, nd_xfs_, 'cellStyle', attrs_);
 
-   natr ('count', '0', attrs_);
-   Xml_Node (doc_, nd_stl_, 'dxfs', attrs_);
-   natr ('defaultTableStyle', 'TableStyleMedium2', attrs_);
-   attr ('defaultPivotStyle', 'PivotStyleLight16', attrs_);
-   Xml_Node (doc_, nd_stl_, 'tableStyles', attrs_);
+   nyce_xml.natr ('count', '0', attrs_);
+   Nyce_Xml.Xml_Node (doc_, nd_stl_, 'dxfs', attrs_);
+   nyce_xml.natr ('defaultTableStyle', 'TableStyleMedium2', attrs_);
+   nyce_xml.attr ('defaultPivotStyle', 'PivotStyleLight16', attrs_);
+   Nyce_Xml.Xml_Node (doc_, nd_stl_, 'tableStyles', attrs_);
 
-   nd_xfs_ := Xml_Node (doc_, nd_stl_, 'extLst');
-   natr ('uri', '{EB79DEF2-80B8-43e5-95BD-54CBDDF9020C}', attrs_);
-   attr ('xmlns:x14', 'http://schemas.microsoft.com/office/spreadsheetml/2009/9/main', attrs_);
-   nd_xf_ := Xml_Node (doc_, nd_xfs_, 'ext', attrs_);
-   natr ('defaultSlicerStyle', 'SlicerStyleLight1', attrs_);
-   Xml_Node (doc_, nd_xf_, 'slicerStyles', 'x14', attrs_);
+   nd_xfs_ := Nyce_Xml.Xml_Node (doc_, nd_stl_, 'extLst');
+   nyce_xml.natr ('uri', '{EB79DEF2-80B8-43e5-95BD-54CBDDF9020C}', attrs_);
+   nyce_xml.attr ('xmlns:x14', 'http://schemas.microsoft.com/office/spreadsheetml/2009/9/main', attrs_);
+   nd_xf_ := Nyce_Xml.Xml_Node (doc_, nd_xfs_, 'ext', attrs_);
+   nyce_xml.natr ('defaultSlicerStyle', 'SlicerStyleLight1', attrs_);
+   Nyce_Xml.Xml_Node (doc_, nd_xf_, 'slicerStyles', 'x14', attrs_);
 
    Add1Xml (excel_, 'xl/styles.xml', Dbms_XmlDom.getXmlType(doc_).getClobVal);
    Dbms_XmlDom.freeDocument (doc_);
@@ -4206,7 +4029,7 @@ IS
    nd_extl_  dbms_XmlDom.DomNode;
    nd_ext_   dbms_XmlDom.DomNode;
    nd_cf_    dbms_XmlDom.DomNode;
-   attrs_    xml_attrs_arr;
+   attrs_    nyce_xml.xml_attrs_arr;
    s_        PLS_INTEGER;
    dn_       VARCHAR2(100);
    rel_      PLS_INTEGER := 4; -- see hard-coded rels in Finish_Workbook_Rels()
@@ -4214,96 +4037,96 @@ BEGIN
 
    -- xl/workbook.xml
    Dbms_XmlDom.setVersion (doc_, '1.0" encoding="UTF-8" standalone="yes');
-   natr ('xmlns', 'http://schemas.openxmlformats.org/spreadsheetml/2006/main', attrs_);
-   attr ('xmlns:r', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships', attrs_);
-   nd_wb_ := Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'workbook', attrs_);
+   nyce_xml.natr ('xmlns', 'http://schemas.openxmlformats.org/spreadsheetml/2006/main', attrs_);
+   nyce_xml.attr ('xmlns:r', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships', attrs_);
+   nd_wb_ := Nyce_Xml.Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'workbook', attrs_);
 
-   natr ('appName', 'xl', attrs_);
-   attr ('lastEdited', '5', attrs_);
-   attr ('lowestEdited', '5', attrs_);
-   attr ('rupBuild', '9302', attrs_);
-   Xml_Node (doc_, nd_wb_, 'fileVersion', attrs_);
-   attrs_.delete;
+   nyce_xml.natr ('appName', 'xl', attrs_);
+   nyce_xml.attr ('lastEdited', '5', attrs_);
+   nyce_xml.attr ('lowestEdited', '5', attrs_);
+   nyce_xml.attr ('rupBuild', '9302', attrs_);
+   Nyce_Xml.Xml_Node (doc_, nd_wb_, 'fileVersion', attrs_);
+   nyce_xml.catr (attrs_);
    IF wb_.pivot_tables.count > 0 THEN
-      attr ('hidePivotFieldList', '1', attrs_);
+      nyce_xml.attr ('hidePivotFieldList', '1', attrs_);
    END IF;
-   attr ('defaultThemeVersion', '166925', attrs_);
-   attr ('date1904', 'false', attrs_);
-   Xml_Node (doc_, nd_wb_, 'workbookPr', attrs_);
+   nyce_xml.attr ('defaultThemeVersion', '166925', attrs_);
+   nyce_xml.attr ('date1904', 'false', attrs_);
+   Nyce_Xml.Xml_Node (doc_, nd_wb_, 'workbookPr', attrs_);
 
-   nd_bks_ := Xml_Node (doc_, nd_wb_, 'bookViews');
-   natr ('xWindow',  '120', attrs_);
-   attr ('yWindow', '45', attrs_);
-   attr ('windowWidth', '19155', attrs_);
-   attr ('windowHeight', '4935', attrs_);
-   Xml_Node (doc_, nd_bks_, 'workbookView', attrs_);
+   nd_bks_ := Nyce_Xml.Xml_Node (doc_, nd_wb_, 'bookViews');
+   nyce_xml.natr ('xWindow',  '120', attrs_);
+   nyce_xml.attr ('yWindow', '45', attrs_);
+   nyce_xml.attr ('windowWidth', '19155', attrs_);
+   nyce_xml.attr ('windowHeight', '4935', attrs_);
+   Nyce_Xml.Xml_Node (doc_, nd_bks_, 'workbookView', attrs_);
 
-   nd_shs_ := Xml_Node (doc_, nd_wb_, 'sheets');
+   nd_shs_ := Nyce_Xml.Xml_Node (doc_, nd_wb_, 'sheets');
    s_ := wb_.sheets.first;
    WHILE s_ IS NOT null LOOP
-      natr ('name', wb_.sheets(s_).name, attrs_);
-      attr ('sheetId', to_char(s_), attrs_);
-      attr ('r:id', rep ('rId:P1', to_char(rel_)), attrs_);
-      Xml_Node (doc_, nd_shs_, 'sheet', attrs_);
+      nyce_xml.natr ('name', wb_.sheets(s_).name, attrs_);
+      nyce_xml.attr ('sheetId', to_char(s_), attrs_);
+      nyce_xml.attr ('r:id', rep ('rId:P1', to_char(rel_)), attrs_);
+      Nyce_Xml.Xml_Node (doc_, nd_shs_, 'sheet', attrs_);
       wb_.sheets(s_).wb_rel := rel_;
       rel_ := rel_ + 1;
       s_   := wb_.sheets.next(s_);
    END LOOP;
 
    IF wb_.defined_names.count > 0 THEN
-      nd_dnm_ := Xml_Node (doc_, nd_wb_, 'definedNames');
+      nd_dnm_ := Nyce_Xml.Xml_Node (doc_, nd_wb_, 'definedNames');
       dn_ := wb_.defined_names.first;
       WHILE dn_ IS NOT null LOOP
-         natr ('name', dn_, attrs_);
+         nyce_xml.natr ('name', dn_, attrs_);
          IF wb_.defined_names(dn_).local_sheet THEN
             IF wb_.defined_names(dn_).sheet_id IS null THEN
                Raise_App_Error ('Sheet Id must be defined for local-sheet function to be viable!');
             END IF;
-            attr ('localSheetId', to_char(wb_.defined_names(dn_).sheet_id), attrs_);
+            nyce_xml.attr ('localSheetId', to_char(wb_.defined_names(dn_).sheet_id), attrs_);
          END IF;
-         Xml_Text_Node (doc_, nd_dnm_, 'definedName', Alfan_Sheet_Range(wb_.defined_names(dn_)), attrs_);
+         Nyce_Xml.Xml_Text_Node (doc_, nd_dnm_, 'definedName', Alfan_Sheet_Range(wb_.defined_names(dn_)), attrs_);
          dn_ := wb_.defined_names.next(dn_);
       END LOOP;
    END IF;
 
-   natr ('calcId', '144525', attrs_);
-   Xml_Node (doc_, nd_wb_, 'calcPr', attrs_);
+   nyce_xml.natr ('calcId', '144525', attrs_);
+   Nyce_Xml.Xml_Node (doc_, nd_wb_, 'calcPr', attrs_);
 
    IF wb_.pivot_caches.count > 0 THEN
-      nd_pvs_ :=  Xml_Node (doc_, nd_wb_, 'pivotCaches');
+      nd_pvs_ :=  Nyce_Xml.Xml_Node (doc_, nd_wb_, 'pivotCaches');
       FOR pc_ IN 0 .. wb_.pivot_caches.count-1 LOOP
-         natr ('cacheId', to_char(wb_.pivot_caches(pc_).cache_id), attrs_);
-         attr ('r:id', 'rId' || to_char(rel_), attrs_);
-         Xml_Node (doc_, nd_pvs_, 'pivotCache', attrs_);
+         nyce_xml.natr ('cacheId', to_char(wb_.pivot_caches(pc_).cache_id), attrs_);
+         nyce_xml.attr ('r:id', 'rId' || to_char(rel_), attrs_);
+         Nyce_Xml.Xml_Node (doc_, nd_pvs_, 'pivotCache', attrs_);
          wb_.pivot_caches(pc_).wb_rel := rel_;
          rel_                         := rel_ + 1;
       END LOOP;
 
-      nd_extl_ := Xml_Node (doc_, nd_wb_, 'extLst');
+      nd_extl_ := Nyce_Xml.Xml_Node (doc_, nd_wb_, 'extLst');
 
-      natr ('uri', Get_Guid, attrs_);
-      attr ('xmlns:x15', 'http://schemas.microsoft.com/office/spreadsheetml/2010/11/main', attrs_);
-      nd_ext_ := Xml_Node (doc_, nd_extl_, 'ext', attrs_);
+      nyce_xml.natr ('uri', Get_Guid, attrs_);
+      nyce_xml.attr ('xmlns:x15', 'http://schemas.microsoft.com/office/spreadsheetml/2010/11/main', attrs_);
+      nd_ext_ := Nyce_Xml.Xml_Node (doc_, nd_extl_, 'ext', attrs_);
 
-      natr ('chartTrackingRefBase', '1', attrs_);
-      Xml_Node (doc_, nd_ext_, 'workbookPr', 'x15', attrs_);
+      nyce_xml.natr ('chartTrackingRefBase', '1', attrs_);
+      Nyce_Xml.Xml_Node (doc_, nd_ext_, 'workbookPr', 'x15', attrs_);
 
-      natr ('uri', Get_Guid, attrs_);
-      attr ('xmlns:xcalcf', 'http://schemas.microsoft.com/office/spreadsheetml/2018/calcfeatures', attrs_);
-      nd_ext_ := Xml_Node (doc_, nd_extl_, 'ext', attrs_);
+      nyce_xml.natr ('uri', Get_Guid, attrs_);
+      nyce_xml.attr ('xmlns:xcalcf', 'http://schemas.microsoft.com/office/spreadsheetml/2018/calcfeatures', attrs_);
+      nd_ext_ := Nyce_Xml.Xml_Node (doc_, nd_extl_, 'ext', attrs_);
 
-      nd_cf_ := Xml_Node (doc_, nd_ext_, 'calcFeatures', 'xcalcf');
+      nd_cf_ := Nyce_Xml.Xml_Node (doc_, nd_ext_, 'calcFeatures', 'xcalcf');
 
-      natr ('name', 'microsoft.com:RD', attrs_);
-      Xml_Node (doc_, nd_cf_, 'feature', 'xcalcf', attrs_);
-      natr ('name', 'microsoft.com:Single', attrs_);
-      Xml_Node (doc_, nd_cf_, 'feature', 'xcalcf', attrs_);
-      natr ('name', 'microsoft.com:FV', attrs_);
-      Xml_Node (doc_, nd_cf_, 'feature', 'xcalcf', attrs_);
-      natr ('name', 'microsoft.com:CNMTM', attrs_);
-      Xml_Node (doc_, nd_cf_, 'feature', 'xcalcf', attrs_);
-      natr ('name', 'microsoft.com:LET_WF', attrs_);
-      Xml_Node (doc_, nd_cf_, 'feature', 'xcalcf', attrs_);
+      nyce_xml.natr ('name', 'microsoft.com:RD', attrs_);
+      Nyce_Xml.Xml_Node (doc_, nd_cf_, 'feature', 'xcalcf', attrs_);
+      nyce_xml.natr ('name', 'microsoft.com:Single', attrs_);
+      Nyce_Xml.Xml_Node (doc_, nd_cf_, 'feature', 'xcalcf', attrs_);
+      nyce_xml.natr ('name', 'microsoft.com:FV', attrs_);
+      Nyce_Xml.Xml_Node (doc_, nd_cf_, 'feature', 'xcalcf', attrs_);
+      nyce_xml.natr ('name', 'microsoft.com:CNMTM', attrs_);
+      Nyce_Xml.Xml_Node (doc_, nd_cf_, 'feature', 'xcalcf', attrs_);
+      nyce_xml.natr ('name', 'microsoft.com:LET_WF', attrs_);
+      Nyce_Xml.Xml_Node (doc_, nd_cf_, 'feature', 'xcalcf', attrs_);
 
    END IF;
 
@@ -4317,44 +4140,44 @@ PROCEDURE Finish_Workbook_Rels (
 IS
    doc_    dbms_XmlDom.DomDocument := Dbms_XmlDom.newDomDocument;
    nd_rls_ dbms_XmlDom.DomNode;
-   attrs_  xml_attrs_arr;
+   attrs_  nyce_xml.xml_attrs_arr;
    s_      PLS_INTEGER;
 BEGIN
 
    -- xl/_rels/workbook.xml.rels
    Dbms_XmlDom.setVersion (doc_, '1.0" encoding="UTF-8" standalone="yes');
 
-   natr ('xmlns', 'http://schemas.openxmlformats.org/package/2006/relationships', attrs_);
-   nd_rls_ := Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'Relationships', attrs_);
+   nyce_xml.natr ('xmlns', 'http://schemas.openxmlformats.org/package/2006/relationships', attrs_);
+   nd_rls_ := Nyce_Xml.Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'Relationships', attrs_);
 
-   natr ('Id', 'rId1', attrs_);
-   attr ('Type', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings', attrs_);
-   attr ('Target', 'sharedStrings.xml', attrs_);
-   Xml_Node (doc_, nd_rls_, 'Relationship', attrs_);
+   nyce_xml.natr ('Id', 'rId1', attrs_);
+   nyce_xml.attr ('Type', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings', attrs_);
+   nyce_xml.attr ('Target', 'sharedStrings.xml', attrs_);
+   Nyce_Xml.Xml_Node (doc_, nd_rls_, 'Relationship', attrs_);
 
-   natr ('Id', 'rId2', attrs_);
-   attr ('Type', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles', attrs_);
-   attr ('Target', 'styles.xml', attrs_);
-   Xml_Node (doc_, nd_rls_, 'Relationship', attrs_);
+   nyce_xml.natr ('Id', 'rId2', attrs_);
+   nyce_xml.attr ('Type', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles', attrs_);
+   nyce_xml.attr ('Target', 'styles.xml', attrs_);
+   Nyce_Xml.Xml_Node (doc_, nd_rls_, 'Relationship', attrs_);
 
-   natr ('Id', 'rId3', attrs_);
-   attr ('Type', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme', attrs_);
-   attr ('Target', 'theme/theme1.xml', attrs_);
-   Xml_Node (doc_, nd_rls_, 'Relationship', attrs_);
+   nyce_xml.natr ('Id', 'rId3', attrs_);
+   nyce_xml.attr ('Type', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme', attrs_);
+   nyce_xml.attr ('Target', 'theme/theme1.xml', attrs_);
+   Nyce_Xml.Xml_Node (doc_, nd_rls_, 'Relationship', attrs_);
 
    FOR pc_ IN 0 .. wb_.pivot_caches.count-1 LOOP
-      natr ('Id', 'rId' || to_char (wb_.pivot_caches(pc_).wb_rel), attrs_);
-      attr ('Type', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotCacheDefinition', attrs_);
-      attr ('Target', rep ('pivotCache/pivotCacheDefinition:P1.xml', pc_), attrs_);
-      Xml_Node (doc_, nd_rls_, 'Relationship', attrs_);
+      nyce_xml.natr ('Id', 'rId' || to_char (wb_.pivot_caches(pc_).wb_rel), attrs_);
+      nyce_xml.attr ('Type', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotCacheDefinition', attrs_);
+      nyce_xml.attr ('Target', rep ('pivotCache/pivotCacheDefinition:P1.xml', pc_), attrs_);
+      Nyce_Xml.Xml_Node (doc_, nd_rls_, 'Relationship', attrs_);
    END LOOP;
 
    s_ := wb_.sheets.first;
    WHILE s_ IS NOT null LOOP
-      natr ('Id', 'rId' || to_char(wb_.sheets(s_).wb_rel), attrs_);
-      attr ('Type',  'http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet', attrs_);
-      attr ('Target', rep ('worksheets/sheet:P1.xml', to_char(s_)), attrs_);
-      Xml_Node (doc_, nd_rls_, 'Relationship', attrs_);
+      nyce_xml.natr ('Id', 'rId' || to_char(wb_.sheets(s_).wb_rel), attrs_);
+      nyce_xml.attr ('Type',  'http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet', attrs_);
+      nyce_xml.attr ('Target', rep ('worksheets/sheet:P1.xml', to_char(s_)), attrs_);
+      Nyce_Xml.Xml_Node (doc_, nd_rls_, 'Relationship', attrs_);
       s_ := wb_.sheets.next(s_);
    END LOOP;
 
@@ -4363,7 +4186,7 @@ BEGIN
 
 END Finish_Workbook_Rels;
 
-PROCEDURE Build_Pivot_Caches
+PROCEDURE Build_Pivot_Caches_And_Tables
 IS
    rollup_fn_      VARCHAR2(20);
    col_name_       VARCHAR2(32000);
@@ -4373,6 +4196,7 @@ IS
    max_val_        NUMBER;
    uq_             tp_unique_data;
 BEGIN
+   -- Build out the caches with necessary data
    FOR pc_ IN 0 .. wb_.pivot_caches.count-1 LOOP
       FOR c_ IN 1 .. Range_Width (wb_.pivot_caches(pc_).ds_range) LOOP
 
@@ -4419,14 +4243,27 @@ BEGIN
          wb_.pivot_caches(pc_).cf_order(c_)             := col_name_;
       END LOOP;
    END LOOP;
-END Build_Pivot_Caches;
+
+   -- Then build out the pivot-tables in the same manner
+   FOR pt_ IN 1 .. wb_.pivot_tables.count LOOP
+      FOR ag_ IN 1 .. wb_.pivot_tables(pt_).pivot_axes.col_agg_fns.count LOOP
+         wb_.pivot_tables(pt_).pivot_axes.col_agg_fns(ag_).col_name := CASE wb_.pivot_tables(pt_).pivot_axes.col_agg_fns(ag_).agg_fn
+            WHEN 'count' THEN 'Count of '
+            WHEN 'sum'   THEN 'Sum of '
+         END || Range_Col_Head_Name (
+            range_    => Get_Pivot_Table_Data_Source (pt_),
+            col_offs_ => wb_.pivot_tables(pt_).pivot_axes.col_agg_fns(ag_).colid
+         );
+      END LOOP;
+   END LOOP;
+END Build_Pivot_Caches_And_Tables;
 
 PROCEDURE Finish_Pivot_Caches (
    excel_ IN OUT NOCOPY BLOB )
 IS
    sh_      PLS_INTEGER;
    doc_     dbms_XmlDom.DomDocument;
-   attrs_   xml_attrs_arr;
+   attrs_   nyce_xml.xml_attrs_arr;
    nd_pcd_  dbms_XmlDom.DomNode;
    nd_cs_   dbms_XmlDom.DomNode;
    nd_cfs_  dbms_XmlDom.DomNode;
@@ -4455,71 +4292,71 @@ BEGIN
       doc_ := Dbms_XmlDom.newDomDocument;
       Dbms_XmlDom.setVersion (doc_, '1.0" encoding="UTF-8" standalone="yes');
 
-      natr ('xmlns', 'http://schemas.openxmlformats.org/spreadsheetml/2006/main', attrs_);
-      attr ('xmlns:r', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships', attrs_);
-      attr ('xmlns:mc', 'http://schemas.openxmlformats.org/markup-compatibility/2006', attrs_);
-      attr ('mc:Ignorable', 'xr', attrs_);
-      attr ('r:id', 'rId1', attrs_); -- points to pivot-cache-record; there's only ever 1 per pCD
-      attr ('refreshedBy', user, attrs_);
-      attr ('refreshedDate', Date_To_Xl_Nr(sysdate), attrs_);
-      attr ('createdVersion', '7', attrs_); -- Version of Excel in which this pivot was created!
-      attr ('refreshedVersion', '7', attrs_);
-      attr ('minRefreshableVersion', '3', attrs_); -- Minimum version of Excel which is compatible (apparently)
-      attr ('recordCount', to_char(Range_Height(cache_.ds_range)), attrs_);
-      attr ('xmlns:xr', 'http://schemas.microsoft.com/office/spreadsheetml/2014/revision', attrs_);
-      attr ('xr:uid', Get_Guid, attrs_); --'{C898DCD4-A18D-452F-B655-4FAEB857F78F}';
-      nd_pcd_ := Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'pivotCacheDefinition', attrs_);
+      nyce_xml.natr ('xmlns', 'http://schemas.openxmlformats.org/spreadsheetml/2006/main', attrs_);
+      nyce_xml.attr ('xmlns:r', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships', attrs_);
+      nyce_xml.attr ('xmlns:mc', 'http://schemas.openxmlformats.org/markup-compatibility/2006', attrs_);
+      nyce_xml.attr ('mc:Ignorable', 'xr', attrs_);
+      nyce_xml.attr ('r:id', 'rId1', attrs_); -- points to pivot-cache-record; there's only ever 1 per pCD
+      nyce_xml.attr ('refreshedBy', user, attrs_);
+      nyce_xml.attr ('refreshedDate', Date_To_Xl_Nr(sysdate), attrs_);
+      nyce_xml.attr ('createdVersion', '7', attrs_); -- Version of Excel in which this pivot was created!
+      nyce_xml.attr ('refreshedVersion', '7', attrs_);
+      nyce_xml.attr ('minRefreshableVersion', '3', attrs_); -- Minimum version of Excel which is compatible (apparently)
+      nyce_xml.attr ('recordCount', to_char(Range_Height(cache_.ds_range)), attrs_);
+      nyce_xml.attr ('xmlns:xr', 'http://schemas.microsoft.com/office/spreadsheetml/2014/revision', attrs_);
+      nyce_xml.attr ('xr:uid', Get_Guid, attrs_); --'{C898DCD4-A18D-452F-B655-4FAEB857F78F}';
+      nd_pcd_ := Nyce_Xml.Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'pivotCacheDefinition', attrs_);
 
-      natr ('type', 'worksheet', attrs_);
-      nd_cs_ := Xml_Node (doc_, nd_pcd_, 'cacheSource', attrs_);
+      nyce_xml.natr ('type', 'worksheet', attrs_);
+      nd_cs_ := Nyce_Xml.Xml_Node (doc_, nd_pcd_, 'cacheSource', attrs_);
 
-      attrs_.delete;
+      nyce_xml.catr (attrs_);
       IF cache_.ds_range.defined_name IS NOT null THEN
-         attr ('name', cache_.ds_range.defined_name, attrs_);
+         nyce_xml.attr ('name', cache_.ds_range.defined_name, attrs_);
       ELSE
-         attr ('ref', Alfan_Range (cache_.ds_range), attrs_);
-         attr ('sheet', Sheet_Name (cache_.ds_range), attrs_);
+         nyce_xml.attr ('ref', Alfan_Range (cache_.ds_range), attrs_);
+         nyce_xml.attr ('sheet', Sheet_Name (cache_.ds_range), attrs_);
       END IF;
-      Xml_Node (doc_, nd_cs_, 'worksheetSource', attrs_);
+      Nyce_Xml.Xml_Node (doc_, nd_cs_, 'worksheetSource', attrs_);
 
-      attrs_.delete;
-      attr ('count', to_char(cache_.cf_order.count), attrs_);
-      nd_cfs_ := Xml_Node (doc_, nd_pcd_, 'cacheFields', attrs_);
+      nyce_xml.catr (attrs_);
+      nyce_xml.attr ('count', to_char(cache_.cf_order.count), attrs_);
+      nd_cfs_ := Nyce_Xml.Xml_Node (doc_, nd_pcd_, 'cacheFields', attrs_);
 
       FOR c_ IN cache_.cf_order.first .. cache_.cf_order.last LOOP
 
          fld_  := cache_.cf_order(c_);
          cfld_ := cache_.cached_fields(fld_);
 
-         natr ('name', fld_, attrs_);
-         attr ('numFmtId', cache_.cached_fields(fld_).format_id, attrs_);
-         nd_cf_ := Xml_Node (doc_, nd_cfs_, 'cacheField', attrs_);
+         nyce_xml.natr ('name', fld_, attrs_);
+         nyce_xml.attr ('numFmtId', cache_.cached_fields(fld_).format_id, attrs_);
+         nd_cf_ := Nyce_Xml.Xml_Node (doc_, nd_cfs_, 'cacheField', attrs_);
 
-         attrs_.delete;
+         nyce_xml.catr (attrs_);
          IF cfld_.rollup_fn IN ('row','column','fileter') THEN
-            attr ('count', to_char(cache_.cached_fields(fld_).shared_items.count), attrs_);
+            nyce_xml.attr ('count', to_char(cache_.cached_fields(fld_).shared_items.count), attrs_);
          ELSIF cfld_.rollup_fn = 'sum' THEN
-            attr ('containsSemiMixedTypes', '0', attrs_);
-            attr ('containsString', '0', attrs_);
-            attr ('containsNumber', '1', attrs_);
-            attr ('minValue', to_char(cache_.cached_fields(fld_).min_value), attrs_);
-            attr ('maxValue', to_char(cache_.cached_fields(fld_).max_value), attrs_);
+            nyce_xml.attr ('containsSemiMixedTypes', '0', attrs_);
+            nyce_xml.attr ('containsString', '0', attrs_);
+            nyce_xml.attr ('containsNumber', '1', attrs_);
+            nyce_xml.attr ('minValue', to_char(cache_.cached_fields(fld_).min_value), attrs_);
+            nyce_xml.attr ('maxValue', to_char(cache_.cached_fields(fld_).max_value), attrs_);
          END IF;
-         nd_si_ := Xml_Node (doc_, nd_cf_, 'sharedItems', attrs_);
+         nd_si_ := Nyce_Xml.Xml_Node (doc_, nd_cf_, 'sharedItems', attrs_);
 
          IF cfld_.si_order.count > 0 THEN
             FOR si_ IN cfld_.si_order.first .. cfld_.si_order.last LOOP
-               natr ('v', cfld_.si_order(si_), attrs_);
-               Xml_Node (doc_, nd_si_, 's', attrs_); -- s for a string, which we assume, for now
+               nyce_xml.natr ('v', cfld_.si_order(si_), attrs_);
+               Nyce_Xml.Xml_Node (doc_, nd_si_, 's', attrs_); -- s for a string, which we assume, for now
             END LOOP;
          END IF;
       END LOOP;
-      nd_el_ := Xml_Node (doc_, nd_pcd_, 'extLst');
-      attrs_.delete;
-      natr ('uri', Get_Guid, attrs_);
-      attr ('xmlns:x14', 'http://schemas.microsoft.com/office/spreadsheetml/2009/9/main', attrs_);
-      nd_ex_ := Xml_Node (doc_, nd_el_, 'ext', attrs_);
-      Xml_Node (doc_, nd_ex_, 'pivotCacheDefinition', 'x14');
+      nd_el_ := Nyce_Xml.Xml_Node (doc_, nd_pcd_, 'extLst');
+
+      nyce_xml.natr ('uri', Get_Guid, attrs_);
+      nyce_xml.attr ('xmlns:x14', 'http://schemas.microsoft.com/office/spreadsheetml/2009/9/main', attrs_);
+      nd_ex_ := Nyce_Xml.Xml_Node (doc_, nd_el_, 'ext', attrs_);
+      Nyce_Xml.Xml_Node (doc_, nd_ex_, 'pivotCacheDefinition', 'x14');
 
       Add1Xml (excel_, rep('xl/pivotCache/pivotCacheDefinition:P1.xml',pc_), Dbms_XmlDom.getXmlType(doc_).getClobVal);
       Dbms_XmlDom.freeDocument (doc_);
@@ -4529,22 +4366,22 @@ BEGIN
       doc_ := Dbms_XmlDom.newDomDocument;
       Dbms_XmlDom.setVersion (doc_, '1.0" encoding="UTF-8" standalone="yes');
 
-      natr ('xmlns', 'http://schemas.openxmlformats.org/spreadsheetml/2006/main', attrs_);
-      attr ('xmlns:r', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships', attrs_);
-      attr ('xmlns:mc', 'http://schemas.openxmlformats.org/markup-compatibility/2006', attrs_);
-      attr ('mc:Ignorable', 'xr', attrs_);
-      attr ('xmlns:xr', 'http://schemas.microsoft.com/office/spreadsheetml/2014/revision', attrs_);
-      attr ('count', to_char(cache_.ds_range.br.r - cache_.ds_range.tl.r), attrs_);
-      nd_pcd_ := Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'pivotCacheRecords', attrs_);
+      nyce_xml.natr ('xmlns', 'http://schemas.openxmlformats.org/spreadsheetml/2006/main', attrs_);
+      nyce_xml.attr ('xmlns:r', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships', attrs_);
+      nyce_xml.attr ('xmlns:mc', 'http://schemas.openxmlformats.org/markup-compatibility/2006', attrs_);
+      nyce_xml.attr ('mc:Ignorable', 'xr', attrs_);
+      nyce_xml.attr ('xmlns:xr', 'http://schemas.microsoft.com/office/spreadsheetml/2014/revision', attrs_);
+      nyce_xml.attr ('count', to_char(cache_.ds_range.br.r - cache_.ds_range.tl.r), attrs_);
+      nd_pcd_ := Nyce_Xml.Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'pivotCacheRecords', attrs_);
 
       FOR r_ IN cache_.ds_range.tl.r+1 .. cache_.ds_range.br.r LOOP
-         nd_row_ := Xml_Node (doc_, nd_pcd_, 'r');
+         nd_row_ := Nyce_Xml.Xml_Node (doc_, nd_pcd_, 'r');
          FOR c_ IN cache_.cf_order.first .. cache_.cf_order.last LOOP
             cfld_   := cache_.cached_fields(cache_.cf_order(c_));
             xl_col_ := cache_.ds_range.tl.c + c_ - 1; -- one based, not zero
-            natr ('v', Get_Cell_Cache_Value (xl_col_, r_, sh_, cfld_.shared_items), attrs_);
+            nyce_xml.natr ('v', Get_Cell_Cache_Value (xl_col_, r_, sh_, cfld_.shared_items), attrs_);
             tag_    := Get_Cell_Cache_Tag (xl_col_, r_, sh_, cfld_.rollup_fn);
-            Xml_Node (doc_, nd_row_, tag_, attrs_);
+            Nyce_Xml.Xml_Node (doc_, nd_row_, tag_, attrs_);
          END LOOP;
       END LOOP;
       Add1Xml (excel_, rep('xl/pivotCache/pivotCacheRecords:P1.xml',pc_), Dbms_XmlDom.getXmlType(doc_).getClobVal);
@@ -4558,13 +4395,13 @@ BEGIN
       doc_ := Dbms_XmlDom.newDomDocument;
       Dbms_XmlDom.setVersion (doc_, '1.0" encoding="UTF-8" standalone="yes');
 
-      natr ('xmlns', 'http://schemas.openxmlformats.org/package/2006/relationships', attrs_);
-      nd_rels_ := Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'Relationships', attrs_);
+      nyce_xml.natr ('xmlns', 'http://schemas.openxmlformats.org/package/2006/relationships', attrs_);
+      nd_rels_ := Nyce_Xml.Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'Relationships', attrs_);
 
-      natr ('Id', 'rId1', attrs_);
-      attr ('Type', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotCacheRecords', attrs_);
-      attr ('Target', rep ('pivotCacheRecords:P1.xml', pc_), attrs_);
-      Xml_Node (doc_, nd_rels_, 'Relationship', attrs_);
+      nyce_xml.natr ('Id', 'rId1', attrs_);
+      nyce_xml.attr ('Type', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotCacheRecords', attrs_);
+      nyce_xml.attr ('Target', rep ('pivotCacheRecords:P1.xml', pc_), attrs_);
+      Nyce_Xml.Xml_Node (doc_, nd_rels_, 'Relationship', attrs_);
 
       Add1Xml (excel_, rep('xl/pivotCache/_rels/pivotCacheDefinition:P1.xml.rels',pc_), Dbms_XmlDom.getXmlType(doc_).getClobVal);
       Dbms_XmlDom.freeDocument (doc_);
@@ -4688,39 +4525,69 @@ PROCEDURE Unravel_Json_To_Sheet (
    pivot_id_ IN PLS_INTEGER,
    j_piv_    IN json_object_t )
 IS
-   aggs_arr_ tp_col_agg_fns := wb_.pivot_tables(pivot_id_).pivot_axes.col_agg_fns;
-   ds_range_ tp_cell_range  := Get_Pivot_Source (pivot_id_);
-   loc_      tp_cell_loc    := wb_.pivot_tables(pivot_id_).location_tl;
-   sh_       PLS_INTEGER    := wb_.pivot_tables(pivot_id_).on_sheet;
-   init_col_ PLS_INTEGER    := loc_.c;
-   col_      PLS_INTEGER    := init_col_;
-   row_      PLS_INTEGER    := loc_.r;
-   desc_     VARCHAR2(2000);
-   ix_       PLS_INTEGER;
-   col_ix_   PLS_INTEGER;
-   sum_obj_  json_object_t;
-   keys_     json_key_list;
-BEGIN
+   
+   --ds_range_   tp_cell_range  := Get_Pivot_Table_Data_Source (pivot_id_);
+   loc_        tp_cell_loc    := wb_.pivot_tables(pivot_id_).location_tl;
+   sh_         PLS_INTEGER    := wb_.pivot_tables(pivot_id_).on_sheet;
+   init_col_   PLS_INTEGER    := loc_.c;
+   col_        PLS_INTEGER    := init_col_;
+   row_        PLS_INTEGER    := loc_.r;
+   --desc_       VARCHAR2(2000);
+   ix_         PLS_INTEGER;
+   --col_ix_     PLS_INTEGER;
+   --sum_obj_    json_object_t;
+   --keys_       json_key_list;
 
--- more to-do => start here
+   piv_axes_   tp_pivot_axes  := wb_.pivot_tables(pivot_id_).pivot_axes;
+   h_rollups_  PLS_INTEGER    := piv_axes_.hrollups.count;
+   v_rollups_  PLS_INTEGER    := piv_axes_.vrollups.count;
+   single_agg_ BOOLEAN        := piv_axes_.col_agg_fns.count = 1;
+   --multi_agg_  BOOLEAN        := piv_axes_.col_agg_fns.count > 1;
+   aggs_arr_   tp_col_agg_fns := piv_axes_.col_agg_fns;
+-- osian
+   -- We haven't got to the filters yet!!
+   --head_depth_ PLS_INTEGER    := 1 + wb_.pivot_tables(pivot_id_).pivot_axes.hrollups.count + CASE WHEN multi_agg_ THEN 1 ELSE 0 END;
+
+   PROCEDURE Build_Pt_Header (
+      level_ IN PLS_INTEGER )
+   IS BEGIN
+      IF level_ = 0 AND v_rollups_ > 0 AND h_rollups_ = 0 THEN
+         IF single_agg_ THEN
+            CellS (col_, row_, 'Row Labels', sheet_ => sh_);
+            col_ := col_ + 1;
+            CellS (col_, row_, aggs_arr_(1).col_name, sheet_ => sh_);
+         ELSE
+            CellB (col_, row_, sheet_ => sh_);
+            FOR ix_ IN 1 .. aggs_arr_.count LOOP
+               col_ := col_ + 1;
+               IF ix_ = 1 THEN
+                  CellS (col_, row_, 'Values');
+               ELSE
+                  CellB (col_, row_);
+               END IF;
+            END LOOP;
+
+         END IF;
+      END IF;
+   END Build_Pt_Header;
+
+BEGIN
+Dbms_Output.Put_Line ('Unravel_Json_To_Sheet() accepts following JSON:');
+Dbms_Output.Put_Line (j_piv_.stringify);
+   Build_Pt_Header (0);
+
+-- more to-do => start here 2024/09/25
 -- we need to unravel the data.  Start by defining the extent of the sheet
 --
---
---
---
-   CellS (col_, row_, 'Row Labels', sheet_ => sh_);
-   ix_ := aggs_arr_.first;
-   WHILE ix_ IS NOT null LOOP
-      col_ix_ := aggs_arr_(ix_).colid;
-      desc_ := CASE aggs_arr_(ix_).agg_fn
-         WHEN 'sum'   THEN 'Sum of '
-         WHEN 'count' THEN 'Count of '
-      END || Range_Col_Head_Name (ds_range_, col_ix_);
-      col_ := col_ + 1;
+   -- Generate the header section of the pivot-table first
+   IF h_rollups_ > 0 AND single_agg_ THEN
+      CellS (col_, row_, piv_axes_.col_agg_fns(1).col_name, sheet_ => sh_);
+   END IF;
+/*
+      CellS (col_, row_, 'Row Labels', sheet_ => sh_);
+      ix_ := aggs_arr_.first;
       CellS (col_, row_, desc_, sheet_ => sh_);
-      ix_ := aggs_arr_.next(ix_);
-   END LOOP;
-   row_ := row_ + 1;
+
 
 Debug (j_piv_.stringify);
    Unravel_Json_To_Sheet (sh_, j_piv_.get_object('sharedItems'), init_col_, row_);
@@ -4734,7 +4601,7 @@ Debug (j_piv_.stringify);
       col_ := col_ + 1;
       CellN (col_, row_, sum_obj_.get_number(keys_(k_)), sheet_ => sh_);
    END LOOP;
-
+*/
 END Unravel_Json_To_Sheet;
 
 -----
@@ -4752,7 +4619,7 @@ IS
    nd_i_        dbms_XmlDom.DomNode;
    bkdn_obj_    json_object_t;
    keys_        json_key_list;
-   attrs_       xml_attrs_arr;
+   attrs_       nyce_xml.xml_attrs_arr;
    level_       PLS_INTEGER := j_node_.get_number('level');
    lv_          PLS_INTEGER := level_ - 1;
    v_           PLS_INTEGER := 0;
@@ -4762,9 +4629,9 @@ BEGIN
    IF level_ > 0 THEN
 
       IF lv_ > 0 THEN
-         attr ('r', to_char(lv_), attrs_);
+         nyce_xml.attr ('r', to_char(lv_), attrs_);
       END IF;
-      nd_i_ := Xml_Node (doc_, xml_nd_, 'i', attrs_);
+      nd_i_ := Nyce_Xml.Xml_Node (doc_, xml_nd_, 'i', attrs_);
 
       si_val_loop_ := cache_.cached_fields(col_name_).shared_items.first;
       WHILE si_val_loop_ IS NOT null LOOP
@@ -4773,11 +4640,11 @@ BEGIN
          si_val_loop_ := cache_.cached_fields(col_name_).shared_items.next(si_val_loop_);
       END LOOP;
 
-      attrs_.delete;
+      nyce_xml.catr (attrs_);
       IF v_ > 0 THEN
-         attr ('v', v_, attrs_);
+         nyce_xml.attr ('v', v_, attrs_);
       END IF;
-      Xml_Node (doc_, nd_i_, 'x', attrs_);
+      Nyce_Xml.Xml_Node (doc_, nd_i_, 'x', attrs_);
 
    END IF;
 
@@ -4797,9 +4664,9 @@ BEGIN
    END IF;
 
    IF level_ = 0 THEN
-      natr ('t', 'grand', attrs_);
-      nd_i_ := Xml_Node (doc_, xml_nd_, 'i', attrs_);
-      Xml_Node (doc_, nd_i_, 'x');
+      nyce_xml.natr ('t', 'grand', attrs_);
+      nd_i_ := Nyce_Xml.Xml_Node (doc_, xml_nd_, 'i', attrs_);
+      Nyce_Xml.Xml_Node (doc_, nd_i_, 'x');
    END IF;
 
 END Unravel_Json_Pivot_Table_Xml;
@@ -4821,15 +4688,22 @@ IS
 BEGIN
    aggs_obj_    := json_object_t();
    FOR ix_ IN 1 .. aggs_rec_.count LOOP
-      agg_obj_.put ('colId', aggs_rec_(ix_).colid);
-      agg_obj_.put ('fn',    aggs_rec_(ix_).agg_fn);
-      agg_obj_.put ('value', 0);
+      agg_obj_.put ('colId',   aggs_rec_(ix_).colid);
+      agg_obj_.put ('colName', aggs_rec_(ix_).col_name);
+      agg_obj_.put ('fn',      aggs_rec_(ix_).agg_fn);
+      agg_obj_.put ('value',   0);
       aggs_list_.append(agg_obj_);
    END LOOP;
    aggs_obj_.put ('aggregatesCount', aggs_rec_.count);
    aggs_obj_.put ('aggregateCols', aggs_list_);
 END Initiate_Agg_Obj;
 
+-----
+-- Increment_Agg_Obj_From_Data()
+-- Increment_Agg_Obj
+--   The aggregate object needs to be incremented as we read the data from our
+--   data-source.  These two functions achieve those ends
+--
 PROCEDURE Increment_Agg_Obj_From_Data (
    data_range_ IN     tp_cell_range,
    row_        IN     PLS_INTEGER,
@@ -4925,7 +4799,7 @@ BEGIN
       END IF;
    END LOOP;
 
-   results_obj_.put ('isLeaf',      true);
+   results_obj_.put ('isLeaf',      aggs_obj_.get_number('aggregatesCount')=1);
    results_obj_.put ('recordCount', rec_count_);
    results_obj_.put ('width',       aggs_obj_.get_number('aggregatesCount'));
    results_obj_.put ('height',      1);
@@ -5065,6 +4939,7 @@ BEGIN
       results_obj_.put ('colDesc',         col_name_);
       results_obj_.put ('h-level',         h_level_);
       results_obj_.put ('v-level',         v_level_);
+      results_obj_.put ('isLeaf',          false);
       results_obj_.put ('is-hLeaf',        next_is_h_leaf_);
       results_obj_.put ('is-vLeaf',        next_is_v_leaf_);
       results_obj_.put ('isLeaf',          false);
@@ -5075,8 +4950,8 @@ BEGIN
       ELSIF direction_ = 'vertical' THEN
          results_obj_.put ('height',       height_);
       END IF;
-      results_obj_.put ('aggregates',      node_agg_obj_);
       results_obj_.put ('sharedItems',     sis_obj_);
+      results_obj_.put ('aggregates',      node_agg_obj_);
 
 
    -- build the leaf node
@@ -5090,8 +4965,6 @@ BEGIN
    END IF;
 
    IF h_level_ = 0 AND v_level_ = 0 THEN
-      Dbms_Output.Put_Line ('Final object output from Json_Aggregates_From_Filters() ===>');
-      Dbms_Output.Put_Line (results_obj_.stringify);
       Unravel_Json_To_Sheet (pivot_id_, results_obj_);
    END IF;
 
@@ -5102,15 +4975,15 @@ END Json_Aggregates_From_Filters;
 
 -----
 -- Finish_Pivot_Tables()
---   Must be called after Build_Pivot_Caches(), which isn't hard to achieve on
---   account of being called at the start of the Finish() process.  It's worth
---   making a note of anyway to avoid potential problem in future.
+--   Must be called after Build_Pivot_Caches_And_Tables(), which isn't hard to
+--   achieve on account of being called at the very beginning of the procedure
+--   Finish().  Worth noting anyway, to avoid potential problem in future.
 --
 PROCEDURE Finish_Pivot_Tables (
    excel_ IN OUT NOCOPY BLOB )
 IS
    doc_         dbms_XmlDom.DomDocument;
-   attrs_       xml_attrs_arr;
+   attrs_       nyce_xml.xml_attrs_arr;
    nd_ptd_      dbms_XmlDom.DomNode;
    nd_pfs_      dbms_XmlDom.DomNode;
    nd_pf_       dbms_XmlDom.DomNode;
@@ -5144,30 +5017,30 @@ Raise_App_Error ('chickens');
       doc_ := Dbms_XmlDom.newDomDocument;
       Dbms_XmlDom.setVersion (doc_, '1.0" encoding="UTF-8" standalone="yes');
 
-      natr ('xmlns', 'http://schemas.openxmlformats.org/spreadsheetml/2006/main', attrs_);
-      attr ('xmlns:mc', 'http://schemas.openxmlformats.org/markup-compatibility/2006', attrs_);
-      attr ('mc:Ignorable', 'xr', attrs_);
-      attr ('name', wb_.pivot_tables(pt_).pivot_name, attrs_);
-      attr ('cacheId', wb_.pivot_tables(pt_).cache_id, attrs_);
-      attr ('xmlns:xr', 'http://schemas.microsoft.com/office/spreadsheetml/2014/revision', attrs_);
-      attr ('xr:uid', Get_Guid, attrs_);
-      attr ('applyNumberFormats', '0', attrs_);
-      attr ('applyBorderFormats', '0', attrs_);
-      attr ('applyFontFormats', '0', attrs_);
-      attr ('applyPatternFormats', '0', attrs_);
-      attr ('applyAlignmentFormats', '0', attrs_);
-      attr ('applyWidthHeightFormats', '1', attrs_);
-      attr ('dataCaption', 'Values', attrs_);
-      attr ('createdVersion', '7', attrs_); -- Version of Excel in which this pivot was created!
-      attr ('updatedVersion', '7', attrs_);
-      attr ('minRefreshableVersion', '3', attrs_); -- Minimum version of Excel which is compatible (apparently)
-      attr ('useAutoFormatting', '1', attrs_);
-      attr ('itemPrintTitles', '1', attrs_);
-      attr ('indent', '0', attrs_);
-      attr ('outline', '1', attrs_);
-      attr ('outlineData', '1', attrs_);
-      attr ('multipleFieldFilters', '0', attrs_);
-      nd_ptd_ := Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'pivotTableDefinition', attrs_);
+      nyce_xml.natr ('xmlns', 'http://schemas.openxmlformats.org/spreadsheetml/2006/main', attrs_);
+      nyce_xml.attr ('xmlns:mc', 'http://schemas.openxmlformats.org/markup-compatibility/2006', attrs_);
+      nyce_xml.attr ('mc:Ignorable', 'xr', attrs_);
+      nyce_xml.attr ('name', wb_.pivot_tables(pt_).pivot_name, attrs_);
+      nyce_xml.attr ('cacheId', wb_.pivot_tables(pt_).cache_id, attrs_);
+      nyce_xml.attr ('xmlns:xr', 'http://schemas.microsoft.com/office/spreadsheetml/2014/revision', attrs_);
+      nyce_xml.attr ('xr:uid', Get_Guid, attrs_);
+      nyce_xml.attr ('applyNumberFormats', '0', attrs_);
+      nyce_xml.attr ('applyBorderFormats', '0', attrs_);
+      nyce_xml.attr ('applyFontFormats', '0', attrs_);
+      nyce_xml.attr ('applyPatternFormats', '0', attrs_);
+      nyce_xml.attr ('applyAlignmentFormats', '0', attrs_);
+      nyce_xml.attr ('applyWidthHeightFormats', '1', attrs_);
+      nyce_xml.attr ('dataCaption', 'Values', attrs_);
+      nyce_xml.attr ('createdVersion', '7', attrs_); -- Version of Excel in which this pivot was created!
+      nyce_xml.attr ('updatedVersion', '7', attrs_);
+      nyce_xml.attr ('minRefreshableVersion', '3', attrs_); -- Minimum version of Excel which is compatible (apparently)
+      nyce_xml.attr ('useAutoFormatting', '1', attrs_);
+      nyce_xml.attr ('itemPrintTitles', '1', attrs_);
+      nyce_xml.attr ('indent', '0', attrs_);
+      nyce_xml.attr ('outline', '1', attrs_);
+      nyce_xml.attr ('outlineData', '1', attrs_);
+      nyce_xml.attr ('multipleFieldFilters', '0', attrs_);
+      nd_ptd_ := Nyce_Xml.Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'pivotTableDefinition', attrs_);
 
       wb_.pivot_tables(pt_).pivot_height := j_piv_.get_number('accum-records') + 2; -- +header, +grand-totals rows
       wb_.pivot_tables(pt_).pivot_width  := wb_.pivot_tables(pt_).pivot_axes.col_agg_fns.count + 1; -- assume for now that we only do v-rollups
@@ -5180,64 +5053,64 @@ Raise_App_Error ('chickens');
          )
       );
 
-      natr ('ref', Alfan_Range(pt_region_), attrs_);
-      attr ('firstHeaderRow', '1', attrs_);
-      attr ('firstDataRow', '1', attrs_);
-      attr ('firstDataCol', '1', attrs_);
-      Xml_Node (doc_, nd_ptd_, 'location', attrs_);
+      nyce_xml.natr ('ref', Alfan_Range(pt_region_), attrs_);
+      nyce_xml.attr ('firstHeaderRow', '1', attrs_);
+      nyce_xml.attr ('firstDataRow', '1', attrs_);
+      nyce_xml.attr ('firstDataCol', '1', attrs_);
+      Nyce_Xml.Xml_Node (doc_, nd_ptd_, 'location', attrs_);
 
-      natr ('count', to_char(cache_.cf_order.count), attrs_);
-      nd_pfs_ := Xml_Node (doc_, nd_ptd_, 'pivotFields', attrs_);
+      nyce_xml.natr ('count', to_char(cache_.cf_order.count), attrs_);
+      nd_pfs_ := Nyce_Xml.Xml_Node (doc_, nd_ptd_, 'pivotFields', attrs_);
 
       FOR cf_ix_ IN cache_.cf_order.first .. cache_.cf_order.last LOOP
 
          -- the rollup in the pivot-table needn't be the same as the rollup in
          -- the cache because a cache could serve multiple tables.  The rollup
          -- calculated here must therefore be that taken from the table
-         attrs_.delete;
+         nyce_xml.catr (attrs_);
          CASE Get_Agg_Fn_From_Axes (wb_.pivot_tables(pt_).pivot_axes, cf_ix_)
-            WHEN 'row' THEN attr ('axis', 'axisRow', attrs_);
-            WHEN 'sum' THEN attr ('dataField', '1', attrs_);
+            WHEN 'row' THEN nyce_xml.attr ('axis', 'axisRow', attrs_);
+            WHEN 'sum' THEN nyce_xml.attr ('dataField', '1', attrs_);
             ELSE null;
          END CASE;
-         attr ('showAll', 0, attrs_);
-         nd_pf_ := Xml_Node (doc_, nd_pfs_, 'pivotField', attrs_);
+         nyce_xml.attr ('showAll', 0, attrs_);
+         nd_pf_ := Nyce_Xml.Xml_Node (doc_, nd_pfs_, 'pivotField', attrs_);
 
          cf_ := cache_.cached_fields(cache_.cf_order(cf_ix_));
          IF cf_.shared_items.count > 0 THEN
-            natr ('count', to_char(cf_.shared_items.count + 1), attrs_);
-            nd_is_ := Xml_Node (doc_, nd_pf_, 'items', attrs_);
+            nyce_xml.natr ('count', to_char(cf_.shared_items.count + 1), attrs_);
+            nd_is_ := Nyce_Xml.Xml_Node (doc_, nd_pf_, 'items', attrs_);
 
             shared_item_ := cf_.shared_items.first;
             WHILE shared_item_ IS NOT null LOOP
-               natr ('x', cf_.shared_items(shared_item_), attrs_);
-               Xml_Node (doc_, nd_is_, 'item', attrs_);
+               nyce_xml.natr ('x', cf_.shared_items(shared_item_), attrs_);
+               Nyce_Xml.Xml_Node (doc_, nd_is_, 'item', attrs_);
                shared_item_ := cf_.shared_items.next(shared_item_);
             END LOOP;
-            natr ('t', 'default', attrs_);
-            Xml_Node (doc_, nd_is_, 'item', attrs_);
+            nyce_xml.natr ('t', 'default', attrs_);
+            Nyce_Xml.Xml_Node (doc_, nd_is_, 'item', attrs_);
          END IF;
 
       END LOOP;
 
-      natr ('count', to_char(wb_.pivot_tables(pt_).pivot_axes.vrollups.count), attrs_);
-      nd_pfs_ := Xml_Node (doc_, nd_ptd_, 'rowFields', attrs_);
+      nyce_xml.natr ('count', to_char(wb_.pivot_tables(pt_).pivot_axes.vrollups.count), attrs_);
+      nd_pfs_ := Nyce_Xml.Xml_Node (doc_, nd_ptd_, 'rowFields', attrs_);
 
       FOR r_ IN 1 .. wb_.pivot_tables(pt_).pivot_axes.vrollups.count LOOP
-         natr ('x', to_char(wb_.pivot_tables(pt_).pivot_axes.vrollups(r_) - 1), attrs_);
-         Xml_Node (doc_, nd_pfs_, 'field', attrs_);
+         nyce_xml.natr ('x', to_char(wb_.pivot_tables(pt_).pivot_axes.vrollups(r_) - 1), attrs_);
+         Nyce_Xml.Xml_Node (doc_, nd_pfs_, 'field', attrs_);
       END LOOP;
 
-      natr ('count', to_char(j_piv_.get_number('accum-records') + 1), attrs_);
-      nd_ri_ := Xml_Node (doc_, nd_ptd_, 'rowItems', attrs_);
+      nyce_xml.natr ('count', to_char(j_piv_.get_number('accum-records') + 1), attrs_);
+      nd_ri_ := Nyce_Xml.Xml_Node (doc_, nd_ptd_, 'rowItems', attrs_);
 
       Unravel_Json_Pivot_Table_Xml (doc_, nd_ri_, j_piv_, cache_);
 
-      natr ('count', 1, attrs_);
-      Xml_Node (doc_, Xml_Node (doc_, nd_ptd_, 'colItems', attrs_), 'i');
+      nyce_xml.natr ('count', 1, attrs_);
+      Nyce_Xml.Xml_Node (doc_, Nyce_Xml.Xml_Node (doc_, nd_ptd_, 'colItems', attrs_), 'i');
 
-      natr ('count', to_char(wb_.pivot_tables(pt_).pivot_axes.col_agg_fns.count), attrs_);
-      nd_dfs_ := Xml_Node (doc_, nd_ptd_, 'dataFields', attrs_);
+      nyce_xml.natr ('count', to_char(wb_.pivot_tables(pt_).pivot_axes.col_agg_fns.count), attrs_);
+      nd_dfs_ := Nyce_Xml.Xml_Node (doc_, nd_ptd_, 'dataFields', attrs_);
 
       FOR ix_ IN 1 .. wb_.pivot_tables(pt_).pivot_axes.col_agg_fns.count LOOP
          agg_col_ := wb_.pivot_tables(pt_).pivot_axes.col_agg_fns(ix_).colid;
@@ -5245,35 +5118,35 @@ Raise_App_Error ('chickens');
             WHEN 'count' THEN 'Count of '
             WHEN 'sum'   THEN 'Sum of '
          END;
-         natr ('name', prefix_ || Range_Col_Head_Name (cache_.ds_range, agg_col_), attrs_);
-         attr ('fld', agg_col_ - 1, attrs_); -- zero based, I think
-         attr ('baseField', '0', attrs_); -- used with showDataAs, which we aren't using for now
-         attr ('baseItem', '0', attrs_);
-         Xml_Node (doc_, nd_dfs_, 'dataField', attrs_);
+         nyce_xml.natr ('name', prefix_ || Range_Col_Head_Name (cache_.ds_range, agg_col_), attrs_);
+         nyce_xml.attr ('fld', agg_col_ - 1, attrs_); -- zero based, I think
+         nyce_xml.attr ('baseField', '0', attrs_); -- used with showDataAs, which we aren't using for now
+         nyce_xml.attr ('baseItem', '0', attrs_);
+         Nyce_Xml.Xml_Node (doc_, nd_dfs_, 'dataField', attrs_);
       END LOOP;
 
-      natr ('name', 'PivotStyleLight16', attrs_);
-      attr ('showRowHeaders', '1', attrs_);
-      attr ('showColHeaders', '1', attrs_);
-      attr ('showRowStripes', '0', attrs_);
-      attr ('showColStripes', '0', attrs_);
-      attr ('showLastColumn', '1', attrs_);
-      Xml_Node (doc_, nd_ptd_, 'pivotTableStyleInfo', attrs_);
+      nyce_xml.natr ('name', 'PivotStyleLight16', attrs_);
+      nyce_xml.attr ('showRowHeaders', '1', attrs_);
+      nyce_xml.attr ('showColHeaders', '1', attrs_);
+      nyce_xml.attr ('showRowStripes', '0', attrs_);
+      nyce_xml.attr ('showColStripes', '0', attrs_);
+      nyce_xml.attr ('showLastColumn', '1', attrs_);
+      Nyce_Xml.Xml_Node (doc_, nd_ptd_, 'pivotTableStyleInfo', attrs_);
 
-      nd_exl_ := Xml_Node (doc_, nd_ptd_, 'extLst');
+      nd_exl_ := Nyce_Xml.Xml_Node (doc_, nd_ptd_, 'extLst');
 
-      natr ('uri', Get_Guid, attrs_);
-      attr ('xmlns:x14', 'http://schemas.microsoft.com/office/spreadsheetml/2009/9/main', attrs_);
-      nd_ext_ := Xml_Node (doc_, nd_exl_, 'ext', attrs_);
+      nyce_xml.natr ('uri', Get_Guid, attrs_);
+      nyce_xml.attr ('xmlns:x14', 'http://schemas.microsoft.com/office/spreadsheetml/2009/9/main', attrs_);
+      nd_ext_ := Nyce_Xml.Xml_Node (doc_, nd_exl_, 'ext', attrs_);
 
-      natr ('hideValuesRow', '1', attrs_);
-      attr ('xmlns:xm', 'http://schemas.microsoft.com/office/excel/2006/main', attrs_);
-      Xml_Node (doc_, nd_ext_, 'pivotTableDefinition', 'x14', attrs_);
+      nyce_xml.natr ('hideValuesRow', '1', attrs_);
+      nyce_xml.attr ('xmlns:xm', 'http://schemas.microsoft.com/office/excel/2006/main', attrs_);
+      Nyce_Xml.Xml_Node (doc_, nd_ext_, 'pivotTableDefinition', 'x14', attrs_);
 
-      natr ('uri', Get_Guid, attrs_);
-      attr ('xmlns:xpdl', 'http://schemas.microsoft.com/office/spreadsheetml/2016/pivotdefaultlayout', attrs_);
-      nd_ext_ := Xml_Node (doc_, nd_exl_, 'ext', attrs_);
-      Xml_Node (doc_, nd_ext_, 'pivotTableDefinition16', 'xpdl');
+      nyce_xml.natr ('uri', Get_Guid, attrs_);
+      nyce_xml.attr ('xmlns:xpdl', 'http://schemas.microsoft.com/office/spreadsheetml/2016/pivotdefaultlayout', attrs_);
+      nd_ext_ := Nyce_Xml.Xml_Node (doc_, nd_exl_, 'ext', attrs_);
+      Nyce_Xml.Xml_Node (doc_, nd_ext_, 'pivotTableDefinition16', 'xpdl');
 
       Add1Xml (excel_, rep('xl/pivotTables/pivotTable:P1.xml',pt_), Dbms_XmlDom.getXmlType(doc_).getClobVal);
       Dbms_XmlDom.freeDocument (doc_);
@@ -5284,13 +5157,13 @@ Raise_App_Error ('chickens');
       doc_ := Dbms_XmlDom.newDomDocument;
       Dbms_XmlDom.setVersion (doc_, '1.0" encoding="UTF-8" standalone="yes');
 
-      natr ('xmlns', 'http://schemas.openxmlformats.org/package/2006/relationships', attrs_);
-      nd_rels_ := Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'Relationships', attrs_);
+      nyce_xml.natr ('xmlns', 'http://schemas.openxmlformats.org/package/2006/relationships', attrs_);
+      nd_rels_ := Nyce_Xml.Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'Relationships', attrs_);
 
-      natr ('Id', 'rId1', attrs_);
-      attr ('Type', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotCacheDefinition', attrs_);
-      attr ('Target', rep ('../pivotCache/pivotCacheDefinition:P1.xml', to_char(wb_.pivot_tables(pt_).cache_id)), attrs_);
-      Xml_Node (doc_, nd_rels_, 'Relationship', attrs_);
+      nyce_xml.natr ('Id', 'rId1', attrs_);
+      nyce_xml.attr ('Type', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotCacheDefinition', attrs_);
+      nyce_xml.attr ('Target', rep ('../pivotCache/pivotCacheDefinition:P1.xml', to_char(wb_.pivot_tables(pt_).cache_id)), attrs_);
+      Nyce_Xml.Xml_Node (doc_, nd_rels_, 'Relationship', attrs_);
 
       Add1Xml (excel_, rep('xl/pivotTables/_rels/pivotTable:P1.xml.rels',pt_), Dbms_XmlDom.getXmlType(doc_).getClobVal);
       Dbms_XmlDom.freeDocument (doc_);
@@ -5303,7 +5176,7 @@ PROCEDURE Finish_Drawings_Rels (
    excel_ IN OUT NOCOPY BLOB )
 IS
    doc_     dbms_XmlDom.DomDocument := Dbms_XmlDom.newDomDocument;
-   attrs_   xml_attrs_arr;
+   attrs_   nyce_xml.xml_attrs_arr;
    nd_rels_ dbms_XmlDom.DomNode;
 BEGIN
 
@@ -5314,14 +5187,14 @@ BEGIN
    -- xl/drawings/_rels/drawing1.xml.rels
    Dbms_XmlDom.setVersion (doc_, '1.0" encoding="UTF-8" standalone="yes');
 
-   natr ('xmlns', 'http://schemas.openxmlformats.org/package/2006/relationships', attrs_);
-   nd_rels_ := Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'Relationships', attrs_);
+   nyce_xml.natr ('xmlns', 'http://schemas.openxmlformats.org/package/2006/relationships', attrs_);
+   nd_rels_ := Nyce_Xml.Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'Relationships', attrs_);
 
    FOR dr_ IN 1 .. wb_.images.count LOOP
-      natr ('Id', 'rId' || dr_, attrs_);
-      attr ('Type', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/image', attrs_);
-      attr ('Target', rep ('../media/image:P1.:P2', dr_, wb_.images(dr_).extension), attrs_);
-      Xml_Node (doc_, nd_rels_, 'Relationship', attrs_);
+      nyce_xml.natr ('Id', 'rId' || dr_, attrs_);
+      nyce_xml.attr ('Type', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/image', attrs_);
+      nyce_xml.attr ('Target', rep ('../media/image:P1.:P2', dr_, wb_.images(dr_).extension), attrs_);
+      Nyce_Xml.Xml_Node (doc_, nd_rels_, 'Relationship', attrs_);
       Add1File (
          zipped_blob_ => excel_,
          filename_    => rep ('xl/media/image:P1.:P2', dr_, wb_.images(dr_).extension),
@@ -5342,7 +5215,7 @@ PROCEDURE Finish_Worksheet (
    s_     IN            PLS_INTEGER )
 IS
    doc_     dbms_XmlDom.DomDocument := Dbms_XmlDom.newDomDocument;
-   attrs_   xml_attrs_arr;
+   attrs_   nyce_xml.xml_attrs_arr;
    nd_ws_   dbms_XmlDom.DomNode;
    nd_svs_  dbms_XmlDom.DomNode;
    nd_sv_   dbms_XmlDom.DomNode;
@@ -5369,107 +5242,105 @@ BEGIN
 
    -- xl/worksheets/sheet:P1.xml
    Dbms_XmlDom.setVersion (doc_, '1.0" encoding="UTF-8" standalone="yes');
-   natr ('xmlns', 'http://schemas.openxmlformats.org/spreadsheetml/2006/main', attrs_);
-   attr ('xmlns:r', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships', attrs_);
-   attr ('xmlns:mc', 'http://schemas.openxmlformats.org/markup-compatibility/2006', attrs_);
-   attr ('xmlns:x14ac', 'http://schemas.microsoft.com/office/spreadsheetml/2009/9/ac', attrs_);
-   attr ('xmlns:xr', 'http://schemas.microsoft.com/office/spreadsheetml/2014/revision', attrs_);
-   --attr ('xmlns:x14', 'http://schemas.microsoft.com/office/spreadsheetml/2009/9/main', attrs_);
-   attr ('mc:Ignorable', 'x14ac', attrs_);
-   attr ('xr:uid', Get_Guid, attrs_);
-   nd_ws_ := Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'worksheet', attrs_);
+   nyce_xml.natr ('xmlns', 'http://schemas.openxmlformats.org/spreadsheetml/2006/main', attrs_);
+   nyce_xml.attr ('xmlns:r', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships', attrs_);
+   nyce_xml.attr ('xmlns:mc', 'http://schemas.openxmlformats.org/markup-compatibility/2006', attrs_);
+   nyce_xml.attr ('xmlns:x14ac', 'http://schemas.microsoft.com/office/spreadsheetml/2009/9/ac', attrs_);
+   nyce_xml.attr ('xmlns:xr', 'http://schemas.microsoft.com/office/spreadsheetml/2014/revision', attrs_);
+   --nyce_xml.attr ('xmlns:x14', 'http://schemas.microsoft.com/office/spreadsheetml/2009/9/main', attrs_);
+   nyce_xml.attr ('mc:Ignorable', 'x14ac', attrs_);
+   nyce_xml.attr ('xr:uid', Get_Guid, attrs_);
+   nd_ws_ := Nyce_Xml.Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'worksheet', attrs_);
    IF wb_.sheets(s_).tabcolor IS NOT null THEN
-      natr ('rgb', wb_.sheets(s_).tabcolor, attrs_);
-      Xml_Node (doc_, Xml_Node(doc_,nd_ws_,'sheetPr'), 'tabColor', attrs_);
+      nyce_xml.natr ('rgb', wb_.sheets(s_).tabcolor, attrs_);
+      Nyce_Xml.Xml_Node (doc_, Nyce_Xml.Xml_Node(doc_,nd_ws_,'sheetPr'), 'tabColor', attrs_);
    END IF;
 
-   natr (
+   nyce_xml.natr (
       'ref', Alfan_Range (
          col_tl_ => col_min_, row_tl_ => wb_.sheets(s_).rows.first,
          col_br_ => col_max_, row_br_ => wb_.sheets(s_).rows.last
       ), attrs_
    );
-   Xml_Node (doc_, nd_ws_, 'dimension', attrs_);
+   Nyce_Xml.Xml_Node (doc_, nd_ws_, 'dimension', attrs_);
 
-   nd_svs_ := Xml_Node (doc_, nd_ws_, 'sheetViews');
-   attrs_.delete;
-   IF s_ = 1 THEN attr ('tabSelected', '1', attrs_); END IF;
-   attr ('workbookViewId', '0', attrs_);
-   nd_sv_  := Xml_Node (doc_, nd_svs_, 'sheetView', attrs_);
+   nd_svs_ := Nyce_Xml.Xml_Node (doc_, nd_ws_, 'sheetViews');
+   nyce_xml.catr (attrs_);
+   IF s_ = 1 THEN nyce_xml.attr ('tabSelected', '1', attrs_); END IF;
+   nyce_xml.attr ('workbookViewId', '0', attrs_);
+   nd_sv_  := Nyce_Xml.Xml_Node (doc_, nd_svs_, 'sheetView', attrs_);
 
    IF wb_.sheets(s_).freeze_rows + wb_.sheets(s_).freeze_cols > 0 THEN
-      natr ('activePane', 'bottomLeft', attrs_);
-      attr ('state', 'frozen', attrs_);
+      nyce_xml.natr ('activePane', 'bottomLeft', attrs_);
+      nyce_xml.attr ('state', 'frozen', attrs_);
       IF wb_.sheets(s_).freeze_rows > 0 AND wb_.sheets(s_).freeze_cols > 0 THEN
-         attr ('xSplit', wb_.sheets(s_).freeze_cols, attrs_);
-         attr ('ySplit', wb_.sheets(s_).freeze_rows, attrs_);
-         attr ('topLeftCell', Alfan_Cell (wb_.sheets(s_).freeze_cols+1, wb_.sheets(s_).freeze_rows+1), attrs_);
+         nyce_xml.attr ('xSplit', wb_.sheets(s_).freeze_cols, attrs_);
+         nyce_xml.attr ('ySplit', wb_.sheets(s_).freeze_rows, attrs_);
+         nyce_xml.attr ('topLeftCell', Alfan_Cell (wb_.sheets(s_).freeze_cols+1, wb_.sheets(s_).freeze_rows+1), attrs_);
       ELSIF wb_.sheets(s_).freeze_rows > 0 THEN
-         attr ('ySplit', wb_.sheets(s_).freeze_rows, attrs_);
-         attr ('topLeftCell', Alfan_Cell (1, wb_.sheets(s_).freeze_rows+1), attrs_);
+         nyce_xml.attr ('ySplit', wb_.sheets(s_).freeze_rows, attrs_);
+         nyce_xml.attr ('topLeftCell', Alfan_Cell (1, wb_.sheets(s_).freeze_rows+1), attrs_);
       ELSIF wb_.sheets(s_).freeze_cols > 0 THEN
-         attr ('xSplit', wb_.sheets(s_).freeze_cols, attrs_);
-         attr ('topLeftCell', Alfan_Cell (wb_.sheets(s_).freeze_cols+1, 1), attrs_);
+         nyce_xml.attr ('xSplit', wb_.sheets(s_).freeze_cols, attrs_);
+         nyce_xml.attr ('topLeftCell', Alfan_Cell (wb_.sheets(s_).freeze_cols+1, 1), attrs_);
       END IF;
-      Xml_Node (doc_, nd_sv_, 'pane', attrs_);
+      Nyce_Xml.Xml_Node (doc_, nd_sv_, 'pane', attrs_);
    ELSE
-      natr ('activeCell', 'A1', attrs_);
-      attr ('sqref', 'A1', attrs_);
-      Xml_Node (doc_, nd_sv_, 'selection', attrs_);
+      nyce_xml.natr ('activeCell', 'A1', attrs_);
+      nyce_xml.attr ('sqref', 'A1', attrs_);
+      Nyce_Xml.Xml_Node (doc_, nd_sv_, 'selection', attrs_);
    END IF;
 
-   attrs_.delete;
-   natr ('defaultRowHeight', '15', attrs_);
-   attr ('x14ac:dyDescent', '0.25', attrs_);
-   Xml_Node (doc_, nd_ws_, 'sheetFormatPr', attrs_);
+   nyce_xml.natr ('defaultRowHeight', '15', attrs_);
+   nyce_xml.attr ('x14ac:dyDescent', '0.25', attrs_);
+   Nyce_Xml.Xml_Node (doc_, nd_ws_, 'sheetFormatPr', attrs_);
 
    IF wb_.sheets(s_).widths.count > 0 THEN
-      nd_cls_ := Xml_Node (doc_, nd_ws_, 'cols');
-      attrs_.delete;
+      nd_cls_ := Nyce_Xml.Xml_Node (doc_, nd_ws_, 'cols');
+      nyce_xml.catr (attrs_);
       col_ := wb_.sheets(s_).widths.first;
       WHILE col_ IS NOT null LOOP
-         natr ('min', col_, attrs_);
-         attr ('max', col_, attrs_);
-         attr ('width', to_char (wb_.sheets(s_).widths(col_), 'TM9', 'NLS_NUMERIC_CHARACTERS=.,'), attrs_);
-         attr ('customWidth', '1', attrs_);
-         Xml_Node (doc_, nd_cls_, 'col', attrs_);
+         nyce_xml.natr ('min', col_, attrs_);
+         nyce_xml.attr ('max', col_, attrs_);
+         nyce_xml.attr ('width', to_char (wb_.sheets(s_).widths(col_), 'TM9', 'NLS_NUMERIC_CHARACTERS=.,'), attrs_);
+         nyce_xml.attr ('customWidth', '1', attrs_);
+         Nyce_Xml.Xml_Node (doc_, nd_cls_, 'col', attrs_);
          col_ := wb_.sheets(s_).widths.next(col_);
       END LOOP;
    END IF;
 
-   nd_sd_ := Xml_Node (doc_, nd_ws_, 'sheetData');
+   nd_sd_ := Nyce_Xml.Xml_Node (doc_, nd_ws_, 'sheetData');
    row_   := wb_.sheets(s_).rows.first;
    WHILE row_ IS NOT null LOOP
-      natr ('r', to_char(row_), attrs_);
-      attr ('spans', to_char(col_min_) || ':' || to_char(col_max_), attrs_);
+      nyce_xml.natr ('r', to_char(row_), attrs_);
+      nyce_xml.attr ('spans', to_char(col_min_) || ':' || to_char(col_max_), attrs_);
       IF wb_.sheets(s_).row_fmts.exists(row_) AND wb_.sheets(s_).row_fmts(row_).height IS NOT null THEN
-         attr ('customHeight', '1', attrs_);
-         attr ('ht', to_char (wb_.sheets(s_).row_fmts(row_).height, 'TM9', 'NLS_NUMERIC_CHARACTERS=.,'), attrs_);
+         nyce_xml.attr ('customHeight', '1', attrs_);
+         nyce_xml.attr ('ht', to_char (wb_.sheets(s_).row_fmts(row_).height, 'TM9', 'NLS_NUMERIC_CHARACTERS=.,'), attrs_);
       END IF;
-      nd_r_ := Xml_Node (doc_, nd_sd_, 'row', attrs_);
+      nd_r_ := Nyce_Xml.Xml_Node (doc_, nd_sd_, 'row', attrs_);
 
       col_ := wb_.sheets(s_).rows(row_).first;
       WHILE col_ IS NOT null LOOP
-         natr ('r', Alfan_Cell (col_, row_), attrs_);
+         nyce_xml.natr ('r', Alfan_Cell (col_, row_), attrs_);
          IF wb_.sheets(s_).rows(row_)(col_).datatype IN (CELL_DT_STRING_, CELL_DT_HYPERLINK_) THEN
-            attr ('t', 's', attrs_);
+            nyce_xml.attr ('t', 's', attrs_);
          END IF;
          IF wb_.sheets(s_).rows(row_)(col_).style IS NOT null THEN
-            attr ('s', to_char(wb_.sheets(s_).rows(row_)(col_).style), attrs_);
+            nyce_xml.attr ('s', to_char(wb_.sheets(s_).rows(row_)(col_).style), attrs_);
          END IF;
-         nd_c_ := Xml_Node (doc_, nd_r_, 'c', attrs_);
+         nd_c_ := Nyce_Xml.Xml_Node (doc_, nd_r_, 'c', attrs_);
          IF wb_.sheets(s_).rows(row_)(col_).formula_idx IS NOT null THEN
-            Xml_Text_Node (doc_, nd_c_, 'f', wb_.formulas(wb_.sheets(s_).rows(row_)(col_).formula_idx));
+            Nyce_Xml.Xml_Text_Node (doc_, nd_c_, 'f', wb_.formulas(wb_.sheets(s_).rows(row_)(col_).formula_idx));
          END IF;
-         Xml_Text_Node (doc_, nd_c_, 'v', to_char(wb_.sheets(s_).rows(row_)(col_).value, 'TM9', 'NLS_NUMERIC_CHARACTERS=.,'));
+         Nyce_Xml.Xml_Text_Node (doc_, nd_c_, 'v', to_char(wb_.sheets(s_).rows(row_)(col_).value, 'TM9', 'NLS_NUMERIC_CHARACTERS=.,'));
          col_ := wb_.sheets(s_).rows(row_).next(col_);
       END LOOP;
       row_ := wb_.sheets(s_).rows.next(row_);
    END LOOP;
 
    FOR af_ IN 1 .. wb_.sheets(s_).autofilters.count LOOP
-      attrs_.delete;
-      natr (
+      nyce_xml.natr (
          'ref', Alfan_Range (
             col_tl_ => nvl (wb_.sheets(s_).autofilters(af_).column_start, col_min_),
             row_tl_ => nvl (wb_.sheets(s_).autofilters(af_).row_start, wb_.sheets(s_).rows.first),
@@ -5477,61 +5348,60 @@ BEGIN
             row_br_ => nvl (wb_.sheets(s_).autofilters(af_).row_end, wb_.sheets(s_).rows.last)
          ), attrs_
       );
-      Xml_Node (doc_, nd_ws_, 'autoFilter', attrs_);
+      Nyce_Xml.Xml_Node (doc_, nd_ws_, 'autoFilter', attrs_);
    END LOOP;
 
    IF wb_.sheets(s_).mergecells.count > 0 THEN
-      natr ('count', to_char(wb_.sheets(s_).mergecells.count), attrs_);
-      nd_mc_ := Xml_Node (doc_, nd_ws_, 'mergeCells', attrs_);
+      nyce_xml.natr ('count', to_char(wb_.sheets(s_).mergecells.count), attrs_);
+      nd_mc_ := Nyce_Xml.Xml_Node (doc_, nd_ws_, 'mergeCells', attrs_);
       FOR mg_ IN 1 .. wb_.sheets(s_).mergecells.count LOOP
-         natr ('ref', wb_.sheets(s_).mergecells(mg_), attrs_);
-         Xml_Node (doc_, nd_mc_, 'mergeCell', attrs_);
+         nyce_xml.natr ('ref', wb_.sheets(s_).mergecells(mg_), attrs_);
+         Nyce_Xml.Xml_Node (doc_, nd_mc_, 'mergeCell', attrs_);
       END LOOP;
    END IF;
 
    IF wb_.sheets(s_).validations.count > 0 THEN
-      natr ('count', to_char(wb_.sheets(s_).validations.count), attrs_);
-      nd_dvs_ := Xml_Node (doc_, nd_ws_, 'dataValidations');
+      nyce_xml.natr ('count', to_char(wb_.sheets(s_).validations.count), attrs_);
+      nd_dvs_ := Nyce_Xml.Xml_Node (doc_, nd_ws_, 'dataValidations');
 
       FOR v_ IN wb_.sheets(s_).validations.count LOOP
-         attrs_.delete;
-         natr ('type', wb_.sheets(s_).validations(v_).type, attrs_);
-         attr ('errorStyle', wb_.sheets(s_).validations(v_).errorstyle, attrs_);
-         attr ('allowBlank', CASE WHEN nvl(wb_.sheets(s_).validations(v_).allowBlank, true) THEN '1' ELSE '0' END, attrs_);
-         attr ('sqref', wb_.sheets(s_).validations(v_).sqref, attrs_);
+         nyce_xml.natr ('type', wb_.sheets(s_).validations(v_).type, attrs_);
+         nyce_xml.attr ('errorStyle', wb_.sheets(s_).validations(v_).errorstyle, attrs_);
+         nyce_xml.attr ('allowBlank', CASE WHEN nvl(wb_.sheets(s_).validations(v_).allowBlank, true) THEN '1' ELSE '0' END, attrs_);
+         nyce_xml.attr ('sqref', wb_.sheets(s_).validations(v_).sqref, attrs_);
          IF wb_.sheets(s_).validations(v_).prompt IS NOT null THEN
-            attr ('showInputMessage', '1', attrs_);
-            attr ('prompt', wb_.sheets(s_).validations(v_).prompt, attrs_);
+            nyce_xml.attr ('showInputMessage', '1', attrs_);
+            nyce_xml.attr ('prompt', wb_.sheets(s_).validations(v_).prompt, attrs_);
             IF wb_.sheets(s_).validations(v_).title IS NOT null THEN
-               attr ('promptTitle', wb_.sheets(s_).validations(v_).title, attrs_);
+               nyce_xml.attr ('promptTitle', wb_.sheets(s_).validations(v_).title, attrs_);
             END IF;
          END IF;
          IF wb_.sheets(s_).validations(v_).showerrormessage THEN
-            attr ('showErrorMessage', '1', attrs_);
+            nyce_xml.attr ('showErrorMessage', '1', attrs_);
             IF wb_.sheets(s_).validations(v_).error_title IS NOT null THEN
-               attr ('errorTitle', wb_.sheets(s_).validations(v_).error_title, attrs_);
+               nyce_xml.attr ('errorTitle', wb_.sheets(s_).validations(v_).error_title, attrs_);
             END IF;
             IF wb_.sheets(s_).validations(v_).error_txt IS NOT null THEN
-               attr ('error', wb_.sheets(s_).validations(v_).error_txt, attrs_);
+               nyce_xml.attr ('error', wb_.sheets(s_).validations(v_).error_txt, attrs_);
             END IF;
          END IF;
-         nd_dv_ := Xml_Node (doc_, nd_dvs_, 'dataValidation', attrs_);
+         nd_dv_ := Nyce_Xml.Xml_Node (doc_, nd_dvs_, 'dataValidation', attrs_);
 
          IF wb_.sheets(s_).validations(v_).formula1 IS NOT null THEN
-            Xml_Text_Node (doc_, nd_dv_, 'formula1', wb_.sheets(s_).validations(v_).formula1);
+            Nyce_Xml.Xml_Text_Node (doc_, nd_dv_, 'formula1', wb_.sheets(s_).validations(v_).formula1);
          END IF;
          IF wb_.sheets(s_).validations(v_).formula2 IS NOT null THEN
-            Xml_Text_Node (doc_, nd_dv_, 'formula2', wb_.sheets(s_).validations(v_).formula2);
+            Nyce_Xml.Xml_Text_Node (doc_, nd_dv_, 'formula2', wb_.sheets(s_).validations(v_).formula2);
          END IF;
       END LOOP;
    END IF;
 
    IF wb_.sheets(s_).hyperlinks.count > 0 THEN
-      nd_h_ := Xml_Node (doc_, nd_ws_, 'hyperlinks');
+      nd_h_ := Nyce_Xml.Xml_Node (doc_, nd_ws_, 'hyperlinks');
       FOR h_ IN 1 .. wb_.sheets(s_).hyperlinks.count LOOP
-         natr ('ref', wb_.sheets(s_).hyperlinks(h_).cell, attrs_);
-         attr ('r:id', rep ('rId:P1', id_), attrs_);
-         Xml_Node (doc_, nd_h_, 'hyperlink', attrs_);
+         nyce_xml.natr ('ref', wb_.sheets(s_).hyperlinks(h_).cell, attrs_);
+         nyce_xml.attr ('r:id', rep ('rId:P1', id_), attrs_);
+         Nyce_Xml.Xml_Node (doc_, nd_h_, 'hyperlink', attrs_);
          id_ := id_ + 1;
       END LOOP;
    END IF;
@@ -5544,23 +5414,23 @@ BEGIN
    -- a sheet).  Images and comments should still be allowed to be placed over
    -- pivot tables though (at least in principlet)
 
-   natr ('left', '0.7', attrs_);
-   attr ('right', '0.7', attrs_);
-   attr ('top', '0.75', attrs_);
-   attr ('bottom', '0.75', attrs_);
-   attr ('header', '0.3', attrs_);
-   attr ('footer', '0.3', attrs_);
-   Xml_Node (doc_, nd_ws_, 'pageMargins', attrs_);
+   nyce_xml.natr ('left', '0.7', attrs_);
+   nyce_xml.attr ('right', '0.7', attrs_);
+   nyce_xml.attr ('top', '0.75', attrs_);
+   nyce_xml.attr ('bottom', '0.75', attrs_);
+   nyce_xml.attr ('header', '0.3', attrs_);
+   nyce_xml.attr ('footer', '0.3', attrs_);
+   Nyce_Xml.Xml_Node (doc_, nd_ws_, 'pageMargins', attrs_);
 
    IF wb_.sheets(s_).drawings.count > 0 THEN
-      natr ('r:id', rep ('rId:P1', id_), attrs_);
-      Xml_Node (doc_, nd_ws_, 'drawing', attrs_);
+      nyce_xml.natr ('r:id', rep ('rId:P1', id_), attrs_);
+      Nyce_Xml.Xml_Node (doc_, nd_ws_, 'drawing', attrs_);
       id_ := id_ + 1;
    END IF;
    
    IF wb_.sheets(s_).comments.count > 0 THEN
-      natr ('r:id', 'rId' || id_, attrs_);
-      Xml_Node (doc_, nd_ws_, 'legacyDrawing', attrs_);
+      nyce_xml.natr ('r:id', 'rId' || id_, attrs_);
+      Nyce_Xml.Xml_Node (doc_, nd_ws_, 'legacyDrawing', attrs_);
    END IF;
 
    Add1Xml (excel_, rep('xl/worksheets/sheet:P1.xml',to_char(s_)), Dbms_XmlDom.getXmlType(doc_).getClobVal);
@@ -5579,7 +5449,7 @@ IS
    nr_drawings_   PLS_INTEGER := wb_.sheets(s_).drawings.count;
    pivot_id_      PLS_INTEGER;
    doc_           dbms_XmlDom.DomDocument := Dbms_XmlDom.newDomDocument;
-   attrs_         xml_attrs_arr;
+   attrs_         nyce_xml.xml_attrs_arr;
    nd_rels_       dbms_XmlDom.DomNode;
 BEGIN
 
@@ -5588,44 +5458,44 @@ BEGIN
    END IF;
 
    Dbms_XmlDom.setVersion (doc_, '1.0" encoding="UTF-8" standalone="yes');
-   natr ('xmlns', 'http://schemas.openxmlformats.org/package/2006/relationships', attrs_);
-   nd_rels_ := Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'Relationships', attrs_);
+   nyce_xml.natr ('xmlns', 'http://schemas.openxmlformats.org/package/2006/relationships', attrs_);
+   nd_rels_ := Nyce_Xml.Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'Relationships', attrs_);
 
    FOR h_ IN 1 .. nr_hyperlinks_ LOOP
       IF wb_.sheets(s_).hyperlinks(h_).url IS NOT null THEN
-         natr ('Id', rep ('rId:P1', id_), attrs_);
-         attr ('Type', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink', attrs_);
-         attr ('Target',  wb_.sheets(s_).hyperlinks(h_).url, attrs_);
-         attr ('TargetMode', 'External', attrs_);
-         Xml_Node (doc_, nd_rels_, 'Relationship', attrs_);
+         nyce_xml.natr ('Id', rep ('rId:P1', id_), attrs_);
+         nyce_xml.attr ('Type', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink', attrs_);
+         nyce_xml.attr ('Target',  wb_.sheets(s_).hyperlinks(h_).url, attrs_);
+         nyce_xml.attr ('TargetMode', 'External', attrs_);
+         Nyce_Xml.Xml_Node (doc_, nd_rels_, 'Relationship', attrs_);
          id_ := id_ + 1;
       END IF;
    END LOOP;
    IF nr_drawings_ > 0 THEN
-      natr ('Id', rep ('rId:P1', id_), attrs_);
-      attr ('Type', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing', attrs_);
-      attr ('Target', rep ('../drawings/drawing:P1.xml', to_char(s_)), attrs_);
-      Xml_Node (doc_, nd_rels_, 'Relationship', attrs_);
+      nyce_xml.natr ('Id', rep ('rId:P1', id_), attrs_);
+      nyce_xml.attr ('Type', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing', attrs_);
+      nyce_xml.attr ('Target', rep ('../drawings/drawing:P1.xml', to_char(s_)), attrs_);
+      Nyce_Xml.Xml_Node (doc_, nd_rels_, 'Relationship', attrs_);
       id_ := id_ + 1;
    END IF;
    IF nr_comments_ > 0 THEN
-      natr ('Id', rep ('rId:P1', id_), attrs_);
-      attr ('Type', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/vmlDrawing', attrs_);
-      attr ('Target', rep ('../drawings/vmlDrawing:P1.vml', to_char(s_)), attrs_);
-      Xml_Node (doc_, nd_rels_, 'Relationship', attrs_);
+      nyce_xml.natr ('Id', rep ('rId:P1', id_), attrs_);
+      nyce_xml.attr ('Type', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/vmlDrawing', attrs_);
+      nyce_xml.attr ('Target', rep ('../drawings/vmlDrawing:P1.vml', to_char(s_)), attrs_);
+      Nyce_Xml.Xml_Node (doc_, nd_rels_, 'Relationship', attrs_);
       id_ := id_ + 1;
-      natr ('Id', rep('rId:P1', id_), attrs_);
-      attr ('Type', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments', attrs_);
-      attr ('Target', rep ('../comments:P1.xml', to_char(s_)), attrs_);
-      Xml_Node (doc_, nd_rels_, 'Relationship', attrs_);
+      nyce_xml.natr ('Id', rep('rId:P1', id_), attrs_);
+      nyce_xml.attr ('Type', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments', attrs_);
+      nyce_xml.attr ('Target', rep ('../comments:P1.xml', to_char(s_)), attrs_);
+      Nyce_Xml.Xml_Node (doc_, nd_rels_, 'Relationship', attrs_);
       id_ := id_ + 1;
    END IF;
    FOR spid_ IN 1 .. wb_.sheets(s_).pivots_list.count LOOP
       pivot_id_ := wb_.sheets(s_).pivots_list(spid_);
-      natr ('Id', 'rId' || to_char(id_), attrs_);
-      attr ('Type', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotTable', attrs_);
-      attr ('Target', rep ('../pivotTables/pivotTable:P1.xml', pivot_id_), attrs_);
-      Xml_Node (doc_, nd_rels_, 'Relationship', attrs_);
+      nyce_xml.natr ('Id', 'rId' || to_char(id_), attrs_);
+      nyce_xml.attr ('Type', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotTable', attrs_);
+      nyce_xml.attr ('Target', rep ('../pivotTables/pivotTable:P1.xml', pivot_id_), attrs_);
+      Nyce_Xml.Xml_Node (doc_, nd_rels_, 'Relationship', attrs_);
       id_ := id_ + 1;
    END LOOP;
 
@@ -5703,24 +5573,24 @@ PROCEDURE Finish_Ws_Drawings (
    excel_ IN OUT NOCOPY BLOB,
    s_     IN            PLS_INTEGER )
 IS
-   doc_        dbms_XmlDom.DomDocument := Dbms_XmlDom.newDomDocument;
-   nd_ws_      dbms_XmlDom.DomNode;
-   nd_tc_      dbms_XmlDom.DomNode;
-   nd_fr_      dbms_XmlDom.DomNode;
-   nd_to_      dbms_XmlDom.DomNode;
-   nd_pi_      dbms_XmlDom.DomNode;
-   nd_nv_      dbms_XmlDom.DomNode;
-   nd_cn_      dbms_XmlDom.DomNode;
-   nd_bf_      dbms_XmlDom.DomNode;
-   nd_bl_      dbms_XmlDom.DomNode;
-   nd_el_      dbms_XmlDom.DomNode;
-   nd_et_      dbms_XmlDom.DomNode;
-   attrs_      xml_attrs_arr;
-   drawing_    tp_drawing;
-   to_col_     PLS_INTEGER;
-   to_row_     PLS_INTEGER;
-   col_ovfl_  NUMBER;
-   row_ovfl_   NUMBER;
+   doc_      dbms_XmlDom.DomDocument := Dbms_XmlDom.newDomDocument;
+   nd_ws_    dbms_XmlDom.DomNode;
+   nd_tc_    dbms_XmlDom.DomNode;
+   nd_fr_    dbms_XmlDom.DomNode;
+   nd_to_    dbms_XmlDom.DomNode;
+   nd_pi_    dbms_XmlDom.DomNode;
+   nd_nv_    dbms_XmlDom.DomNode;
+   nd_cn_    dbms_XmlDom.DomNode;
+   nd_bf_    dbms_XmlDom.DomNode;
+   nd_bl_    dbms_XmlDom.DomNode;
+   nd_el_    dbms_XmlDom.DomNode;
+   nd_et_    dbms_XmlDom.DomNode;
+   attrs_    nyce_xml.xml_attrs_arr;
+   drawing_  tp_drawing;
+   to_col_   PLS_INTEGER;
+   to_row_   PLS_INTEGER;
+   col_ovfl_ NUMBER;
+   row_ovfl_ NUMBER;
 BEGIN
 
    IF wb_.sheets(s_).drawings.count = 0 THEN
@@ -5729,61 +5599,61 @@ BEGIN
 
    -- xl/drawings/drawing:P1.xml
    Dbms_XmlDom.setVersion (doc_, '1.0" encoding="UTF-8" standalone="yes');
-   natr ('xmlns:xdr', 'http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing', attrs_);
-   attr ('xmlns:a', 'http://schemas.openxmlformats.org/drawingml/2006/main', attrs_);
-   nd_ws_ := Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'wsDr', 'xdr', attrs_);
+   nyce_xml.natr ('xmlns:xdr', 'http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing', attrs_);
+   nyce_xml.attr ('xmlns:a', 'http://schemas.openxmlformats.org/drawingml/2006/main', attrs_);
+   nd_ws_ := Nyce_Xml.Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'wsDr', 'xdr', attrs_);
 
    FOR img_ IN 1 .. wb_.sheets(s_).drawings.count LOOP
 
       drawing_ := wb_.sheets(s_).drawings(img_);
       Calc_Image_Col_And_Row (to_col_, to_row_, col_ovfl_, row_ovfl_, drawing_, s_);
 
-      natr ('editAs', 'oneCell', attrs_);
-      nd_tc_ := Xml_Node (doc_, nd_ws_, 'twoCellAnchor', 'xdr', attrs_);
+      nyce_xml.natr ('editAs', 'oneCell', attrs_);
+      nd_tc_ := Nyce_Xml.Xml_Node (doc_, nd_ws_, 'twoCellAnchor', 'xdr', attrs_);
 
-      nd_fr_ := Xml_Node (doc_, nd_tc_, 'from', 'xdr');
-      Xml_Text_Node (doc_, nd_fr_, 'col', to_char(drawing_.col-1), 'xdr');
-      Xml_Text_Node (doc_, nd_fr_, 'colOff', '0', 'xdr');
-      Xml_Text_Node (doc_, nd_fr_, 'row', to_char(drawing_.row-1), 'xdr');
-      Xml_Text_Node (doc_, nd_fr_, 'rowOff', '0', 'xdr');
+      nd_fr_ := Nyce_Xml.Xml_Node (doc_, nd_tc_, 'from', 'xdr');
+      Nyce_Xml.Xml_Text_Node (doc_, nd_fr_, 'col', to_char(drawing_.col-1), 'xdr');
+      Nyce_Xml.Xml_Text_Node (doc_, nd_fr_, 'colOff', '0', 'xdr');
+      Nyce_Xml.Xml_Text_Node (doc_, nd_fr_, 'row', to_char(drawing_.row-1), 'xdr');
+      Nyce_Xml.Xml_Text_Node (doc_, nd_fr_, 'rowOff', '0', 'xdr');
 
-      nd_to_ := Xml_Node (doc_, nd_tc_, 'to', 'xdr');
-      Xml_Text_Node (doc_, nd_to_, 'col', to_char(to_col_), 'xdr');
-      Xml_Text_Node (doc_, nd_to_, 'colOff', to_char(col_ovfl_), 'xdr');
-      Xml_Text_Node (doc_, nd_to_, 'row', to_char(to_row_), 'xdr');
-      Xml_Text_Node (doc_, nd_to_, 'rowOff', to_char(row_ovfl_), 'xdr');
+      nd_to_ := Nyce_Xml.Xml_Node (doc_, nd_tc_, 'to', 'xdr');
+      Nyce_Xml.Xml_Text_Node (doc_, nd_to_, 'col', to_char(to_col_), 'xdr');
+      Nyce_Xml.Xml_Text_Node (doc_, nd_to_, 'colOff', to_char(col_ovfl_), 'xdr');
+      Nyce_Xml.Xml_Text_Node (doc_, nd_to_, 'row', to_char(to_row_), 'xdr');
+      Nyce_Xml.Xml_Text_Node (doc_, nd_to_, 'rowOff', to_char(row_ovfl_), 'xdr');
 
-      nd_pi_ := Xml_Node (doc_, nd_tc_, 'pic', 'xdr');
-      nd_nv_ := Xml_Node (doc_, nd_pi_, 'nvPicPr', 'xdr');
+      nd_pi_ := Nyce_Xml.Xml_Node (doc_, nd_tc_, 'pic', 'xdr');
+      nd_nv_ := Nyce_Xml.Xml_Node (doc_, nd_pi_, 'nvPicPr', 'xdr');
 
-      natr ('id', '3', attrs_);
-      attr ('name', coalesce (drawing_.name, 'Picture '||img_), attrs_);
-      IF drawing_.title       IS NOT null THEN attr('title', drawing_.title, attrs_); END IF;
-      IF drawing_.description IS NOT null THEN attr('descr', drawing_.description, attrs_); END IF;
-      Xml_Node (doc_, nd_nv_, 'cNvPr', 'xdr', attrs_);
-      nd_cn_ := Xml_Node (doc_, nd_nv_, 'cNvPicPr', 'xdr');
+      nyce_xml.natr ('id', '3', attrs_);
+      nyce_xml.attr ('name', coalesce (drawing_.name, 'Picture '||img_), attrs_);
+      IF drawing_.title       IS NOT null THEN nyce_xml.attr('title', drawing_.title, attrs_); END IF;
+      IF drawing_.description IS NOT null THEN nyce_xml.attr('descr', drawing_.description, attrs_); END IF;
+      Nyce_Xml.Xml_Node (doc_, nd_nv_, 'cNvPr', 'xdr', attrs_);
+      nd_cn_ := Nyce_Xml.Xml_Node (doc_, nd_nv_, 'cNvPicPr', 'xdr');
 
-      natr ('noChangeAspect', '1', attrs_);
-      Xml_Node (doc_, nd_cn_, 'picLocks', 'a', attrs_);
+      nyce_xml.natr ('noChangeAspect', '1', attrs_);
+      Nyce_Xml.Xml_Node (doc_, nd_cn_, 'picLocks', 'a', attrs_);
 
-      nd_bf_ := Xml_Node (doc_, nd_pi_, 'blipFill', 'xdr');
+      nd_bf_ := Nyce_Xml.Xml_Node (doc_, nd_pi_, 'blipFill', 'xdr');
 
-      natr ('xmlns:r', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships', attrs_);
-      attr ('r:embed', rep ('rId:P1', to_char(drawing_.img_id)), attrs_);
-      nd_bl_ := Xml_Node (doc_, nd_bf_, 'blip', 'a', attrs_);
-      nd_et_ := Xml_Node (doc_, nd_bl_, 'extLst', 'a');
+      nyce_xml.natr ('xmlns:r', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships', attrs_);
+      nyce_xml.attr ('r:embed', rep ('rId:P1', to_char(drawing_.img_id)), attrs_);
+      nd_bl_ := Nyce_Xml.Xml_Node (doc_, nd_bf_, 'blip', 'a', attrs_);
+      nd_et_ := Nyce_Xml.Xml_Node (doc_, nd_bl_, 'extLst', 'a');
 
-      natr ('uri', Get_Guid, attrs_);
-      nd_el_ := Xml_Node (doc_, nd_et_, 'ext', 'a', attrs_);
+      nyce_xml.natr ('uri', Get_Guid, attrs_);
+      nd_el_ := Nyce_Xml.Xml_Node (doc_, nd_et_, 'ext', 'a', attrs_);
 
-      natr ('xmlns:a14', 'http://schemas.microsoft.com/office/drawing/2010/main', attrs_);
-      attr ('val', '0', attrs_);
-      Xml_Node (doc_, nd_el_, 'useLocalDpi', 'a14', attrs_);
-      Xml_Node (doc_, Xml_Node(doc_,nd_bf_,'stretch','a'), 'fillRect', 'a');
+      nyce_xml.natr ('xmlns:a14', 'http://schemas.microsoft.com/office/drawing/2010/main', attrs_);
+      nyce_xml.attr ('val', '0', attrs_);
+      Nyce_Xml.Xml_Node (doc_, nd_el_, 'useLocalDpi', 'a14', attrs_);
+      Nyce_Xml.Xml_Node (doc_, Nyce_Xml.Xml_Node(doc_,nd_bf_,'stretch','a'), 'fillRect', 'a');
 
-      natr ('prst', 'rect', attrs_);
-      Xml_Node (doc_, Xml_Node(doc_,nd_pi_,'spPr','xdr'), 'prstGeom', 'a', attrs_);
-      Xml_Node (doc_, nd_tc_, 'clientData', 'xdr');
+      nyce_xml.natr ('prst', 'rect', attrs_);
+      Nyce_Xml.Xml_Node (doc_, Nyce_Xml.Xml_Node(doc_,nd_pi_,'spPr','xdr'), 'prstGeom', 'a', attrs_);
+      Nyce_Xml.Xml_Node (doc_, nd_tc_, 'clientData', 'xdr');
 
    END LOOP;
 
@@ -5816,7 +5686,7 @@ IS
    nd_sh_         dbms_XmlDom.DomNode;
    nd_tb_         dbms_XmlDom.DomNode;
    nd_cd_         dbms_XmlDom.DomNode;
-   attrs_         xml_attrs_arr;
+   attrs_         nyce_xml.xml_attrs_arr;
    nl_            VARCHAR2(2);
    comment_w_rem_ NUMBER;
    comment_h_     NUMBER;
@@ -5835,61 +5705,61 @@ BEGIN
    -- xl/comments:P1.xml
    Dbms_XmlDom.setVersion (doc_, '1.0" encoding="UTF-8" standalone="yes');
 
-   natr ('xmlns', 'http://schemas.openxmlformats.org/spreadsheetml/2006/main', attrs_);
-   nd_cms_ := Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'comments', attrs_);
-   nd_aus_ := Xml_Node (doc_, nd_cms_, 'authors');
+   nyce_xml.natr ('xmlns', 'http://schemas.openxmlformats.org/spreadsheetml/2006/main', attrs_);
+   nd_cms_ := Nyce_Xml.Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'comments', attrs_);
+   nd_aus_ := Nyce_Xml.Xml_Node (doc_, nd_cms_, 'authors');
    author_ := ws_authors_.first;
    WHILE author_ IS NOT null OR ws_authors_.next(author_) IS NOT null LOOP
       ws_authors_(author_) := au_count_;
-      Xml_Text_Node (doc_, nd_aus_, 'author', author_);
+      Nyce_Xml.Xml_Text_Node (doc_, nd_aus_, 'author', author_);
       au_count_  := au_count_ + 1;
       author_ := ws_authors_.next(author_);
    END LOOP;
 
-   nd_cml_ := Xml_Node (doc_, nd_cms_, 'commentList');
+   nd_cml_ := Nyce_Xml.Xml_Node (doc_, nd_cms_, 'commentList');
    FOR cm_ IN 1 .. wb_.sheets(s_).comments.count LOOP
-      natr ('ref', Alfan_Cell (wb_.sheets(s_).comments(cm_).column, wb_.sheets(s_).comments(cm_).row), attrs_);
-      attr ('authorId', ws_authors_(wb_.sheets(s_).comments(cm_).author), attrs_);
-      nd_cm_ := Xml_Node (doc_, nd_cml_, 'comment', attrs_);
-      nd_tx_ := Xml_Node (doc_, nd_cm_, 'text');
+      nyce_xml.natr ('ref', Alfan_Cell (wb_.sheets(s_).comments(cm_).column, wb_.sheets(s_).comments(cm_).row), attrs_);
+      nyce_xml.attr ('authorId', ws_authors_(wb_.sheets(s_).comments(cm_).author), attrs_);
+      nd_cm_ := Nyce_Xml.Xml_Node (doc_, nd_cml_, 'comment', attrs_);
+      nd_tx_ := Nyce_Xml.Xml_Node (doc_, nd_cm_, 'text');
       IF wb_.sheets(s_).comments(cm_).author IS NOT null THEN
-         nd_r_  := Xml_Node (doc_, nd_tx_, 'r');
-         nd_pr_ := Xml_Node (doc_, nd_r_, 'rPr');
-         Xml_Node (doc_, nd_pr_, 'b');
+         nd_r_  := Nyce_Xml.Xml_Node (doc_, nd_tx_, 'r');
+         nd_pr_ := Nyce_Xml.Xml_Node (doc_, nd_r_, 'rPr');
+         Nyce_Xml.Xml_Node (doc_, nd_pr_, 'b');
 
-         natr ('val', '9', attrs_);
-         Xml_Node (doc_, nd_pr_, 'sz', attrs_);
+         nyce_xml.natr ('val', '9', attrs_);
+         Nyce_Xml.Xml_Node (doc_, nd_pr_, 'sz', attrs_);
 
-         natr ('indexed', '81', attrs_);
-         Xml_Node (doc_, nd_pr_, 'color', attrs_);
+         nyce_xml.natr ('indexed', '81', attrs_);
+         Nyce_Xml.Xml_Node (doc_, nd_pr_, 'color', attrs_);
 
-         natr ('val', 'Tahoma', attrs_);
-         Xml_Node (doc_, nd_pr_, 'rFont', attrs_);
+         nyce_xml.natr ('val', 'Tahoma', attrs_);
+         Nyce_Xml.Xml_Node (doc_, nd_pr_, 'rFont', attrs_);
 
-         natr ('val', '1', attrs_);
-         Xml_Node (doc_, nd_pr_, 'charset', attrs_);
+         nyce_xml.natr ('val', '1', attrs_);
+         Nyce_Xml.Xml_Node (doc_, nd_pr_, 'charset', attrs_);
 
-         natr ('xml:space', 'preserve', attrs_);
-         Xml_Text_Node (doc_, nd_r_, 't', wb_.sheets(s_).comments(cm_).author, attrs_);
+         nyce_xml.natr ('xml:space', 'preserve', attrs_);
+         Nyce_Xml.Xml_Text_Node (doc_, nd_r_, 't', wb_.sheets(s_).comments(cm_).author, attrs_);
       END IF;
-      nd_r_  := Xml_Node (doc_, nd_tx_, 'r');
-      nd_pr_ := Xml_Node (doc_, nd_r_, 'rPr');
+      nd_r_  := Nyce_Xml.Xml_Node (doc_, nd_tx_, 'r');
+      nd_pr_ := Nyce_Xml.Xml_Node (doc_, nd_r_, 'rPr');
 
-      natr ('val', '9', attrs_);
-      Xml_Node (doc_, nd_pr_, 'sz', attrs_);
+      nyce_xml.natr ('val', '9', attrs_);
+      Nyce_Xml.Xml_Node (doc_, nd_pr_, 'sz', attrs_);
 
-      natr ('indexed', '81', attrs_);
-      Xml_Node (doc_, nd_pr_, 'color', attrs_);
+      nyce_xml.natr ('indexed', '81', attrs_);
+      Nyce_Xml.Xml_Node (doc_, nd_pr_, 'color', attrs_);
 
-      natr ('val', 'Tahoma', attrs_);
-      Xml_Node (doc_, nd_pr_, 'rFont', attrs_);
+      nyce_xml.natr ('val', 'Tahoma', attrs_);
+      Nyce_Xml.Xml_Node (doc_, nd_pr_, 'rFont', attrs_);
 
-      natr ('val', '1', attrs_);
-      Xml_Node (doc_, nd_pr_, 'charset', attrs_);
+      nyce_xml.natr ('val', '1', attrs_);
+      Nyce_Xml.Xml_Node (doc_, nd_pr_, 'charset', attrs_);
 
-      natr ('xml:space', 'preserve', attrs_);
+      nyce_xml.natr ('xml:space', 'preserve', attrs_);
       nl_ := CASE WHEN wb_.sheets(s_).comments(cm_).author IS NOT null THEN chr(13) || chr(10) END;
-      Xml_Text_Node (doc_, nd_r_, 't', nl_ || wb_.sheets(s_).comments(cm_).text, attrs_);
+      Nyce_Xml.Xml_Text_Node (doc_, nd_r_, 't', nl_ || wb_.sheets(s_).comments(cm_).text, attrs_);
    END LOOP;
 
    Add1Xml (excel_, rep('xl/comments:P1.xml',s_), Dbms_XmlDom.getXmlType(doc_).getClobVal);
@@ -5899,60 +5769,60 @@ BEGIN
    -- xl/drawings/vmlDrawing:P1.vml
    doc_ := Dbms_XmlDom.newDomDocument;
 
-   natr ('xmlns:v', 'urn:schemas-microsoft-com:vml', attrs_);
-   attr ('xmlns:o', 'urn:schemas-microsoft-com:office:office', attrs_);
-   attr ('xmlns:x', 'urn:schemas-microsoft-com:office:excel', attrs_);
-   nd_xml_ := Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'xml', attrs_);
+   nyce_xml.natr ('xmlns:v', 'urn:schemas-microsoft-com:vml', attrs_);
+   nyce_xml.attr ('xmlns:o', 'urn:schemas-microsoft-com:office:office', attrs_);
+   nyce_xml.attr ('xmlns:x', 'urn:schemas-microsoft-com:office:excel', attrs_);
+   nd_xml_ := Nyce_Xml.Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'xml', attrs_);
 
-   natr ('v:ext', 'edit', attrs_);
-   nd_sl_ := Xml_Node (doc_, nd_xml_, 'shapelayout', 'o', attrs_);
+   nyce_xml.natr ('v:ext', 'edit', attrs_);
+   nd_sl_ := Nyce_Xml.Xml_Node (doc_, nd_xml_, 'shapelayout', 'o', attrs_);
 
-   natr ('v:ext', 'edit', attrs_);
-   attr ('data', '2', attrs_);
-   Xml_Node (doc_, nd_sl_, 'idmap', 'o', attrs_);
-   attrs_.delete;
-   natr ('id', '_x0000_t202', attrs_);
-   attr ('coordsize', '21600,21600', attrs_);
-   attr ('o:spt', '202', attrs_);
-   attr ('path', 'm,l,21600r21600,l21600,xe', attrs_);
-   nd_st_ := Xml_Node (doc_, nd_xml_, 'shapetype', 'v', attrs_);
+   nyce_xml.natr ('v:ext', 'edit', attrs_);
+   nyce_xml.attr ('data', '2', attrs_);
+   Nyce_Xml.Xml_Node (doc_, nd_sl_, 'idmap', 'o', attrs_);
 
-   natr ('joinstyle', 'miter', attrs_);
-   Xml_Node (doc_, nd_st_, 'stroke', 'v', attrs_);
+   nyce_xml.natr ('id', '_x0000_t202', attrs_);
+   nyce_xml.attr ('coordsize', '21600,21600', attrs_);
+   nyce_xml.attr ('o:spt', '202', attrs_);
+   nyce_xml.attr ('path', 'm,l,21600r21600,l21600,xe', attrs_);
+   nd_st_ := Nyce_Xml.Xml_Node (doc_, nd_xml_, 'shapetype', 'v', attrs_);
 
-   natr ('gradientshapeok', 't', attrs_);
-   attr ('o:connecttype', 'rect', attrs_);
-   Xml_Node (doc_, nd_st_, 'path', 'v', attrs_);
+   nyce_xml.natr ('joinstyle', 'miter', attrs_);
+   Nyce_Xml.Xml_Node (doc_, nd_st_, 'stroke', 'v', attrs_);
+
+   nyce_xml.natr ('gradientshapeok', 't', attrs_);
+   nyce_xml.attr ('o:connecttype', 'rect', attrs_);
+   Nyce_Xml.Xml_Node (doc_, nd_st_, 'path', 'v', attrs_);
 
    FOR cm_ IN 1 .. wb_.sheets(s_).comments.count LOOP
 
-      natr ('id', rep('_x0000_s:P1', to_char(cm_)), attrs_);
-      attr ('type', '#_x0000_t202', attrs_);
-      attr ('style', rep ('position:absolute;margin-left:35.25pt;margin-top:3pt;z-index::P1;visibility:hidden;', to_char(cm_)), attrs_);
-      attr ('fillcolor', '#ffffe1', attrs_);
-      attr ('o:insetmode', 'auto', attrs_);
-      nd_sh_ := Xml_Node (doc_, nd_xml_, 'shape', 'v', attrs_);
+      nyce_xml.natr ('id', rep('_x0000_s:P1', to_char(cm_)), attrs_);
+      nyce_xml.attr ('type', '#_x0000_t202', attrs_);
+      nyce_xml.attr ('style', rep ('position:absolute;margin-left:35.25pt;margin-top:3pt;z-index::P1;visibility:hidden;', to_char(cm_)), attrs_);
+      nyce_xml.attr ('fillcolor', '#ffffe1', attrs_);
+      nyce_xml.attr ('o:insetmode', 'auto', attrs_);
+      nd_sh_ := Nyce_Xml.Xml_Node (doc_, nd_xml_, 'shape', 'v', attrs_);
 
-      natr ('color2', '#ffffe1', attrs_);
-      Xml_Node (doc_, nd_sh_, 'fill', 'v', attrs_);
+      nyce_xml.natr ('color2', '#ffffe1', attrs_);
+      Nyce_Xml.Xml_Node (doc_, nd_sh_, 'fill', 'v', attrs_);
 
-      natr ('n', 't', attrs_);
-      attr ('color', 'black', attrs_);
-      attr ('obscured', 't', attrs_);
-      Xml_Node (doc_, nd_sh_, 'shadow', 'v', attrs_);
+      nyce_xml.natr ('n', 't', attrs_);
+      nyce_xml.attr ('color', 'black', attrs_);
+      nyce_xml.attr ('obscured', 't', attrs_);
+      Nyce_Xml.Xml_Node (doc_, nd_sh_, 'shadow', 'v', attrs_);
 
-      natr ('o:connecttype', 'none', attrs_);
-      Xml_Node (doc_, nd_sh_, 'path', 'v', attrs_);
+      nyce_xml.natr ('o:connecttype', 'none', attrs_);
+      Nyce_Xml.Xml_Node (doc_, nd_sh_, 'path', 'v', attrs_);
 
-      natr ('style', 'mso-direction-alt:auto', attrs_);
-      nd_tb_ := Xml_Node (doc_, nd_sh_, 'textbox', 'v', attrs_);
-      attr ('style', 'text-align:left', attrs_);
-      Xml_Text_Node (doc_, nd_tb_, 'div', '', attrs_);
+      nyce_xml.natr ('style', 'mso-direction-alt:auto', attrs_);
+      nd_tb_ := Nyce_Xml.Xml_Node (doc_, nd_sh_, 'textbox', 'v', attrs_);
+      nyce_xml.attr ('style', 'text-align:left', attrs_);
+      Nyce_Xml.Xml_Text_Node (doc_, nd_tb_, 'div', '', attrs_);
 
-      natr ('ObjectType', 'Note', attrs_);
-      nd_cd_ := Xml_Node (doc_, nd_sh_, 'ClientData', 'x', attrs_);
-      Xml_Node (doc_, nd_cd_, 'MoveWithCells', 'x');
-      Xml_Node (doc_, nd_cd_, 'SizeWithCells', 'x');
+      nyce_xml.natr ('ObjectType', 'Note', attrs_);
+      nd_cd_ := Nyce_Xml.Xml_Node (doc_, nd_sh_, 'ClientData', 'x', attrs_);
+      Nyce_Xml.Xml_Node (doc_, nd_cd_, 'MoveWithCells', 'x');
+      Nyce_Xml.Xml_Node (doc_, nd_cd_, 'SizeWithCells', 'x');
 
       comment_w_rem_ := wb_.sheets(s_).comments(cm_).width;
       comment_h_     := wb_.sheets(s_).comments(cm_).height;
@@ -5968,7 +5838,7 @@ BEGIN
          colspan_       := colspan_ + 1;
          comment_w_rem_ := comment_w_rem_ - col_w_;
       END LOOP;
-      Xml_Text_Node (
+      Nyce_Xml.Xml_Text_Node (
          doc_, nd_cd_, 'Anchor',
          rep (
             ':P1,15,:P2,30,:P3,:P4,:P5,:P6',
@@ -5980,9 +5850,9 @@ BEGIN
             to_char(mod(comment_h_, 20))
          ), 'x'
       );
-      Xml_Text_Node (doc_, nd_cd_, 'AutoFill', 'False', 'x');
-      Xml_Text_Node (doc_, nd_cd_, 'Row', to_char(wb_.sheets(s_).comments(cm_).row-1), 'x');
-      Xml_Text_Node (doc_, nd_cd_, 'Column', to_char(wb_.sheets(s_).comments(cm_).column-1), 'x');
+      Nyce_Xml.Xml_Text_Node (doc_, nd_cd_, 'AutoFill', 'False', 'x');
+      Nyce_Xml.Xml_Text_Node (doc_, nd_cd_, 'Row', to_char(wb_.sheets(s_).comments(cm_).row-1), 'x');
+      Nyce_Xml.Xml_Text_Node (doc_, nd_cd_, 'Column', to_char(wb_.sheets(s_).comments(cm_).column-1), 'x');
    END LOOP;
 
    Add1Xml (excel_, rep('xl/drawings/vmlDrawing:P1.vml',s_), Dbms_XmlDom.getXmlType(doc_).getClobVal);
@@ -6002,7 +5872,7 @@ BEGIN
 
    -- Pad out the Pivot Cache before doing any Excel generation.  Pivot tables
    -- will need this data in a moment...
-   Build_Pivot_Caches;
+   Build_Pivot_Caches_And_Tables;
 
    Dbms_Lob.createTemporary (excel_, true);
 

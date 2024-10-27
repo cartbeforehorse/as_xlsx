@@ -1,5 +1,5 @@
 PL/SQL Developer Test script 3.0
-81
+82
 DECLARE
    test_name_   CONSTANT VARCHAR2(30) := 'PivotTableHorizontal';
    file_start_  CONSTANT VARCHAR2(20) := 't04_';
@@ -56,13 +56,14 @@ BEGIN
    As_Xlsx.Set_Column_Width (col_+2, 15, sheet_);
    As_Xlsx.Set_Column_Width (col_+3, 15, sheet_);
 
-   --
-   -- here are the column rollups
-   --
-   piv_axes_.hrollups       := as_xlsx.tp_pivot_cols(1, 3);
-   piv_axes_.vrollups       := as_xlsx.tp_pivot_cols(2); --2);
+   -------------------------------------
+   -- ***
+   -- *** HERE ARE THE COLUMN ROLLUPS
+   -- ***
+   piv_axes_.hrollups       := as_xlsx.tp_pivot_cols(3);
+   piv_axes_.vrollups       := as_xlsx.tp_pivot_cols(1, 2);
    piv_axes_.col_agg_fns(1) := as_xlsx.tp_agg_fn (colid => 4, agg_fn => 'sum');
-   piv_axes_.col_agg_fns(2) := as_xlsx.tp_agg_fn (colid => 4, agg_fn => 'count');
+   --piv_axes_.col_agg_fns(2) := as_xlsx.tp_agg_fn (colid => 4, agg_fn => 'count');
 
    loc_ := as_xlsx.tp_cell_loc (c => pt_col_, r => pt_row_);
    As_Xlsx.Add_Pivot_Table (
