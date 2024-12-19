@@ -280,7 +280,7 @@ FUNCTION Rep (
    p0_       IN VARCHAR2 := null,
    repl_nl_  IN BOOLEAN  := true ) RETURN CLOB
 IS
-   rtn_text_ VARCHAR2(32000);
+   rtn_text_ CLOB;
 BEGIN
    rtn_text_ := msg_text_;
    rtn_text_ := replace (rtn_text_, ':P1', p1_);
@@ -336,9 +336,18 @@ PROCEDURE Trace (
    repl_nl_ IN BOOLEAN  := true,
    quiet_   IN BOOLEAN  := false )
 IS
-   logmsg_ VARCHAR2(32000) := Rep(msg_, p1_, p2_, p3_, p4_, p5_, p6_, p7_, p8_, p9_, p0_, repl_nl_);
+   chunk_sz_ CONSTANT PLS_INTEGER := 32000; -- can't use max 32767, because char/byte issue
+   offset_   PLS_INTEGER := 1;
+   logmsg_   CLOB := Rep (msg_, p1_, p2_, p3_, p4_, p5_, p6_, p7_, p8_, p9_, p0_, repl_nl_);
 BEGIN
-   Dbms_Output.Put_Line (CASE WHEN not quiet_ THEN 'Trace: ' END || logmsg_);
+   IF not quiet_ THEN
+      Dbms_Output.Put ('Trace >>> ');
+   END IF;
+   LOOP
+      Dbms_Output.Put_Line (Dbms_Lob.subStr (logmsg_, chunk_sz_, offset_));
+      offset_ := offset_ + chunk_sz_;
+      EXIT WHEN offset_ > Dbms_Lob.getLength (logmsg_);
+   END LOOP;
 END Trace;
 
 PROCEDURE TraceQ (

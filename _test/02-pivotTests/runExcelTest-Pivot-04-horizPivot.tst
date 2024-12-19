@@ -60,8 +60,8 @@ BEGIN
    -- ***
    -- *** HERE ARE THE COLUMN ROLLUPS
    -- ***
-   piv_axes_.hrollups       := as_xlsx.tp_pivot_cols(3);
-   piv_axes_.vrollups       := as_xlsx.tp_pivot_cols(1, 2);
+   piv_axes_.hrollups       := as_xlsx.tp_pivot_cols(1, 3);
+   piv_axes_.vrollups       := as_xlsx.tp_pivot_cols(2);
    piv_axes_.col_agg_fns(1) := as_xlsx.tp_agg_fn (colid => 4, agg_fn => 'sum');
    --piv_axes_.col_agg_fns(2) := as_xlsx.tp_agg_fn (colid => 4, agg_fn => 'count');
 
