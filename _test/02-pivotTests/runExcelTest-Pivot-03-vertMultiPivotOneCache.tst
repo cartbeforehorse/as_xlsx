@@ -12,17 +12,17 @@ DECLARE
    pt_col_      PLS_INTEGER;
    pt_row_      PLS_INTEGER;
    init_row_    PLS_INTEGER := row_;
-   data_range_  as_xlsx.tp_cell_range;
+   data_range_  nyce_xlsx.tp_cell_range;
    blob_        BLOB;
    cache_id_    PLS_INTEGER;
-   loc_         as_xlsx.tp_cell_loc;
-   piv_axes_    as_xlsx.tp_pivot_axes := as_xlsx.tp_pivot_axes (
-      vrollups    => as_xlsx.tp_pivot_cols(),
-      hrollups    => as_xlsx.tp_pivot_cols(),
-      filter_cols => as_xlsx.tp_pivot_cols(),
-      col_agg_fns => as_xlsx.tp_col_agg_fns()
+   loc_         nyce_xlsx.tp_cell_loc;
+   piv_axes_    nyce_xlsx.tp_pivot_axes := Nyce_Xlsx.tp_pivot_axes (
+      vrollups    => nyce_xlsx.tp_pivot_cols(),
+      hrollups    => nyce_xlsx.tp_pivot_cols(),
+      filter_cols => nyce_xlsx.tp_pivot_cols(),
+      col_agg_fns => nyce_xlsx.tp_col_agg_fns()
    );
-   arr_         as_xlsx.tp_pivot_cols;
+   arr_         nyce_xlsx.tp_pivot_cols;
 
    CURSOR get_entities IS
       SELECT e.identity_type, e.identity, e.currency, e.amount
@@ -30,40 +30,40 @@ DECLARE
 
 BEGIN
 
-   As_Xlsx.Init_Workbook;
-   As_Xlsx.Set_Sheet_Name (1, 'Base Data');
+   Nyce_Xlsx.Init_Workbook;
+   Nyce_Xlsx.Set_Sheet_Name (1, 'Base Data');
 
    -- Create data first
-   As_Xlsx.CellS (col_,   row_, 'Identity Type');
-   As_Xlsx.CellS (col_+1, row_, 'Identity');
-   As_Xlsx.CellS (col_+2, row_, 'Currency');
-   As_Xlsx.CellS (col_+3, row_, 'Amount');
+   Nyce_Xlsx.CellS (col_,   row_, 'Identity Type');
+   Nyce_Xlsx.CellS (col_+1, row_, 'Identity');
+   Nyce_Xlsx.CellS (col_+2, row_, 'Currency');
+   Nyce_Xlsx.CellS (col_+3, row_, 'Amount');
    FOR r_ IN get_entities LOOP
       row_ := row_ + 1;
-      As_Xlsx.CellS (col_,   row_, r_.identity_type);
-      As_Xlsx.CellS (col_+1, row_, r_.identity);
-      As_Xlsx.CellS (col_+2, row_, r_.currency);
-      As_Xlsx.CellN (col_+3, row_, r_.amount);
+      Nyce_Xlsx.CellS (col_,   row_, r_.identity_type);
+      Nyce_Xlsx.CellS (col_+1, row_, r_.identity);
+      Nyce_Xlsx.CellS (col_+2, row_, r_.currency);
+      Nyce_Xlsx.CellN (col_+3, row_, r_.amount);
    END LOOP;
-   data_range_ := as_xlsx.tp_cell_range (
+   data_range_ := nyce_xlsx.tp_cell_range (
       defined_name => 'SystemData', -- will create a "defined name" instance, can be commented out
       sheet_id     => sheet_,
-      tl           => as_xlsx.tp_cell_loc (col_, init_row_, true, true),
-      br           => as_xlsx.tp_cell_loc (col_end_, row_, true, true)
+      tl           => nyce_xlsx.tp_cell_loc (col_, init_row_, true, true),
+      br           => nyce_xlsx.tp_cell_loc (col_end_, row_, true, true)
    );
 
    -- Then create the pivot cache
-   piv_axes_.vrollups       := as_xlsx.tp_pivot_cols(1, 2, 3);
+   piv_axes_.vrollups       := Nyce_Xlsx.tp_pivot_cols(1, 2, 3);
    piv_axes_.col_agg_fns(4) := 'sum';
-   cache_id_ := As_Xlsx.Add_Pivot_Cache (data_range_, piv_axes_);
+   cache_id_ := Nyce_Xlsx.Add_Pivot_Cache (data_range_, piv_axes_);
 
    -- some formatting of the sheet
-   As_Xlsx.Set_Column_Width (col_,   15, sheet_);
-   As_Xlsx.Set_Column_Width (col_+1, 15, sheet_);
-   As_Xlsx.Set_Column_Width (col_+2, 15, sheet_);
-   As_Xlsx.Set_Column_Width (col_+3, 15, sheet_);
+   Nyce_Xlsx.Set_Column_Width (col_,   15, sheet_);
+   Nyce_Xlsx.Set_Column_Width (col_+1, 15, sheet_);
+   Nyce_Xlsx.Set_Column_Width (col_+2, 15, sheet_);
+   Nyce_Xlsx.Set_Column_Width (col_+3, 15, sheet_);
 
-   piv_axes_.vrollups := as_xlsx.tp_pivot_cols();  -- reset, to be rebuilt in the loop
+   piv_axes_.vrollups := Nyce_Xlsx.tp_pivot_cols();  -- reset, to be rebuilt in the loop
 
    -- loop to create the pivot tables
    FOR i_ IN 1 .. 3 LOOP
@@ -82,8 +82,8 @@ BEGIN
       piv_axes_.vrollups       := arr_;
       piv_axes_.col_agg_fns(4) := 'sum';
 
-      loc_ := as_xlsx.tp_cell_loc (c => pt_col_, r => pt_row_);
-      As_Xlsx.Add_Pivot_Table (
+      loc_ := nyce_xlsx.tp_cell_loc (c => pt_col_, r => pt_row_);
+      Nyce_Xlsx.Add_Pivot_Table (
          cache_id_       => cache_id_,
          src_data_range_ => data_range_,
          pivot_axes_     => piv_axes_,
@@ -91,13 +91,13 @@ BEGIN
          pivot_name_     => 'AutoPivot' || to_char(i_),
          add_to_sheet_   => sheet_
       );
-      As_Xlsx.Set_Column_Width (pt_col_, 15, sheet_);
-      As_Xlsx.Set_Column_Width (pt_col_ + 1, 15, sheet_);
+      Nyce_Xlsx.Set_Column_Width (pt_col_, 15, sheet_);
+      Nyce_Xlsx.Set_Column_Width (pt_col_ + 1, 15, sheet_);
 
    END LOOP;
 
    file_name_ := file_start_ || test_name_ || '_' || file_end_ || '.xlsx';
-   As_Xlsx.Save (As_Xlsx.Finish, 'EXCEL_OUT', file_name_);
+   Nyce_Xlsx.Save (Nyce_Xlsx.Finish, 'EXCEL_OUT', file_name_);
    Dbms_Output.Put_Line (file_name_ || ' saved to filesystem');
 
 END;

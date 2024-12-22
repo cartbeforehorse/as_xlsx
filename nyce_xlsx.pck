@@ -1,21 +1,54 @@
-CREATE OR REPLACE PACKAGE as_xlsx IS
+CREATE OR REPLACE PACKAGE Nyce_Xlsx IS
+
 /*****************************************************************************
+ *****************************************************************************
+ *****************************************************************************
  *****************************************************************************
  **
  ** Author: Anton Scheffer
  ** Website: http://technology.amis.nl/blog
  ** See also: http://technology.amis.nl/blog/?p=10995
  **   # License
- **   Copyright (C) 2011, 2020 by Anton Scheffer
+ **   Copyright (C) 2011 - 2024 by Anton Scheffer
  **   See associated LICENSE.md file
  **
  ** Modifications added by Osian ap Garth since 2017, version-controlled since
  ** 2021 in Git Hub:
  **    >> https://github.com/cartbeforehorse/as_xlsx
- ** Documentation updated in README.md
+ **    Copyright(C) 2024 "Now you can, ey!" (nyce.software) Nyce_Xlsx.
+ ** For usage notes and a bit of a discussion about the design changes between
+ ** Anton's version and this, see documentation in README.md
  **
  *****************************************************************************
- *****************************************************************************/
+ ****************************************************************************/
+
+
+------------------------------------------------------------------------------
+-- Coding Notes
+--    We'd be grateful if you could keep to these principles:
+--    - 3 space indents
+--    - UPPERCASE Structural keywords (like FUNCTION, PROCEDURE, LOOP)
+--    - UPPERCASE constant names
+--    - Camel_Case_Underscored() function and procedure names, in order to let
+--      them stand out a bit from variable names
+--    - lowercase everything else
+--    - variable names given trailing underscore_, and none of this p_, v_, i_
+--      prefix silliness.  No need to name every variable a "variable" as it's
+--      the least interesting property of any variable!!
+--    - Commas go at the end of lines, not the start (as I am sure you do with
+--      every other programming language in the world, including English)
+--    - Use the first of the formats below, not the second; it maintains clear
+--      indentation when your function names get long:
+--
+--         Function_Name (           Function_Name ( hello_   => 'hi',
+--            hello_   => 'hi',                      bye_     => 'see ya',
+--            bye_     => 'see ya',                  staying_ => 'for tea' );
+--            staying_ => 'for tea
+--         );
+--
+--    - Do not use code beautifiers; they make code ugly and seriously mess up
+--      version-control
+--
 
 
 --------------------------------------------------
@@ -652,9 +685,9 @@ PROCEDURE Create_Params_Sheet (
    sheet_       IN PLS_INTEGER := null );
 
 
-END as_xlsx;
+END Nyce_Xlsx;
 /
-CREATE OR REPLACE PACKAGE BODY as_xlsx IS
+CREATE OR REPLACE PACKAGE BODY Nyce_Xlsx IS
 
 VERSION_ CONSTANT VARCHAR2(20) := 'as_xlsx20';
 
@@ -6847,5 +6880,5 @@ BEGIN
 
 END Create_Params_Sheet;
 
-END as_xlsx;
+END Nyce_Xlsx;
 /
