@@ -51,11 +51,13 @@ CREATE OR REPLACE PACKAGE nyce_xml IS
    PROCEDURE Attr (
       key_   IN VARCHAR2,
       val_   IN VARCHAR2,
-      attrs_ IN OUT NOCOPY xml_attrs_arr );
+      attrs_ IN OUT NOCOPY xml_attrs_arr,
+      cndtn_ IN BOOLEAN := true );
    PROCEDURE nAtr (
       key_   IN VARCHAR2,
       val_   IN VARCHAR2,
-      attrs_ IN OUT NOCOPY xml_attrs_arr );
+      attrs_ IN OUT NOCOPY xml_attrs_arr,
+      cndtn_ IN BOOLEAN := true );
 
    ---------------------------------------
    -- XML file "part" builders
@@ -239,27 +241,31 @@ END cAtr;
 PROCEDURE Attr (
    key_   IN VARCHAR2,
    val_   IN VARCHAR2,
-   attrs_ IN OUT NOCOPY xml_attrs_arr )
+   attrs_ IN OUT NOCOPY xml_attrs_arr,
+   cndtn_ IN BOOLEAN := true )
 IS
    ix_ PLS_INTEGER := attrs_.attrs.count + 1;
 BEGIN
-   IF not attrs_.attr_loc.exists(key_) THEN
-      ix_ := attrs_.attrs.count + 1;
-      attrs_.attr_loc(key_) := ix_;
-      attrs_.attrs(ix_).key := key_;
-   ELSE
-      ix_ := attrs_.attr_loc(key_);
+   IF cndtn_ THEN
+      IF not attrs_.attr_loc.exists(key_) THEN
+         ix_ := attrs_.attrs.count + 1;
+         attrs_.attr_loc(key_) := ix_;
+         attrs_.attrs(ix_).key := key_;
+      ELSE
+         ix_ := attrs_.attr_loc(key_);
+      END IF;
+      attrs_.attrs(ix_).val := val_;
    END IF;
-   attrs_.attrs(ix_).val := val_;
 END Attr;
 
 PROCEDURE nAtr (
    key_   IN VARCHAR2,
    val_   IN VARCHAR2,
-   attrs_ IN OUT NOCOPY xml_attrs_arr )
+   attrs_ IN OUT NOCOPY xml_attrs_arr,
+   cndtn_ IN BOOLEAN := true )
 IS BEGIN
    cAtr (attrs_);
-   Attr (key_, val_, attrs_);
+   Attr (key_, val_, attrs_, cndtn_);
 END nAtr;
 
 

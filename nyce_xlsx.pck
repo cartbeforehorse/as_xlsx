@@ -62,9 +62,10 @@ CREATE OR REPLACE PACKAGE Nyce_Xlsx IS
 --
 TYPE tp_pivot_cols  IS TABLE OF PLS_INTEGER INDEX BY PLS_INTEGER;
 TYPE tp_agg_fn IS RECORD (
-   colid    PLS_INTEGER,
-   agg_fn   VARCHAR2(20),  -- [sum,avg,count...]
-   col_name VARCHAR2(2000) -- 'Sum of xxx' where "xxx" is the col-name
+   colid        PLS_INTEGER,
+   agg_fn       VARCHAR2(20),   -- [sum,avg,count...]
+   col_tot_name VARCHAR2(2000), -- 'Total' or 'Sum of xxx', depending on nr of aggregates
+   col_agg_name VARCHAR2(2000)  -- 'Sum of xxx' where "xxx" is the col-name
 );
 TYPE tp_col_agg_fns IS TABLE OF tp_agg_fn INDEX BY PLS_INTEGER;  -- 1 based
 TYPE tp_pivot_axes IS RECORD (
@@ -108,20 +109,21 @@ TYPE params_arr IS TABLE OF param_rec;
 
 
 --------------------------------------------------
--- Fonts and fills stored by ID
+-- Fonts and fills stored by name.  By design these are globally accessibel to
+-- the outside world
 --
-TYPE fonts_list  IS TABLE OF INTEGER INDEX BY VARCHAR2(50);
-TYPE fills_list  IS TABLE OF INTEGER INDEX BY VARCHAR2(50);
-TYPE border_list IS TABLE OF INTEGER INDEX BY VARCHAR2(50);
-TYPE numFmt_list IS TABLE OF INTEGER INDEX BY VARCHAR2(50);
-TYPE align_list  IS TABLE OF tp_alignment INDEX BY VARCHAR2(50);
-TYPE numFmt_cols IS TABLE OF INTEGER INDEX BY PLS_INTEGER;
+TYPE tp_fonts_list  IS TABLE OF PLS_INTEGER INDEX BY VARCHAR2(50);
+TYPE tp_fills_list  IS TABLE OF PLS_INTEGER INDEX BY VARCHAR2(50);
+TYPE tp_border_list IS TABLE OF PLS_INTEGER INDEX BY VARCHAR2(50);
+TYPE tp_numFmt_list IS TABLE OF PLS_INTEGER INDEX BY VARCHAR2(50);
+TYPE tp_align_list  IS TABLE OF tp_alignment INDEX BY VARCHAR2(50);
+TYPE tp_numFmt_cols IS TABLE OF PLS_INTEGER INDEX BY PLS_INTEGER;
 
-fonts_  fonts_list;
-fills_  fills_list;
-bdrs_   border_list;
-numFmt_ numFmt_list;
-align_  align_list;
+fonts_  tp_fonts_list;
+fills_  tp_fills_list;
+bdrs_   tp_border_list;
+numFmt_ tp_numFmt_list;
+align_  tp_align_list;
 
 --------------------------------------------------
 -- Public Procedures and Functions
@@ -594,63 +596,63 @@ PROCEDURE Query2Sheet (
    row_count_   IN OUT PLS_INTEGER,
    sql_         IN VARCHAR2,
    binds_       IN OUT NOCOPY bind_arr,
-   col_headers_ IN BOOLEAN     := true,
-   directory_   IN VARCHAR2    := null,
-   filename_    IN VARCHAR2    := null,
-   sheet_       IN PLS_INTEGER := null,
-   useXf_       IN BOOLEAN     := false,
-   hdr_font_    IN PLS_INTEGER := null,
-   hdr_fill_    IN PLS_INTEGER := null,
-   col_fmts_    IN numFmt_cols := numFmt_cols() );
+   col_headers_ IN BOOLEAN        := true,
+   directory_   IN VARCHAR2       := null,
+   filename_    IN VARCHAR2       := null,
+   sheet_       IN PLS_INTEGER    := null,
+   useXf_       IN BOOLEAN        := false,
+   hdr_font_    IN PLS_INTEGER    := null,
+   hdr_fill_    IN PLS_INTEGER    := null,
+   col_fmts_    IN tp_numFmt_cols := tp_numFmt_cols() );
 
 PROCEDURE Query2Sheet (
    col_count_   IN OUT PLS_INTEGER,
    row_count_   IN OUT PLS_INTEGER,
    sql_         IN VARCHAR2,
-   col_headers_ IN BOOLEAN     := true,
-   directory_   IN VARCHAR2    := null,
-   filename_    IN VARCHAR2    := null,
-   sheet_       IN PLS_INTEGER := null,
-   useXf_       IN BOOLEAN     := false,
-   hdr_font_    IN PLS_INTEGER := null,
-   hdr_fill_    IN PLS_INTEGER := null,
-   col_fmts_    IN numFmt_cols := numFmt_cols() );
+   col_headers_ IN BOOLEAN        := true,
+   directory_   IN VARCHAR2       := null,
+   filename_    IN VARCHAR2       := null,
+   sheet_       IN PLS_INTEGER    := null,
+   useXf_       IN BOOLEAN        := false,
+   hdr_font_    IN PLS_INTEGER    := null,
+   hdr_fill_    IN PLS_INTEGER    := null,
+   col_fmts_    IN tp_numFmt_cols := tp_numFmt_cols() );
 
 PROCEDURE Query2Sheet ( -- using REFCURSOR
    col_count_   IN OUT PLS_INTEGER,
    row_count_   IN OUT PLS_INTEGER,
    rc_          IN OUT SYS_REFCURSOR,
-   col_headers_ IN BOOLEAN     := true,
-   directory_   IN VARCHAR2    := null,
-   filename_    IN VARCHAR2    := null,
-   sheet_       IN PLS_INTEGER := null,
-   useXf_       IN BOOLEAN     := false,
-   hdr_font_    IN PLS_INTEGER := null,
-   hdr_fill_    IN PLS_INTEGER := null,
-   col_fmts_    IN numFmt_cols := numFmt_cols() );
+   col_headers_ IN BOOLEAN        := true,
+   directory_   IN VARCHAR2       := null,
+   filename_    IN VARCHAR2       := null,
+   sheet_       IN PLS_INTEGER    := null,
+   useXf_       IN BOOLEAN        := false,
+   hdr_font_    IN PLS_INTEGER    := null,
+   hdr_fill_    IN PLS_INTEGER    := null,
+   col_fmts_    IN tp_numFmt_cols := tp_numFmt_cols() );
 
 PROCEDURE Query2SheetAndAutofilter ( -- with Binds
    sql_         IN VARCHAR2,
    binds_       IN OUT NOCOPY bind_arr,
-   col_headers_ IN BOOLEAN     := true,
-   directory_   IN VARCHAR2    := null,
-   filename_    IN VARCHAR2    := null,
-   sheet_       IN PLS_INTEGER := null,
-   useXf_       IN BOOLEAN     := false,
-   hdr_font_    IN PLS_INTEGER := null,
-   hdr_fill_    IN PLS_INTEGER := null,
-   col_fmts_    IN numFmt_cols := numFmt_cols() );
+   col_headers_ IN BOOLEAN        := true,
+   directory_   IN VARCHAR2       := null,
+   filename_    IN VARCHAR2       := null,
+   sheet_       IN PLS_INTEGER    := null,
+   useXf_       IN BOOLEAN        := false,
+   hdr_font_    IN PLS_INTEGER    := null,
+   hdr_fill_    IN PLS_INTEGER    := null,
+   col_fmts_    IN tp_numFmt_cols := tp_numFmt_cols() );
 
 PROCEDURE Query2SheetAndAutofilter ( -- no Binds
    sql_         IN VARCHAR2,
-   col_headers_ IN BOOLEAN     := true,
-   directory_   IN VARCHAR2    := null,
-   filename_    IN VARCHAR2    := null,
-   sheet_       IN PLS_INTEGER := null,
-   useXf_       IN BOOLEAN     := false,
-   hdr_font_    IN PLS_INTEGER := null,
-   hdr_fill_    IN PLS_INTEGER := null,
-   col_fmts_    IN numFmt_cols := numFmt_cols() );
+   col_headers_ IN BOOLEAN        := true,
+   directory_   IN VARCHAR2       := null,
+   filename_    IN VARCHAR2       := null,
+   sheet_       IN PLS_INTEGER    := null,
+   useXf_       IN BOOLEAN        := false,
+   hdr_font_    IN PLS_INTEGER    := null,
+   hdr_fill_    IN PLS_INTEGER    := null,
+   col_fmts_    IN tp_numFmt_cols := tp_numFmt_cols() );
 
 PROCEDURE SetUseXf (
    p_val BOOLEAN := true );
@@ -801,7 +803,7 @@ TYPE tp_validations IS TABLE OF tp_validation INDEX BY PLS_INTEGER;
 -----
 -- tp_unique_data  =>
 -- tp_data_ix_ord =>
---   Sometimes we want to store data indexed by a unique string value.  But as
+--   Sometimes we want to store data indexed by a unique string value.  But at
 --   other times we need to keep that data ordered, which doesn't suit the way
 --   that plsql-table-types work.  We therefore hold the data in two different
 --   arrays, defined by these types.
@@ -1528,18 +1530,18 @@ BEGIN
    RETURN Get_Cell_Xff (sh_, col_, row_).numFmtId;
 END Range_Col_NumFmtId;
 
-FUNCTION Range_Unique_Data_Ord (
+PROCEDURE Build_Si_From_Range (
+   unq_data_ IN OUT NOCOPY tp_unique_data,
+   ord_data_ IN OUT NOCOPY tp_data_ix_ord,
    range_    IN tp_cell_range,
    col_offs_ IN PLS_INTEGER,
-   sheet_    IN PLS_INTEGER := null ) RETURN tp_data_ix_ord
+   sheet_    IN PLS_INTEGER := null )
 IS
    col_       PLS_INTEGER := range_.tl.c + col_offs_ - 1;
    row_start_ PLS_INTEGER := range_.tl.r + 1; -- allow for header row
    row_end_   PLS_INTEGER := range_.br.r;
    sh_        PLS_INTEGER := coalesce (range_.sheet_id, sheet_, wb_.sheets.count);
    val_       VARCHAR2(2000);
-   unq_data_  tp_unique_data;
-   ord_data_  tp_data_ix_ord;
    new_ix_    PLS_INTEGER := 0; -- pivotCacheRecord uses a base of zero
 BEGIN
    IF sh_ IS null THEN
@@ -1553,19 +1555,8 @@ BEGIN
          new_ix_ := new_ix_ + 1;
       END IF;
    END LOOP;
-   RETURN ord_data_;
-END Range_Unique_Data_Ord;
+END Build_Si_From_Range;
 
-FUNCTION Ord_Data_To_Unique (
-   ixs_ordered_ IN tp_data_ix_ord ) RETURN tp_unique_data
-IS
-   data_uq_ tp_unique_data;
-BEGIN
-   FOR ix_ IN ixs_ordered_.first .. ixs_ordered_.last LOOP
-      data_uq_(ixs_ordered_(ix_)) := ix_;
-   END LOOP;
-   RETURN data_uq_;
-END Ord_Data_To_Unique;
 
 PROCEDURE Range_Col_Min_Max_Values (
    range_    IN     tp_cell_range,
@@ -3337,13 +3328,13 @@ BEGIN
 
    Add_Col_Headings_To_Range (src_data_range_); -- easier to access column names later
 
+   -- We only need to create a new cache if the caller hasn't given us a cache
+   -- ID of an existing cache.  We shall assume that the caller is intelligent
+   -- enough to know that the new pivot-table can only be created from a cache
+   -- built on the same data-source.  No validation or stupidity checks are to
+   -- be done here!!
    IF cache_id_ IS null THEN
       cache_id_ := Add_Pivot_Cache (src_data_range_, pivot_axes_);
-   -- ELSE???
-   --   if the cache already exists, it implies that multiple PTs are using the
-   --   same cache.  Should we be updating the `cols_to_cache_` list in this scenario?
-   --   THIS FEATURE NOT CURRENTLY SUPPORTED; for now we assume 1:1 cach/pivot
-   --   relationship
    END IF;
 
    wb_.pivot_tables(pv_id_) := tp_pivot_table (
@@ -4223,11 +4214,11 @@ PROCEDURE Build_Pivot_Caches_And_Tables
 IS
    rollup_fn_      VARCHAR2(20);
    col_name_       VARCHAR2(32000);
-   range_vals_ord_ tp_data_ix_ord;
    cache_field_    tp_cache_field;
    min_val_        NUMBER;
    max_val_        NUMBER;
-   uq_             tp_unique_data;
+   ord_si_         tp_data_ix_ord;
+   uq_si_          tp_unique_data;
 BEGIN
    -- Build out the caches with necessary data
    FOR pc_ IN 0 .. wb_.pivot_caches.count-1 LOOP
@@ -4235,16 +4226,17 @@ BEGIN
 
          col_name_  := Range_Col_Head_Name (wb_.pivot_caches(pc_).ds_range, c_);
          rollup_fn_ := wb_.pivot_caches(pc_).flds_to_cache(c_);
+         ord_si_    := tp_data_ix_ord();
+         uq_si_     := tp_unique_data();
 
          IF rollup_fn_ IN ('row','col','filter') THEN -- filter needs to be checked!!
-            range_vals_ord_ := Range_Unique_Data_Ord (wb_.pivot_caches(pc_).ds_range, c_);
-            uq_ := Ord_Data_To_Unique (range_vals_ord_);
+            Build_Si_From_Range (uq_si_, ord_si_, wb_.pivot_caches(pc_).ds_range, c_);
             cache_field_ := tp_cache_field (
                field_name   => col_name_,
                rollup_fn    => rollup_fn_,
                format_id    => Range_Col_NumFmtId (wb_.pivot_caches(pc_).ds_range, c_),
-               shared_items => uq_,
-               si_order     => range_vals_ord_,
+               shared_items => uq_si_,
+               si_order     => ord_si_,
                min_value    => null,
                max_value    => null
             );
@@ -4279,8 +4271,11 @@ BEGIN
 
    -- Then build out the pivot-tables in the same manner
    FOR pt_ IN 1 .. wb_.pivot_tables.count LOOP
+      IF wb_.pivot_tables(pt_).pivot_axes.col_agg_fns.count = 1 THEN
+         wb_.pivot_tables(pt_).pivot_axes.col_agg_fns(1).col_tot_name := 'Total';
+      END IF;
       FOR ag_ IN 1 .. wb_.pivot_tables(pt_).pivot_axes.col_agg_fns.count LOOP
-         wb_.pivot_tables(pt_).pivot_axes.col_agg_fns(ag_).col_name := CASE
+         wb_.pivot_tables(pt_).pivot_axes.col_agg_fns(ag_).col_agg_name := CASE
             wb_.pivot_tables(pt_).pivot_axes.col_agg_fns(ag_).agg_fn
                WHEN 'count' THEN 'Count of '
                WHEN 'sum'   THEN 'Sum of '
@@ -4289,6 +4284,10 @@ BEGIN
             col_offs_ => wb_.pivot_tables(pt_).pivot_axes.col_agg_fns(ag_).colid
          );
       END LOOP;
+      wb_.pivot_tables(pt_).pivot_axes.col_agg_fns(1).col_tot_name := CASE
+         WHEN wb_.pivot_tables(pt_).pivot_axes.col_agg_fns.count = 1 THEN 'Total'
+         ELSE wb_.pivot_tables(pt_).pivot_axes.col_agg_fns(1).col_agg_name
+      END;
    END LOOP;
 END Build_Pivot_Caches_And_Tables;
 
@@ -4509,183 +4508,183 @@ END Check_Cell_Not_Exist;
 --   sheets.  Dependant on the pivot caches, it may well be that the new pivot
 --   tables overwirte existing cells, which raises an exception in our program
 --   just as it does in actual Excel.
---   There are 2 versions of this function, the second is the initiator, while
---   the first is the recursor.
 --
-PROCEDURE Unravel_Json_Grid_To_Sheet (
-   sh_       IN PLS_INTEGER,
-   j_node_   IN json_object_t,
-   init_col_ IN PLS_INTEGER,
-   row_      IN OUT NOCOPY PLS_INTEGER )
-IS
-   col_      PLS_INTEGER;
-   k_obj_    json_object_t;
-   sum_obj_  json_object_t;
-   keys_     json_key_list := j_node_.get_keys;
-   s_keys_   json_key_list;
-BEGIN
-
-/*Trace ('== returning JSON object ==>');
-Trace (results_obj_.stringify);
-Raise_App_Error ('chickens');*/
-
-   FOR k_ IN keys_.first .. keys_.last LOOP
-
-      col_ := init_col_;
-      Check_Cell_Not_Exist (sh_, col_, row_);
-      CellS (col_, row_, keys_(k_), sheet_ => sh_);
-
-      k_obj_   := j_node_.get_object(keys_(k_));
-      sum_obj_ := k_obj_.get_object('sum');
-      s_keys_  := sum_obj_.get_keys;
-
-      FOR l_ IN s_keys_.first .. s_keys_.last LOOP
-         col_ := col_ + 1;
-         Check_Cell_Not_Exist (sh_, col_, row_);
-         CellN (col_, row_, sum_obj_.get_number(s_keys_(l_)), sheet_ => sh_);
-      END LOOP;
-      row_ := row_ + 1;
-
-      IF k_obj_.has('sharedItems') THEN
-         Unravel_Json_Grid_To_Sheet (sh_, k_obj_.get_object('sharedItems'), init_col_, row_);
-      END IF;
-
-   END LOOP;
-
-END Unravel_Json_Grid_To_Sheet;
-
-
 PROCEDURE Unravel_Json_To_Sheet (
    pivot_id_ IN PLS_INTEGER,
    j_piv_    IN json_object_t )
 IS
-
-   --ds_range_   tp_cell_range  := Get_Pivot_Table_Data_Source (pivot_id_);
    pt_loc_     tp_cell_loc   := wb_.pivot_tables(pivot_id_).location_tl;
    sh_         PLS_INTEGER   := wb_.pivot_tables(pivot_id_).on_sheet;
    col_        PLS_INTEGER;
    row_        PLS_INTEGER;
-
-   grid_obj_   json_object_t := j_piv_.get_object ('full-grid');
-   gridsi_obj_ json_object_t := grid_obj_.get_object ('sharedItems');
-   si_keys_    json_key_list;
+   v_row_      PLS_INTEGER;
    hd_arr_     json_array_t  := j_piv_.get_array ('xlPtHead');
+   vt_arr_     json_array_t  := j_piv_.get_array ('xlPtvAxes');
+   grid_arr_   json_array_t  := j_piv_.get_object('full-grid').get_array('xlGrid');
    lv_arr_     json_array_t;
-
-   --desc_       VARCHAR2(2000);
-   --ix_         PLS_INTEGER;
-   --col_ix_     PLS_INTEGER;
-   --sum_obj_    json_object_t;
-
-   --piv_axes_   tp_pivot_axes  := wb_.pivot_tables(pivot_id_).pivot_axes;
-   --h_rollups_  PLS_INTEGER    := piv_axes_.hrollups.count;
-   --v_rollups_  PLS_INTEGER    := piv_axes_.vrollups.count;
-   --single_agg_ BOOLEAN        := piv_axes_.col_agg_fns.count = 1;
-   --multi_agg_  BOOLEAN        := piv_axes_.col_agg_fns.count > 1;
-   --aggs_arr_   tp_col_agg_fns := piv_axes_.col_agg_fns;
--- osian
-   -- We haven't got to the filters yet!!
-   --head_depth_ PLS_INTEGER    := 1 + wb_.pivot_tables(pivot_id_).pivot_axes.hrollups.count + CASE WHEN multi_agg_ THEN 1 ELSE 0 END;
-
 BEGIN
-
    -- Paste the pre-calculated header into the Excel sheet
-   FOR r_ IN 0 .. (hd_arr_.get_size-1) LOOP
+   FOR r_ IN 0 .. hd_arr_.get_size-1 LOOP
       row_    := pt_loc_.r + r_;
       lv_arr_ := treat (hd_arr_.get(r_) as json_array_t);
       FOR c_ IN 0 .. (lv_arr_.get_size-1) LOOP
          col_ := pt_loc_.c + c_;
+         Check_Cell_Not_Exist (sh_, col_, row_);
          CellS (col_, row_, lv_arr_.get_string(c_), sheet_ => sh_);
       END LOOP;
    END LOOP;
-
-   si_keys_ := gridsi_obj_.get_keys;
-   FOR k_ IN si_keys_.first .. si_keys_.last LOOP
-      null;
+   -- Then the vertical row-header names
+   FOR r_ IN 0 .. vt_arr_.get_size-1 LOOP
+      v_row_ := row_ + r_ + 1;
+      Check_Cell_Not_Exist (sh_, pt_loc_.c, v_row_);
+      CellS (pt_loc_.c, v_row_, treat(vt_arr_.get(r_) as json_object_t).get_string('val'), sheet_ => sh_);
    END LOOP;
-      
---   Unravel_Json_Grid_To_Sheet (sh_, j_piv_.get_object_);
-
-
--- more to-do => start here 2024/11/26
---
-/*    CellS (col_, row_, 'Row Labels', sheet_ => sh_);
-      ix_ := aggs_arr_.first;
-      CellS (col_, row_, desc_, sheet_ => sh_);
-Debug (j_piv_.stringify);
-   Unravel_Json_To_Sheet (sh_, j_piv_.get_object('sharedItems'), init_col_, row_);
-
-   col_ := init_col_;
-   CellS (col_, row_, 'Grand Total', sheet_ => sh_);
-
-   sum_obj_ := j_piv_.get_object('sum');
-   keys_ := sum_obj_.get_keys;
-   FOR k_ IN keys_.first .. keys_.last LOOP
-      col_ := col_ + 1;
-      CellN (col_, row_, sum_obj_.get_number(keys_(k_)), sheet_ => sh_);
+   -- And then the pivoted data itself...
+   FOR r_ IN 0 .. grid_arr_.get_size-1 LOOP
+      v_row_  := row_ + r_ + 1;
+      lv_arr_ := treat(grid_arr_.get(r_) as json_object_t).get_array('grid');
+      FOR c_ IN 0 .. lv_arr_.get_size-1 LOOP
+         col_ := pt_loc_.c + 1 + c_;
+         Check_Cell_Not_Exist (sh_, col_, v_row_);
+         CellN (col_, v_row_, lv_arr_.get_number(c_), sheet_ => sh_);
+      END LOOP;
    END LOOP;
-*/
 END Unravel_Json_To_Sheet;
 
 -----
--- Unravel_Json_Pt_Axes_Xml()
---   Build the <rowItems> and <colItems> XML tags from our JSON representation
---   of that data.  This is the multi-dimensional axes held in PivotTable.xml
+-- Unravel_Json_Ptv_Axes_Xml()
+-- Unravel_Json_Pth_Axes_Xml()
+--   Build the <rowItems> and <colItems> XML tags for PivotTable.xml file-part
+--   of the Excel sheet.  Both horizontal and vertical axes have been built as
+--   a Json array or object, including the "level" information.
 --
-PROCEDURE Unravel_Json_Pt_Axes_Xml (
+PROCEDURE Unravel_Json_Ptv_Axes_Xml (
    doc_      IN OUT NOCOPY dbms_XmlDom.DomDocument,
    xml_nd_   IN            dbms_XmlDom.DomNode,
-   j_axes_   IN            json_object_t,
-   cache_    IN OUT NOCOPY tp_pivot_cache,
-   col_name_ IN            VARCHAR2 := null,
-   si_val_   IN            VARCHAR2 := null )
+   axes_arr_ IN            json_array_t,
+   cache_    IN            tp_pivot_cache )
 IS
-   nd_i_        dbms_XmlDom.DomNode;
-   bkdn_obj_    json_object_t;
-   keys_        json_key_list;
-   attrs_       nyce_xml.xml_attrs_arr;
-   level_       PLS_INTEGER := j_axes_.get_number('level');
-   lv_          PLS_INTEGER := level_ - 2;
-   v_           PLS_INTEGER := 0;
-   si_val_loop_ VARCHAR2(32000);
+   nd_i_     dbms_XmlDom.DomNode;
+   attrs_    nyce_xml.xml_attrs_arr;
+   ix_obj_   json_object_t;
+   lv_       PLS_INTEGER;
+   col_name_ VARCHAR2(32000);
+   si_val_   VARCHAR2(32000);
+   v_        PLS_INTEGER;
 BEGIN
+   FOR ix_ IN 0 .. axes_arr_.get_size-1 LOOP
 
-   IF level_ >= 2 THEN -- h-level starts at 1, and we want to skip the first
-      IF lv_ > 0 THEN nyce_xml.attr ('r', to_char(lv_), attrs_); END IF;
-      nd_i_ := Nyce_Xml.Xml_Node (doc_, xml_nd_, 'i', attrs_);
-      si_val_loop_ := cache_.cached_fields(col_name_).shared_items.first;
-      WHILE si_val_loop_ IS NOT null LOOP
-         EXIT WHEN si_val_loop_ = si_val_;
-         v_ := v_ + 1;
-         si_val_loop_ := cache_.cached_fields(col_name_).shared_items.next(si_val_loop_);
-      END LOOP;
+      ix_obj_   := treat(axes_arr_.get(ix_) as json_object_t);
+      lv_       := ix_obj_.get_number ('lv') - 1; -- 'lv' starts at 1, so lv_=0 is root-level
+      col_name_ := ix_obj_.get_string ('colName');
+      si_val_   := ix_obj_.get_string ('val');
+      v_        := 0;
+
+      IF lv_ >= 0 THEN
+         nyce_xml.natr ('r', to_char(lv_), attrs_, lv_>0);
+         nd_i_ := Nyce_Xml.Xml_Node (doc_, xml_nd_, 'i', attrs_);
+         v_ := cache_.cached_fields(col_name_).shared_items(si_val_);
+         nyce_xml.natr ('v', v_, attrs_, v_>0);
+         Nyce_Xml.Xml_Node (doc_, nd_i_, 'x', attrs_);
+
+      ELSE -- last record will be -1
+         nyce_xml.natr ('t', 'grand', attrs_);
+         nd_i_ := Nyce_Xml.Xml_Node (doc_, xml_nd_, 'i', attrs_);
+         Nyce_Xml.Xml_Node (doc_, nd_i_, 'x');
+
+      END IF;
+   END LOOP;
+END Unravel_Json_Ptv_Axes_Xml;
+
+PROCEDURE Unravel_Json_Pth_Axes_Xml (
+   doc_      IN OUT NOCOPY dbms_XmlDom.DomDocument,
+   xml_nd_   IN            dbms_XmlDom.DomNode,
+   axes_obj_ IN            json_object_t,
+   cache_    IN            tp_pivot_cache )
+IS
+   col_names_arr_   json_array_t := axes_obj_.get_array('colNames');
+   axes_arr_        json_array_t := axes_obj_.get_array('vHead');
+   pthd_v_col_      json_array_t;
+   grand_total_     BOOLEAN      := false;
+   totals_col_name_ VARCHAR2(32000);
+   totals_col_val_  VARCHAR2(32000);
+   col_name_        VARCHAR2(32000);
+   col_val_         VARCHAR2(32000);
+   r_val_           PLS_INTEGER;
+   attrs_           nyce_xml.xml_attrs_arr;
+   nd_i_            dbms_XmlDom.DomNode;
+   v_               PLS_INTEGER;
+
+   FUNCTION Is_Total (
+      col_val_ IN VARCHAR2 ) RETURN BOOLEAN
+   IS BEGIN
+      RETURN col_val_ LIKE '% Total' OR col_val_ LIKE 'Count of %' OR col_val_ LIKE 'Sum of %';
+   END Is_Total;
+   FUNCTION Col_Val_From_Total (
+      chk_col_val_ IN VARCHAR2 ) RETURN VARCHAR2
+   IS
+      new_val_ VARCHAR2(32000);
+   BEGIN
+      new_val_ := replace (chk_col_val_, ' Total');
+      new_val_ := replace (new_val_, 'Count of ');
+      new_val_ := replace (new_val_, 'Sum of ');
+      RETURN new_val_;
+   END Col_Val_From_Total;
+
+BEGIN
+   FOR pt_col_ IN 0 .. axes_arr_.get_size-1 LOOP -- loop on each <i>
+
       nyce_xml.catr (attrs_);
-      IF v_ > 0 THEN nyce_xml.attr ('v', v_, attrs_); END IF;
-      Nyce_Xml.Xml_Node (doc_, nd_i_, 'x', attrs_);
-   END IF;
+      r_val_           := 0;
+      totals_col_name_ := '';
+      totals_col_val_  := '';
+      pthd_v_col_      := treat (axes_arr_.get(pt_col_) as json_array_t);
 
-   IF j_axes_.has('sharedItems') THEN
-      bkdn_obj_ := j_axes_.get_object ('sharedItems');
-      keys_     := bkdn_obj_.get_keys;
-      FOR si_ IN keys_.first .. keys_.last LOOP
-         Unravel_Json_Pt_Axes_Xml (
-            doc_      => doc_,
-            xml_nd_   => xml_nd_,
-            j_axes_   => bkdn_obj_.get_object(keys_(si_)),
-            cache_    => cache_,
-            col_name_ => j_axes_.get_string('colDesc'),
-            si_val_   => keys_(si_)
-         );
+      -- This first loop checks for null values and "total" values in the head
+      -- grid-array.  If none are found, we process the same loop again below.
+      FOR lv_ IN 0 .. pthd_v_col_.get_size-1 LOOP
+         col_val_ := pthd_v_col_.get_string(lv_);
+         IF col_val_ IS null THEN
+            r_val_ := r_val_ + 1;
+         ELSIF col_val_ = 'Grand Total' OR col_val_ LIKE 'Total %' THEN
+            grand_total_ := true;
+            nyce_xml.attr ('t', 'grand', attrs_);
+            exit;
+         ELSIF Is_Total(col_val_) THEN
+            totals_col_name_ := col_names_arr_.get_string(lv_);
+            totals_col_val_  := Col_Val_From_Total (col_val_);
+            nyce_xml.attr ('t', 'default', attrs_);
+            exit;
+         END IF;
       END LOOP;
-   END IF;
 
-   IF level_ = 1 THEN
-      nyce_xml.natr ('t', 'grand', attrs_);
+      -- create <i> node
+      nyce_xml.attr ('r', to_char(r_val_), attrs_, r_val_>0);
       nd_i_ := Nyce_Xml.Xml_Node (doc_, xml_nd_, 'i', attrs_);
-      Nyce_Xml.Xml_Node (doc_, nd_i_, 'x');
-   END IF;
 
-END Unravel_Json_Pt_Axes_Xml;
+      -- <i><x> nodes...
+      IF grand_total_ THEN
+         Nyce_Xml.Xml_Node (doc_, nd_i_, 'x');
+
+      ELSIF totals_col_name_ IS NOT null THEN
+         v_ := cache_.cached_fields(totals_col_name_).shared_items(totals_col_val_);
+         nyce_xml.natr ('v', to_char(v_), attrs_, v_>0);
+         Nyce_Xml.Xml_Node (doc_, nd_i_, 'x', attrs_);
+
+      ELSE
+         -- There shouldn't be any more totals here as we've already processed
+         -- the array up to the totals in the earlier loop
+         FOR lv_ IN r_val_ .. pthd_v_col_.get_size-1 LOOP
+            col_name_ := col_names_arr_.get_string(lv_);
+            col_val_  := pthd_v_col_.get_string(lv_);
+            v_ := cache_.cached_fields(col_name_).shared_items(col_val_);
+            nyce_xml.natr ('v', to_char(v_), attrs_, v_>0);
+            Nyce_Xml.Xml_Node (doc_, nd_i_, 'x', attrs_);
+         END LOOP;
+      END IF;
+
+   END LOOP;
+END Unravel_Json_Pth_Axes_Xml;
 
 
 -----
@@ -4705,7 +4704,7 @@ BEGIN
    aggs_obj_ := json_object_t();
    FOR ix_ IN 1 .. aggs_rec_.count LOOP
       agg_obj_.put ('colId',   aggs_rec_(ix_).colid);
-      agg_obj_.put ('colName', aggs_rec_(ix_).col_name);
+      agg_obj_.put ('colName', aggs_rec_(ix_).col_tot_name);
       agg_obj_.put ('fn',      aggs_rec_(ix_).agg_fn);
       agg_obj_.put ('value',   to_number(null));
       aggs_list_.append(agg_obj_);
@@ -4806,7 +4805,7 @@ IS BEGIN
          lv_arr_.append (CASE i_ WHEN 1 THEN shared_item_ ELSE '' END);
       END LOOP;
       FOR ix_ IN 1 .. aggregates_.count LOOP
-         lv_arr_.append (shared_item_ || ' ' || aggregates_(ix_).col_name);
+         lv_arr_.append (shared_item_ || ' ' || aggregates_(ix_).col_tot_name);
       END LOOP;
    END IF;
 END Append_Array_Of_Len;
@@ -4874,8 +4873,8 @@ END Build_Excel_Agg;
 --   pivot table
 --     [[a, b, c],[d, e, f]] + [[g, h],[j, k]] => [[a, b, c, g, h][d, e, f, j, k]]
 PROCEDURE Append_Arr_2D (
-   lv0_arr_    IN OUT NOCOPY json_array_t,  -- 2D
-   lv1_arr_    IN json_array_t )            -- 2D
+   lv0_arr_    IN OUT NOCOPY json_array_t, -- 2D
+   lv1_arr_    IN json_array_t )           -- 2D
 IS
    row_arr_ json_array_t;
 BEGIN
@@ -4947,10 +4946,15 @@ PROCEDURE Append_Aggs_Build_Next_2D (
    h_level_    IN PLS_INTEGER,
    aggregates_ IN tp_col_agg_fns )
 IS
-   lv_arr_  json_array_t;
+   lv_arr_   json_array_t;
+   col_name_ VARCHAR2(32000);
 BEGIN
    FOR ag_ IN 1 .. aggregates_.count LOOP
-      lv0_arr_1d_.append (CASE h_level_ WHEN 1 THEN 'Total ' || aggregates_(ag_).col_name ELSE '' END);
+      col_name_ := CASE
+         WHEN aggregates_.count = 1 THEN 'Grand Total'
+         ELSE aggregates_(ag_).col_tot_name
+      END;
+      lv0_arr_1d_.append (CASE h_level_ WHEN 1 THEN col_name_ ELSE '' END);
       -- We can't `put()` an element into location-zero of an empty array, and
       -- so this IF statement becomes necessary
       IF lv1_arr_2d_.get_size > 0 THEN
@@ -5043,7 +5047,7 @@ BEGIN
       FOR col_ IN 0 .. aggregates_.count LOOP
          lv_arr_.append (CASE
             WHEN col_ = 0 THEN 'Column Labels'
-            ELSE aggregates_(col_).col_name
+            ELSE aggregates_(col_).col_tot_name
          END);
       END LOOP;
       xl_pt_hd_arr_.append(lv_arr_);
@@ -5058,13 +5062,55 @@ BEGIN
          lv_arr_ := treat (xl_pt_hd_arr_.get(lv_) as json_array_t);
          lv_arr_.put (0, CASE
             WHEN lv_ = th_depth_                   THEN 'Row Labels'
-            WHEN lv_ = 0 AND aggregates_.count = 1 THEN aggregates_(1).col_name
+            WHEN lv_ = 0 AND aggregates_.count = 1 THEN aggregates_(1).col_tot_name
             ELSE ''
          END);
          xl_pt_hd_arr_.put (lv_, lv_arr_, true);
       END LOOP;
    END IF;
 END Complete_Pivot_Header;
+
+-----
+-- Pivot_Header_To_Cols()
+--   Converts the pivot-table's header grid (which has already been calculated
+--   as a 2D array) to a vertical format, helping us build the <colItems> node
+--   of the pivotTable part.  Remember that the function above hasn't yet been
+--   called, and so "finishing" has been applied yet.
+--     [["Fruit", "", "Veg", "","Total"]["Apple","Pear","Carrot","Sprout",""]
+--       => [["Fruit","Apple"],["","Pear"],["Veg","Carrot"],["","Sprout"],["Total",""]]
+--
+FUNCTION Pivot_Header_To_Cols (
+   xl_pt_hd_arr_ IN json_array_t,
+   ds_range_     IN tp_cell_range,
+   h_rollups_    IN tp_pivot_cols ) RETURN json_object_t
+IS
+   ix_           PLS_INTEGER;
+   th_width_     PLS_INTEGER   := treat (xl_pt_hd_arr_.get(0) as json_array_t).get_size;
+   col_name_arr_ json_array_t  := json_array_t();
+   int_arr_      json_array_t;
+   rtn_arr_      json_array_t  := json_array_t();
+   rtn_obj_      json_object_t := json_object_t();
+BEGIN
+   ix_ := h_rollups_.first;
+   WHILE ix_ IS NOT null LOOP
+      col_name_arr_.append (
+         Range_Col_Head_Name (ds_range_, col_offs_ => h_rollups_(ix_))
+      );
+      ix_  := h_rollups_.next(ix_);
+   END LOOP;
+   FOR int_loop_ IN 0 .. th_width_-1 LOOP
+      int_arr_ := json_array_t();
+      FOR ext_loop_ IN 0 .. xl_pt_hd_arr_.get_size-1 LOOP
+         int_arr_.append (
+            treat (xl_pt_hd_arr_.get(ext_loop_) as json_array_t).get_string(int_loop_)
+         );
+      END LOOP;
+      rtn_arr_.append (int_arr_);
+   END LOOP;
+   rtn_obj_.put ('colNames', col_name_arr_);
+   rtn_obj_.put ('vHead',    rtn_arr_);
+   RETURN rtn_obj_;
+END Pivot_Header_To_Cols;
 
 -----
 -- Breadcrumb_Is_In_Axes()
@@ -5154,8 +5200,10 @@ IS
    lv0_1d_hd_arr_    json_array_t   := json_array_t();
    lv0_2d_hd_arr_    json_array_t   := json_array_t();
    lv0_grid_obj_arr_ json_array_t   := json_array_t();
-   v_axes_arr_       json_array_t   := json_array_t();
+   axes_obj_         json_object_t  := json_object_t();
+   axes_arr_         json_array_t   := json_array_t();
    xl_pt_axes_arr_   json_array_t   := json_array_t();
+   xl_pt_hd_v_obj_   json_object_t;
    node_agg_obj_     json_object_t;
 
    next_v_level_     PLS_INTEGER;
@@ -5196,6 +5244,7 @@ BEGIN
       Raise_App_Error ('h-level / v-level are: :P1 / :P2', to_char(leaf_h_level_), to_char(v_level_));
    END IF;
 
+   -- ***
    -- *** Root level initiator; This is also where the recursion exits
    IF direction_ = 'top' THEN
       results_obj_.put ('v-tree', CASE
@@ -5218,25 +5267,35 @@ BEGIN
          )
       END);
 
-      IF results_obj_.get_object('v-tree').has('aggregates') AND
-         results_obj_.get_object('v-tree').get_object('aggregates').has('xlPtvAxes')
-      THEN
-         xl_pt_axes_arr_ := results_obj_.get_object('v-tree').get_object('aggregates').get_array('xlPtvAxes');
+      -- complete the vertical axes
+      IF results_obj_.get_object('v-tree').has('aggregates') THEN
+         child_agg_obj_ := results_obj_.get_object('v-tree').get_object('aggregates');
+         IF child_agg_obj_.has('xlPtvAxes') THEN
+            xl_pt_axes_arr_ := child_agg_obj_.get_array('xlPtvAxes');
+            axes_obj_.put ('lv', 0);
+            axes_obj_.put ('val', 'Grand Total');
+            xl_pt_axes_arr_.append (axes_obj_);
+            results_obj_.put ('xlPtvAxes', xl_pt_axes_arr_);
+         END IF;
       END IF;
-      xl_pt_axes_arr_.append ('Grand Total');
-      results_obj_.put ('xlPtvAxes', xl_pt_axes_arr_);
 
-      IF results_obj_.get_object('h-tree').has('aggregates') AND
-         results_obj_.get_object('h-tree').get_object('aggregates').has('xlPtHead')
-      THEN
-         xl_pt_axes_arr_ := results_obj_.get_object('h-tree').get_object('aggregates').get_array('xlPtHead');
+      -- complete the horizontal axes
+      IF results_obj_.get_object('h-tree').has('aggregates') THEN
+         child_agg_obj_ := results_obj_.get_object('h-tree').get_object('aggregates');
+         IF child_agg_obj_.has('xlPtHead') THEN
+            xl_pt_axes_arr_ := results_obj_.get_object('h-tree').get_object('aggregates').get_array('xlPtHead');
+            xl_pt_hd_v_obj_ := Pivot_Header_To_Cols (xl_pt_axes_arr_, ds_range_, pt_.pivot_axes.hrollups);
+            Complete_Pivot_Header (xl_pt_axes_arr_, aggregates_);
+            results_obj_.put ('xlPthAxes', xl_pt_hd_v_obj_);
+            results_obj_.put ('xlPtHead', xl_pt_axes_arr_);
+         END IF;
       END IF;
-      Complete_Pivot_Header (xl_pt_axes_arr_, aggregates_);
-      results_obj_.put ('xlPtHead', xl_pt_axes_arr_);
 
+      -- Now finish the job by putting that json into an Excel sheet!
       Unravel_Json_To_Sheet (pivot_id_, results_obj_);
 
 
+   -- ***
    -- *** Build a mid-level node
    ELSIF roll_vertical_ OR roll_horizntl_ THEN
 
@@ -5286,16 +5345,18 @@ BEGIN
                child_is_lf_ := child_obj_.get_boolean('isLeaf');
                lv_width_    := lv_width_ + child_width_;
                Append_Array_Of_Len (lv0_1d_hd_arr_, child_width_, child_is_lf_, shared_item_, aggregates_);
-               -- Leaf level only includes "xlPtHead" if there's more than one
-               -- aggregate count
+               -- Leaf only includes "xlPtHead" if there's more than one aggregate count
                IF child_agg_obj_.has('xlPtHead') THEN
                   Append_Arr_2D (lv0_2d_hd_arr_, child_agg_obj_.get_array('xlPtHead'));
                END IF;
             ELSIF dir_vertical_ THEN
                lv_height_ := lv_height_ + child_obj_.get_number('height');
-               v_axes_arr_.append (shared_item_);
+               axes_obj_.put ('lv', v_level_);
+               axes_obj_.put ('colName', col_name_);
+               axes_obj_.put ('val', shared_item_);
+               axes_arr_.append (axes_obj_);
                IF child_agg_obj_.has ('xlPtvAxes') THEN
-                  v_axes_arr_.append_all (child_agg_obj_.get_array ('xlPtvAxes'));
+                  axes_arr_.append_all (child_agg_obj_.get_array ('xlPtvAxes'));
                END IF;
             ELSIF dir_full_grid_ THEN
                IF child_obj_.has('xlGrid') THEN
@@ -5316,18 +5377,16 @@ BEGIN
          Append_Aggs_Build_Next_2D (lv0_1d_hd_arr_, lv0_2d_hd_arr_, h_level_, aggregates_);
          lv_width_ := lv_width_ + node_agg_obj_.get_number('aggregatesCount');
          Build_Excel_Agg (node_agg_obj_);
-         sis_obj_.put ('[[Totals]]', node_agg_obj_);
          node_agg_obj_.put ('xlPtHead', lv0_2d_hd_arr_);
       ELSIF dir_vertical_ THEN
          lv_height_ := lv_height_ + 1;
-         node_agg_obj_.put ('xlPtvAxes', v_axes_arr_);
+         node_agg_obj_.put ('xlPtvAxes', axes_arr_);
       ELSIF dir_full_grid_ THEN
          IF grid_nd_exists_ THEN
             Finish_Grid_Group (
                lv0_grid_obj_arr_, node_agg_obj_, unroll_horzntl_, h_level_+v_level_
             );
          END IF;
-         sis_obj_.put ('[[Totals]]', node_agg_obj_);
       END IF;
 
       results_obj_.put ('direction',       CASE WHEN roll_vertical_ THEN 'vertical' ELSE 'horizontal' END);
@@ -5356,6 +5415,7 @@ BEGIN
       END IF;
 
 
+   -- ***
    -- *** Build the leaf node
    ELSE
 
@@ -5435,7 +5495,6 @@ IS
    nd_rels_     dbms_XmlDom.DomNode;
    nd_dfs_      dbms_XmlDom.DomNode;
    j_piv_       json_object_t;
-   j_axes_      json_object_t;
    pt_region_   tp_cell_range;
    cache_       tp_pivot_cache;
    cf_          tp_cache_field;
@@ -5448,10 +5507,6 @@ BEGIN
    FOR pt_ IN 1 .. wb_.pivot_tables.count LOOP
 
       j_piv_ := Json_Aggregates_From_Filters (pivot_id_ => pt_);
--- osian trace
-      Trace ('== returning JSON object ==>');
-      Trace (j_piv_.to_clob);
---Raise_App_Error ('chickens');
 
       cache_   := wb_.pivot_caches(wb_.pivot_tables(pt_).cache_id);
       pt_axes_ := wb_.pivot_tables(pt_).pivot_axes;
@@ -5463,10 +5518,10 @@ BEGIN
       nyce_xml.natr ('xmlns', 'http://schemas.openxmlformats.org/spreadsheetml/2006/main', attrs_);
       nyce_xml.attr ('xmlns:mc', 'http://schemas.openxmlformats.org/markup-compatibility/2006', attrs_);
       nyce_xml.attr ('mc:Ignorable', 'xr', attrs_);
-      nyce_xml.attr ('name', wb_.pivot_tables(pt_).pivot_name, attrs_);
-      nyce_xml.attr ('cacheId', wb_.pivot_tables(pt_).cache_id, attrs_);
       nyce_xml.attr ('xmlns:xr', 'http://schemas.microsoft.com/office/spreadsheetml/2014/revision', attrs_);
       nyce_xml.attr ('xr:uid', Get_Guid, attrs_);
+      nyce_xml.attr ('name', wb_.pivot_tables(pt_).pivot_name, attrs_);
+      nyce_xml.attr ('cacheId', wb_.pivot_tables(pt_).cache_id, attrs_);
       nyce_xml.attr ('applyNumberFormats', '0', attrs_);
       nyce_xml.attr ('applyBorderFormats', '0', attrs_);
       nyce_xml.attr ('applyFontFormats', '0', attrs_);
@@ -5485,7 +5540,7 @@ BEGIN
       nyce_xml.attr ('multipleFieldFilters', '0', attrs_);
       nd_ptd_ := Nyce_Xml.Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'pivotTableDefinition', attrs_);
 
-      wb_.pivot_tables(pt_).pivot_height := j_piv_.get_object('v-tree').get_number('height'); -- includes grand-totals row
+      wb_.pivot_tables(pt_).pivot_height := j_piv_.get_object('v-tree').get_number('height') + j_piv_.get_array('xlPtHead').get_size;
       wb_.pivot_tables(pt_).pivot_width  := treat(j_piv_.get_array('xlPtHead').get(0) as json_array_t).get_size;
       pt_region_ := tp_cell_range (
          sheet_id => wb_.pivot_tables(pt_).on_sheet,
@@ -5502,9 +5557,9 @@ BEGIN
       nyce_xml.attr ('firstDataCol',   '1', attrs_);
       Nyce_Xml.Xml_Node (doc_, nd_ptd_, 'location', attrs_);
 
+      -- <pivotFields>
       nyce_xml.natr ('count', to_char(cache_.cf_order.count), attrs_);
       nd_pfs_ := Nyce_Xml.Xml_Node (doc_, nd_ptd_, 'pivotFields', attrs_);
-
       FOR cf_ix_ IN cache_.cf_order.first .. cache_.cf_order.last LOOP
 
          -- the rollup in the pivot-table needn't be the same as the rollup in
@@ -5538,7 +5593,7 @@ BEGIN
 
       END LOOP;
 
-      -- cache row items (vertical)
+      -- cache row items (vertical) <rowFields> and <rowItems>
       IF pt_axes_.vrollups.count > 0 THEN
          nyce_xml.natr ('count', to_char(pt_axes_.vrollups.count), attrs_);
          nd_pfs_ := Nyce_Xml.Xml_Node (doc_, nd_ptd_, 'rowFields', attrs_);
@@ -5546,26 +5601,25 @@ BEGIN
             nyce_xml.natr ('x', to_char(pt_axes_.vrollups(r_) - 1), attrs_);
             Nyce_Xml.Xml_Node (doc_, nd_pfs_, 'field', attrs_);
          END LOOP;
-         j_axes_ := j_piv_.get_object('v-tree');
-         nyce_xml.natr ('count', to_char(j_axes_.get_number('height')), attrs_);
+         nyce_xml.natr ('count', to_char(j_piv_.get_object('v-tree').get_number('height')), attrs_);
          nd_ri_ := Nyce_Xml.Xml_Node (doc_, nd_ptd_, 'rowItems', attrs_);
-         Unravel_Json_Pt_Axes_Xml (doc_, nd_ri_, j_axes_, cache_);
+         Unravel_Json_Ptv_Axes_Xml (doc_, nd_ri_, j_piv_.get_array('xlPtvAxes'), cache_);
       ELSE
          nyce_xml.natr ('count', '1', attrs_);
          Nyce_Xml.Xml_Node (doc_, nd_ptd_, 'rowItems/i');
       END IF;
-      -- cache col items (horizontal)
+
+      -- cache col items (horizontal) <colFields> and <colItems>
       IF pt_axes_.hrollups.count > 0 THEN
          nyce_xml.natr ('count', to_char(pt_axes_.hrollups.count), attrs_);
          nd_pfs_ := Nyce_Xml.Xml_Node (doc_, nd_ptd_, 'colFields', attrs_);
          FOR r_ IN 1 .. pt_axes_.hrollups.count LOOP
-            nyce_xml.natr ('x', to_char(pt_axes_.vrollups(r_) - 1), attrs_);
+            nyce_xml.natr ('x', to_char(pt_axes_.hrollups(r_) - 1), attrs_);
             Nyce_Xml.Xml_Node (doc_, nd_pfs_, 'field', attrs_);
          END LOOP;
-         j_axes_ := j_piv_.get_object('h-tree');
-         nyce_xml.natr ('count', to_char(j_axes_.get_number('width')), attrs_);
+         nyce_xml.natr ('count', to_char(j_piv_.get_object('h-tree').get_number('width')), attrs_);
          nd_ri_ := Nyce_Xml.Xml_Node (doc_, nd_ptd_, 'colItems', attrs_);
-         Unravel_Json_Pt_Axes_Xml (doc_, nd_ri_, j_axes_, cache_);
+         Unravel_Json_Pth_Axes_Xml (doc_, nd_ri_, j_piv_.get_object('xlPthAxes'), cache_);
       ELSE
          nyce_xml.natr ('count', '1', attrs_);
          Nyce_Xml.Xml_Node (doc_, nd_ptd_, 'colItems/i');
@@ -5576,7 +5630,7 @@ BEGIN
       nd_dfs_ := Nyce_Xml.Xml_Node (doc_, nd_ptd_, 'dataFields', attrs_);
       FOR ix_ IN 1 .. pt_axes_.col_agg_fns.count LOOP
          agg_col_ := pt_axes_.col_agg_fns(ix_).colid;
-         nyce_xml.natr ('name', pt_axes_.col_agg_fns(ix_).col_name, attrs_);
+         nyce_xml.natr ('name', pt_axes_.col_agg_fns(ix_).col_agg_name, attrs_);
          nyce_xml.attr ('fld', agg_col_ - 1, attrs_); -- zero based, I think
          nyce_xml.attr ('baseField', '0', attrs_); -- used with showDataAs, which we aren't using for now
          nyce_xml.attr ('baseItem', '0', attrs_);
@@ -5767,6 +5821,7 @@ BEGIN
       END LOOP;
    END IF;
 
+   -- <sheetData> goes here, included our calculated pivot tables
    nd_sd_ := Nyce_Xml.Xml_Node (doc_, nd_ws_, 'sheetData');
    row_   := wb_.sheets(s_).rows.first;
    WHILE row_ IS NOT null LOOP
@@ -5863,14 +5918,6 @@ BEGIN
          id_ := id_ + 1;
       END LOOP;
    END IF;
-
-   -- pivot tables need to be inserted here
-   -- Question about whether pivot tables need to be generated before or after
-   -- images (drawings) and comments.  Assuming that the designer of the Excel
-   -- document is careful, there shouldn't be too many overlaps of normal data
-   -- with pivoted data (which can expand quite easily to cover large areas of
-   -- a sheet).  Images and comments should still be allowed to be placed over
-   -- pivot tables though (at least in principlet)
 
    nyce_xml.natr ('left', '0.7', attrs_);
    nyce_xml.attr ('right', '0.7', attrs_);
@@ -6386,12 +6433,12 @@ PROCEDURE Query2Sheet (
    col_count_   IN OUT PLS_INTEGER,
    row_count_   IN OUT PLS_INTEGER,
    cur_         IN OUT INTEGER,
-   col_headers_ IN BOOLEAN     := true,
-   sheet_       IN PLS_INTEGER := null,
-   useXf_       IN BOOLEAN     := false,
-   hdr_font_    IN PLS_INTEGER := null,
-   hdr_fill_    IN PLS_INTEGER := null,
-   col_fmts_    IN numFmt_cols := numFmt_cols() )
+   col_headers_ IN BOOLEAN        := true,
+   sheet_       IN PLS_INTEGER    := null,
+   useXf_       IN BOOLEAN        := false,
+   hdr_font_    IN PLS_INTEGER    := null,
+   hdr_fill_    IN PLS_INTEGER    := null,
+   col_fmts_    IN tp_numFmt_cols := tp_numFmt_cols() )
 IS
 
    TYPE tp_XfIds IS TABLE OF VARCHAR2(50) INDEX BY PLS_INTEGER;
@@ -6544,14 +6591,14 @@ PROCEDURE Query2Sheet (
    row_count_   IN OUT PLS_INTEGER,
    sql_         IN VARCHAR2,
    binds_       IN OUT NOCOPY bind_arr,
-   col_headers_ IN BOOLEAN     := true,
-   directory_   IN VARCHAR2    := null,
-   filename_    IN VARCHAR2    := null,
-   sheet_       IN PLS_INTEGER := null,
-   useXf_       IN BOOLEAN     := false,
-   hdr_font_    IN PLS_INTEGER := null,
-   hdr_fill_    IN PLS_INTEGER := null,
-   col_fmts_    IN numFmt_cols := numFmt_cols() )
+   col_headers_ IN BOOLEAN        := true,
+   directory_   IN VARCHAR2       := null,
+   filename_    IN VARCHAR2       := null,
+   sheet_       IN PLS_INTEGER    := null,
+   useXf_       IN BOOLEAN        := false,
+   hdr_font_    IN PLS_INTEGER    := null,
+   hdr_fill_    IN PLS_INTEGER    := null,
+   col_fmts_    IN tp_numFmt_cols := tp_numFmt_cols() )
 IS
    cur_   INTEGER := Dbms_Sql.Open_Cursor;
    throw_ INTEGER;
@@ -6573,14 +6620,14 @@ PROCEDURE Query2Sheet (
    col_count_   IN OUT PLS_INTEGER,
    row_count_   IN OUT PLS_INTEGER,
    sql_         IN VARCHAR2,
-   col_headers_ IN BOOLEAN     := true,
-   directory_   IN VARCHAR2    := null,
-   filename_    IN VARCHAR2    := null,
-   sheet_       IN PLS_INTEGER := null,
-   useXf_       IN BOOLEAN     := false,
-   hdr_font_    IN PLS_INTEGER := null,
-   hdr_fill_    IN PLS_INTEGER := null,
-   col_fmts_    IN numFmt_cols := numFmt_cols() )
+   col_headers_ IN BOOLEAN        := true,
+   directory_   IN VARCHAR2       := null,
+   filename_    IN VARCHAR2       := null,
+   sheet_       IN PLS_INTEGER    := null,
+   useXf_       IN BOOLEAN        := false,
+   hdr_font_    IN PLS_INTEGER    := null,
+   hdr_fill_    IN PLS_INTEGER    := null,
+   col_fmts_    IN tp_numFmt_cols := tp_numFmt_cols() )
 IS
    binds_ bind_arr := bind_arr();
 BEGIN
@@ -6596,14 +6643,14 @@ PROCEDURE Query2Sheet (
    col_count_   IN OUT PLS_INTEGER,
    row_count_   IN OUT PLS_INTEGER,
    rc_          IN OUT SYS_REFCURSOR,
-   col_headers_ IN BOOLEAN     := true,
-   directory_   IN VARCHAR2    := null,
-   filename_    IN VARCHAR2    := null,
-   sheet_       IN PLS_INTEGER := null,
-   useXf_       IN BOOLEAN     := false,
-   hdr_font_    IN PLS_INTEGER := null,
-   hdr_fill_    IN PLS_INTEGER := null,
-   col_fmts_    IN numFmt_cols := numFmt_cols() )
+   col_headers_ IN BOOLEAN        := true,
+   directory_   IN VARCHAR2       := null,
+   filename_    IN VARCHAR2       := null,
+   sheet_       IN PLS_INTEGER    := null,
+   useXf_       IN BOOLEAN        := false,
+   hdr_font_    IN PLS_INTEGER    := null,
+   hdr_fill_    IN PLS_INTEGER    := null,
+   col_fmts_    IN tp_numFmt_cols := tp_numFmt_cols() )
 IS
    cur_ INTEGER := dbms_sql.to_cursor_number (rc_);
 BEGIN
@@ -6619,14 +6666,14 @@ END Query2Sheet;
 PROCEDURE Query2SheetAndAutofilter ( -- with Binds
    sql_         IN VARCHAR2,
    binds_       IN OUT NOCOPY bind_arr,
-   col_headers_ IN BOOLEAN     := true,
-   directory_   IN VARCHAR2    := null,
-   filename_    IN VARCHAR2    := null,
-   sheet_       IN PLS_INTEGER := null,
-   useXf_       IN BOOLEAN     := false,
-   hdr_font_    IN PLS_INTEGER := null,
-   hdr_fill_    IN PLS_INTEGER := null,
-   col_fmts_    IN numFmt_cols := numFmt_cols() )
+   col_headers_ IN BOOLEAN        := true,
+   directory_   IN VARCHAR2       := null,
+   filename_    IN VARCHAR2       := null,
+   sheet_       IN PLS_INTEGER    := null,
+   useXf_       IN BOOLEAN        := false,
+   hdr_font_    IN PLS_INTEGER    := null,
+   hdr_fill_    IN PLS_INTEGER    := null,
+   col_fmts_    IN tp_numFmt_cols := tp_numFmt_cols() )
 IS
    col_count_ NUMBER;
    row_count_ NUMBER;
@@ -6651,14 +6698,14 @@ END Query2SheetAndAutofilter;
 
 PROCEDURE Query2SheetAndAutofilter ( -- no Binds
    sql_         IN VARCHAR2,
-   col_headers_ IN BOOLEAN     := true,
-   directory_   IN VARCHAR2    := null,
-   filename_    IN VARCHAR2    := null,
-   sheet_       IN PLS_INTEGER := null,
-   useXf_       IN BOOLEAN     := false,
-   hdr_font_    IN PLS_INTEGER := null,
-   hdr_fill_    IN PLS_INTEGER := null,
-   col_fmts_    IN numFmt_cols := numFmt_cols() )
+   col_headers_ IN BOOLEAN        := true,
+   directory_   IN VARCHAR2       := null,
+   filename_    IN VARCHAR2       := null,
+   sheet_       IN PLS_INTEGER    := null,
+   useXf_       IN BOOLEAN        := false,
+   hdr_font_    IN PLS_INTEGER    := null,
+   hdr_fill_    IN PLS_INTEGER    := null,
+   col_fmts_    IN tp_numFmt_cols := tp_numFmt_cols() )
 IS
    binds_ bind_arr := bind_arr();
 BEGIN
