@@ -3,7 +3,7 @@ PL/SQL Developer Test script 3.0
 DECLARE
    test_name_  CONSTANT VARCHAR2(30) := 'Date1900';
    file_start_ CONSTANT VARCHAR2(20) := 'TestOut_';
-   file_end_   CONSTANT VARCHAR2(20) := Cbh_Utils_API.Rep ('_:P1.xlsx', to_char(sysdate,'YYYYMMDD-HH24MI'));
+   file_end_   CONSTANT VARCHAR2(20) := Nyce_Utils.Rep ('_:P1.xlsx', to_char(sysdate,'YYYYMMDD-HH24MI'));
    file_name_  VARCHAR2(80);
    sheet_      PLS_INTEGER;
    base_date_  DATE := to_date ('1900-01-01','YYYY-MM-DD');
@@ -16,20 +16,20 @@ DECLARE
    test_date_  DATE := to_date ('2024-01-01 14:23:56', 'YYYY-MM-DD HH24:MI:SS');
 BEGIN
 
-   As_Xlsx.Init_Workbook;
-   As_Xlsx.Set_Sheet_Name (1, 'Date 1900');
-   As_Xlsx.CellD (2, 2, base_date_);
-   As_Xlsx.CellD (2, 3, base_date_, numFmtId_ => 'dthm_mid', fontId_ => 'bold');
-   As_Xlsx.CellD (2, 4, test_date_);
-   As_Xlsx.CellD (2, 5, test_date_, numFmtId_ => 'dthms_mid', fontId_ => 'bold');
+   Nyce_Xlsx.Init_Workbook;
+   Nyce_Xlsx.Set_Sheet_Name (1, 'Date 1900');
+   Nyce_Xlsx.CellD (2, 2, base_date_);
+   Nyce_Xlsx.CellD (2, 3, base_date_, numFmtId_ => 'dthm_mid', fontId_ => 'bold');
+   Nyce_Xlsx.CellD (2, 4, test_date_);
+   Nyce_Xlsx.CellD (2, 5, test_date_, numFmtId_ => 'dthms_mid', fontId_ => 'bold');
 
-   As_Xlsx.CellD (2, 7, feb28_);
-   --As_Xlsx.CellD (2, 7.5, feb29_);
-   As_Xlsx.CellD (2, 8, mar1_);
-   As_Xlsx.CellD (2, 9, mar2_);
+   Nyce_Xlsx.CellD (2, 7, feb28_);
+   --Nyce_Xlsx.CellD (2, 7.5, feb29_);
+   Nyce_Xlsx.CellD (2, 8, mar1_);
+   Nyce_Xlsx.CellD (2, 9, mar2_);
 
    file_name_ := file_start_ || test_name_ || file_end_;
-   As_Xlsx.Save (As_Xlsx.Finish, 'EXCEL_OUT', file_name_);
+   Nyce_Xlsx.Save (Nyce_Xlsx.Finish, 'EXCEL_OUT', file_name_);
    Dbms_Output.Put_Line (file_name_ || ' saved to filesystem');
 
 END;

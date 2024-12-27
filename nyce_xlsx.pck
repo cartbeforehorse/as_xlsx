@@ -654,6 +654,17 @@ PROCEDURE Query2SheetAndAutofilter ( -- no Binds
    hdr_fill_    IN PLS_INTEGER    := null,
    col_fmts_    IN tp_numFmt_cols := tp_numFmt_cols() );
 
+PROCEDURE Query2SheetAndAutofilter ( -- ref-cursor
+   rc_          IN OUT SYS_REFCURSOR,
+   col_headers_ IN BOOLEAN        := true,
+   directory_   IN VARCHAR2       := null,
+   filename_    IN VARCHAR2       := null,
+   sheet_       IN PLS_INTEGER    := null,
+   useXf_       IN BOOLEAN        := false,
+   hdr_font_    IN PLS_INTEGER    := null,
+   hdr_fill_    IN PLS_INTEGER    := null,
+   col_fmts_    IN tp_numFmt_cols := tp_numFmt_cols() );
+
 PROCEDURE SetUseXf (
    p_val BOOLEAN := true );
 
@@ -696,11 +707,6 @@ VERSION_ CONSTANT VARCHAR2(20) := 'as_xlsx20';
 LOCAL_FILE_HEADER_        CONSTANT RAW(4) := hextoraw('504B0304'); -- Local file header signature
 END_OF_CENTRAL_DIRECTORY_ CONSTANT RAW(4) := hextoraw('504B0506'); -- End of central directory signature
 
--- Excel's first day is 1900-01-01, represented by the number 1 (not 0), which
--- means we need to subtract 1 day from 01-01-1900.  What's more is that Excel
--- thinks that 1900 is a leap year, and so from 1900-03-01 we need to take off
--- another day, leaving us with a base-date of 1899-12-30:
-EXCEL_BASE_DATE_          CONSTANT DATE         := to_date('18991230','YYYYMMDD');
 CELL_DT_STRING_           CONSTANT VARCHAR2(10) := 'string';
 CELL_DT_NUMBER_           CONSTANT VARCHAR2(10) := 'number';
 CELL_DT_DATE_             CONSTANT VARCHAR2(10) := 'date';
@@ -1339,9 +1345,10 @@ END Print_Range;
 -- Cell reference converters
 -- > Alfanumeric to number reference.  Useful as a helper for generating Excel
 --   formulas such as `sum(A3:X3)`.  But also required when building XML parts
--- > Alfan_Col() => helps to convert (2, 3) => B3
--- > Col_Alfan() => helps to convert B3 => (2, 3)
---
+-- > Alfan_Col()   => helps to convert (2, 3) => B3; actually ports AA => 27
+-- > Col_Alfan()   => helps to convert B3 => (2, 3); actually ports 27 => AA
+-- > Alfan_Cell()  => (2, 3, true, false) => B$3
+-- > Alfan_Range() => (2, 3, 7, 7) => B3:G7
 --
 FUNCTION Col_Alfan(
    col_ IN VARCHAR2 ) RETURN PLS_INTEGER
@@ -1782,10 +1789,11 @@ FUNCTION New_Sheet (
    sheetname_ VARCHAR2 := null,
    tab_color_ VARCHAR2 := null ) RETURN PLS_INTEGER
 IS
-   s_ PLS_INTEGER := wb_.sheets.count + 1;
+   s_          PLS_INTEGER   := wb_.sheets.count + 1;
+   sheet_name_ VARCHAR2(100) := nvl (sheetname_, 'Sheet ' || s_);
 BEGIN
    wb_.sheets(s_).name := nvl (
-      Dbms_XmlGen.Convert(translate(sheetname_, 'a/\[]*:?', 'a')),
+      Dbms_XmlGen.Convert(translate(sheet_name_, 'a/\[]*:?', 'a')),
       'Sheet' || s_
    );
    IF wb_.strings.count = 0 THEN
@@ -2627,10 +2635,20 @@ IS BEGIN
    );
 END CellS;
 
+-- Excel's first day is 1900-01-01, represented by the number 1 (not 0), which
+-- means we need to subtract 1 day from 01-01-1900.  What's more is that Excel
+-- thinks that 1900 is a leap year, and so from 1900-03-01 we need to take off
+-- another day, leaving us with a base-date of 1899-12-30.
+-- The calculation here tries to correct for what Excel thinks is 29/02/1900.
 FUNCTION Date_To_Xl_Nr (
    date_ IN DATE ) RETURN NUMBER
-IS BEGIN
-   RETURN date_ - EXCEL_BASE_DATE_;
+IS
+   xl_date_as_num_ NUMBER := date_ - to_date('19000301','YYYYMMDD');
+BEGIN
+   xl_date_as_num_ := xl_date_as_num_ + CASE
+      WHEN xl_date_as_num_ < 0 THEN 60 ELSE 61
+   END;
+   RETURN xl_date_as_num_;
 END Date_To_Xl_Nr;
 
 PROCEDURE Cell (  -- date version
@@ -2737,7 +2755,7 @@ PROCEDURE Query_Date_Cell (
    row_   IN PLS_INTEGER,
    value_ IN DATE,
    sheet_ IN PLS_INTEGER := null,
-   XfId_  IN VARCHAR2 )
+   XfId_  IN PLS_INTEGER )
 IS
    sh_ PLS_INTEGER := nvl(sheet_, wb_.sheets.count);
 BEGIN
@@ -6429,6 +6447,13 @@ IS BEGIN
    Blob2File (xl_blob_, directory_, filename_);
 END Save;
 
+-----
+-- Query2Sheet()
+--   This collection of functions is the quickest way of putting data onto the
+--   Excel sheet.  col_fmts_ allows us to define one numFmt for each column of
+--   the data-source.  You can leave the collection sparse if some columns are
+--   not in need of formatting.
+--
 PROCEDURE Query2Sheet (
    col_count_   IN OUT PLS_INTEGER,
    row_count_   IN OUT PLS_INTEGER,
@@ -6713,6 +6738,31 @@ BEGIN
       sql_, binds_, col_headers_, directory_,
       filename_, sheet_, useXf_, hdr_font_, hdr_fill_, col_fmts_
    );
+END Query2SheetAndAutofilter;
+
+PROCEDURE Query2SheetAndAutofilter ( -- ref-cursor
+   rc_          IN OUT SYS_REFCURSOR,
+   col_headers_ IN BOOLEAN        := true,
+   directory_   IN VARCHAR2       := null,
+   filename_    IN VARCHAR2       := null,
+   sheet_       IN PLS_INTEGER    := null,
+   useXf_       IN BOOLEAN        := false,
+   hdr_font_    IN PLS_INTEGER    := null,
+   hdr_fill_    IN PLS_INTEGER    := null,
+   col_fmts_    IN tp_numFmt_cols := tp_numFmt_cols() )
+IS
+   col_count_ NUMBER;
+   row_count_ NUMBER;
+   cur_       INTEGER := dbms_sql.to_cursor_number (rc_);
+BEGIN
+   Query2Sheet (
+      col_count_, row_count_, cur_, col_headers_,
+      sheet_, useXf_, hdr_font_, hdr_fill_, col_fmts_
+   );
+   Set_Autofilter (1, col_count_, 1, row_count_, sheet_);
+   IF directory_ IS NOT null AND filename_ IS NOT null THEN
+      Save (directory_, filename_);
+   END IF;
 END Query2SheetAndAutofilter;
 
 
