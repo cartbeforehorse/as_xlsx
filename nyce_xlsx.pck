@@ -242,7 +242,7 @@ PROCEDURE Add_Border_To_Range (
    style_     IN VARCHAR2    := 'medium',
    sheet_     IN PLS_INTEGER := null );
 
----------------------------------------
+-----
 -- Get_Alignment()
 --  Values allowed in vert/horiz: horizontal;center;centerContinuous;distributed;fill;general;justify;left;right
 --  Values allowed in wrapText:   vertical;bottom;center;distributed;justify;top
@@ -576,6 +576,24 @@ PROCEDURE Set_Autofilter (
    row_end_   IN PLS_INTEGER := null,
    sheet_     IN PLS_INTEGER := null );
 
+-----
+-- Set_Table()
+--  Values allowed in style_: TableStyleLight1;TableStyleLight21;TableStyleMedium1;TableStyleMedium28;TableStyleDark1;TableStyleDark11
+--
+PROCEDURE Set_Table (
+   col_start_ PLS_INTEGER,
+   col_end_   PLS_INTEGER,
+   row_start_ PLS_INTEGER,
+   row_end_   PLS_INTEGER,
+   style_     VARCHAR2,
+   tbl_name_  VARCHAR2    := null,
+   sheet_     PLS_INTEGER := null );
+
+PROCEDURE Set_Table (
+   tbl_range_ tp_cell_range,
+   style_     VARCHAR2,
+   tbl_name_  VARCHAR2 := null );
+
 PROCEDURE Set_Tabcolor (
    tabcolor_ VARCHAR2, -- hex Alpha-rgb value
    sheet_    PLS_INTEGER := null );
@@ -764,9 +782,17 @@ TYPE tp_autofilter IS RECORD (
 );
 TYPE tp_autofilters IS TABLE OF tp_autofilter INDEX BY PLS_INTEGER;
 
+TYPE tp_table IS RECORD (
+   tbl_range tp_cell_range,
+   style     VARCHAR2(1000),
+   tbl_name  VARCHAR2(32767),
+   ws_rel    PLS_INTEGER );
+TYPE tp_tables IS TABLE OF tp_table INDEX BY PLS_INTEGER;
+
 TYPE tp_hyperlink IS RECORD (
-   cell VARCHAR2(10),
-   url  VARCHAR2(1000)
+   cell   VARCHAR2(10),
+   url    VARCHAR2(1000),
+   ws_rel PLS_INTEGER
 );
 TYPE tp_hyperlinks IS TABLE OF tp_hyperlink INDEX BY PLS_INTEGER;
 
@@ -783,7 +809,11 @@ TYPE tp_comment IS RECORD (
    width  PLS_INTEGER,
    height PLS_INTEGER
 );
-TYPE tp_comments   IS TABLE OF tp_comment INDEX BY PLS_INTEGER;
+TYPE tp_comments_list IS TABLE OF tp_comment INDEX BY PLS_INTEGER;
+TYPE tp_comments IS RECORD (
+   ws_rel        PLS_INTEGER,
+   comments_list tp_comments_list
+);
 
 TYPE tp_mergecells IS TABLE OF VARCHAR2(21) INDEX BY PLS_INTEGER;
 
@@ -851,6 +881,7 @@ TYPE tp_pivot_table IS RECORD (
 );
 TYPE tp_pivot_tables IS TABLE OF tp_pivot_table INDEX BY PLS_INTEGER;
 TYPE tp_pivots_list  IS TABLE OF PLS_INTEGER INDEX BY PLS_INTEGER;
+TYPE tp_tables_list  IS TABLE OF PLS_INTEGER INDEX BY PLS_INTEGER;
 
 -----
 -- image/drawing/picture types
@@ -863,7 +894,11 @@ TYPE tp_drawing IS RECORD (
    title       VARCHAR2(100),
    description VARCHAR2(4000)
 );
-TYPE tp_drawings IS TABLE OF tp_drawing INDEX BY PLS_INTEGER;
+TYPE tp_drawings_list IS TABLE OF tp_drawing INDEX BY PLS_INTEGER;
+TYPE tp_drawings IS RECORD (
+   ws_rel        PLS_INTEGER,
+   drawings_list tp_drawings_list
+);
 
 -----
 -- sheet type
@@ -872,6 +907,8 @@ TYPE tp_sheet IS RECORD (
    wb_rel       PLS_INTEGER,
    rows         tp_rows,
    widths       tp_widths,
+   tabcolor     VARCHAR2(8),
+   fontId       PLS_INTEGER,
    name         VARCHAR2(100),
    freeze_rows  PLS_INTEGER,
    freeze_cols  PLS_INTEGER,
@@ -882,8 +919,7 @@ TYPE tp_sheet IS RECORD (
    comments     tp_comments,
    mergecells   tp_mergecells,
    validations  tp_validations,
-   tabcolor     VARCHAR2(8),
-   fontId       PLS_INTEGER,
+   tables_list  tp_tables_list,
    pivots_list  tp_pivots_list,
    drawings     tp_drawings
 );
@@ -938,13 +974,14 @@ TYPE tp_book IS RECORD (
    str_ind       tp_str_ind,
    str_cnt       PLS_INTEGER := 0,
    fonts         tp_fonts,
+   fontId        PLS_INTEGER,
    fills         tp_fills,
    borders       tp_borders,
    numFmts       tp_numFmts,
    cellXfs       tp_cellXfs,
-   defined_names tp_defined_names,
    formulas      tp_formulas,
-   fontId        PLS_INTEGER,
+   defined_names tp_defined_names,
+   tables        tp_tables,
    pivot_caches  tp_pivot_caches,
    pivot_tables  tp_pivot_tables,
    images        tp_images
@@ -1089,6 +1126,27 @@ BEGIN
       substr (guid_, 13, 4) || '-' || substr (guid_, 17, 4) || '-' ||
       substr (guid_, 21, 12) || '}';
 END Get_Guid;
+
+PROCEDURE Name_Checker (
+   proposed_name_ IN VARCHAR2 )
+IS
+BEGIN
+   IF not regexp_like (proposed_name_, '^[a-zA-Z_]') THEN
+      Raise_App_Error ('A registered name must start with a letter or an underscore.');
+   END IF;
+   IF not regexp_like (proposed_name_, '^[a-zA-Z0-9_\]+$') THEN
+      Raise_App_Error (
+         'A registered name must not contain spaces or any operation characters, such as ' ||
+         'plus (+), divide (/) etc.  To keep it simple, use alpha-numeric and underscore only!'
+      );
+   END IF;
+   -- Should we also check for name duplication here?  Unfortunately, it's not
+   -- as easy as it sounds.  A registered name can have different scopes, over
+   -- the whole workbook, or just in within a sheet.  Also, we should remember
+   -- that "defined_names" is part of the existing functionality.  The problem
+   -- is that as_xlsx assumes that a defined name may only ever reference cell
+   -- ranges, while Excel uses them for many different things.
+END Name_Checker;
 
 
 ---------------------------------------
@@ -1386,14 +1444,6 @@ IS BEGIN
    RETURN Alfan_Cell (loc_.c, loc_.r, loc_.fixc, loc_.fixr);
 END Alfan_Cell;
 
-PROCEDURE Alfan_Cell (
-   loc_ IN OUT NOCOPY tp_cell_loc )
-IS
-   throw_ VARCHAR2(12);
-BEGIN
-   throw_ := Alfan_Cell (loc_.c, loc_.r, loc_.fixc, loc_.fixr);
-END Alfan_Cell;
-
 FUNCTION Alfan_Range (
    col_tl_  IN PLS_INTEGER,
    row_tl_  IN PLS_INTEGER,
@@ -1494,16 +1544,26 @@ IS BEGIN
 END Range_Width;
 
 PROCEDURE Add_Col_Headings_To_Range (
-   range_ IN OUT NOCOPY tp_cell_range,
-   sheet_ IN PLS_INTEGER := null )
+   range_     IN OUT NOCOPY tp_cell_range,
+   sheet_     IN PLS_INTEGER := null,
+   allow_dup_ IN BOOLEAN     := true )
 IS
-   i_   PLS_INTEGER := 1;
-   row_ PLS_INTEGER := range_.tl.r;
-   sh_  PLS_INTEGER := coalesce (range_.sheet_id, sheet_, wb_.sheets.count);
+   i_       PLS_INTEGER := 1;
+   row_     PLS_INTEGER := range_.tl.r;
+   sh_      PLS_INTEGER := coalesce (range_.sheet_id, sheet_, wb_.sheets.count);
+   new_val_ VARCHAR2(32000);
+   uq_      tp_unique_data;
 BEGIN
-   IF range_.col_names.count = 0 THEN -- else assume `col_names` is correctly filled out
+   IF range_.col_names.count = 0 THEN -- else assume `col_names` is already correctly filled out
       FOR c_ IN range_.tl.c .. range_.br.c LOOP
-         range_.col_names(i_) := wb_.sheets(sh_).rows(row_)(c_).ora_value.str_val;
+         new_val_ := wb_.sheets(sh_).rows(row_)(c_).ora_value.str_val;
+         IF not allow_dup_ THEN
+            IF uq_.exists(new_val_) THEN
+               Raise_App_Error ('Heading :P1 may only appear once in this range!', new_val_);
+            END IF;
+            uq_(new_val_) := 1;
+         END IF;
+         range_.col_names(i_) := new_val_;
          i_ := i_ + 1;
       END LOOP;
    END IF;
@@ -1745,34 +1805,39 @@ BEGIN
    WHILE s_ IS NOT null LOOP
       row_ix_ := wb_.sheets(s_).rows.first;
       WHILE row_ix_ IS NOT null LOOP
-         wb_.sheets(s_).rows(row_ix_).delete();
+         wb_.sheets(s_).rows(row_ix_).delete;
          row_ix_ := wb_.sheets(s_).rows.next(row_ix_);
       END LOOP;
-      wb_.sheets(s_).rows.delete();
-      wb_.sheets(s_).widths.delete();
-      wb_.sheets(s_).autofilters.delete();
-      wb_.sheets(s_).hyperlinks.delete();
-      wb_.sheets(s_).col_fmts.delete();
-      wb_.sheets(s_).row_fmts.delete();
-      wb_.sheets(s_).comments.delete();
-      wb_.sheets(s_).mergecells.delete();
-      wb_.sheets(s_).validations.delete();
-      wb_.sheets(s_).drawings.delete();
+      wb_.sheets(s_).rows.delete;
+      wb_.sheets(s_).widths.delete;
+      wb_.sheets(s_).autofilters.delete;
+      wb_.sheets(s_).hyperlinks.delete;
+      wb_.sheets(s_).col_fmts.delete;
+      wb_.sheets(s_).row_fmts.delete;
+      wb_.sheets(s_).comments.comments_list.delete;
+      wb_.sheets(s_).comments := null;
+      wb_.sheets(s_).mergecells.delete;
+      wb_.sheets(s_).validations.delete;
+      wb_.sheets(s_).tables_list.delete;
+      wb_.sheets(s_).pivots_list.delete;
+      wb_.sheets(s_).drawings.drawings_list.delete;
+      wb_.sheets(s_).drawings := tp_drawings();
       s_ := wb_.sheets.next(s_);
    END LOOP;
-   wb_.strings.delete();
-   wb_.str_ind.delete();
-   wb_.fonts.delete();
-   wb_.fills.delete();
-   wb_.borders.delete();
-   wb_.numFmts.delete();
-   wb_.cellXfs.delete();
-   wb_.defined_names.delete();
-   wb_.formulas.delete();
+   wb_.strings.delete;
+   wb_.str_ind.delete;
+   wb_.fonts.delete;
+   wb_.fills.delete;
+   wb_.borders.delete;
+   wb_.numFmts.delete;
+   wb_.cellXfs.delete;
+   wb_.formulas.delete;
+   wb_.defined_names.delete;
+   wb_.tables.delete;
    FOR i_ IN 1 .. wb_.images.count LOOP
       dbms_lob.freeTemporary (wb_.images(i_).img_blob);
    END LOOP;
-   wb_.images.delete();
+   wb_.images.delete;
    wb_ := null;
 END Clear_Workbook;
 
@@ -2635,11 +2700,20 @@ IS BEGIN
    );
 END CellS;
 
--- Excel's first day is 1900-01-01, represented by the number 1 (not 0), which
--- means we need to subtract 1 day from 01-01-1900.  What's more is that Excel
--- thinks that 1900 is a leap year, and so from 1900-03-01 we need to take off
--- another day, leaving us with a base-date of 1899-12-30.
--- The calculation here tries to correct for what Excel thinks is 29/02/1900.
+-- Excel thinks that 1900 was a leap-year, meaning that the date 1900-02-29 is
+-- valid in Excel.  The rest of the world (in particular, Oracle) knows better
+-- and so there will always be a discrepancy and a decision to make should you
+-- need to "span" over the 1900-02-28 - 1900-03-01 gap.
+--   > In Excel:        1900-03-01 - 1900-02-28 = 2
+--   > Everywhere else: 1900-03-01 - 1900-02-28 = 1
+-- Our solution is to force Excel to show Oracle's (correct) date calculation.
+-- Date 1900-03-01 and after assume that 2 refers to 1900-01-01, while earlier
+-- dates assume that 1900-01-01 = 1.
+-- Just be aware of all this if you need to do some date-calculations in Excel
+-- itself, and that it will lead to discrepancies if you need to match answers
+-- with calculations made in Oracle.
+-- Just to be clear, this is a Microsoft bug, and this Oracle package does its
+-- best to work around it.  Your app may require a different approach.
 FUNCTION Date_To_Xl_Nr (
    date_ IN DATE ) RETURN NUMBER
 IS
@@ -2846,14 +2920,14 @@ PROCEDURE Comment (
    sheet_  IN PLS_INTEGER := null )
 IS
    sh_ PLS_INTEGER := nvl(sheet_, wb_.sheets.count);
-   ix_ PLS_INTEGER := wb_.sheets(sh_).comments.count + 1;
+   ix_ PLS_INTEGER := wb_.sheets(sh_).comments.comments_list.count + 1;
 BEGIN
-   wb_.sheets(sh_).comments(ix_).row    := row_;
-   wb_.sheets(sh_).comments(ix_).column := col_;
-   wb_.sheets(sh_).comments(ix_).text   := dbms_xmlgen.convert(text_);
-   wb_.sheets(sh_).comments(ix_).author := dbms_xmlgen.convert(author_);
-   wb_.sheets(sh_).comments(ix_).width  := width_;
-   wb_.sheets(sh_).comments(ix_).height := height_;
+   wb_.sheets(sh_).comments.comments_list(ix_).row    := row_;
+   wb_.sheets(sh_).comments.comments_list(ix_).column := col_;
+   wb_.sheets(sh_).comments.comments_list(ix_).text   := dbms_xmlgen.convert(text_);
+   wb_.sheets(sh_).comments.comments_list(ix_).author := dbms_xmlgen.convert(author_);
+   wb_.sheets(sh_).comments.comments_list(ix_).width  := width_;
+   wb_.sheets(sh_).comments.comments_list(ix_).height := height_;
 END Comment;
 
 PROCEDURE Num_Formula (
@@ -3173,7 +3247,7 @@ BEGIN
    drawing_.name        := name_;
    drawing_.title       := title_;
    drawing_.description := description_;
-   wb_.sheets(sh_).drawings(wb_.sheets(sh_).drawings.count+1) := drawing_;
+   wb_.sheets(sh_).drawings.drawings_list(wb_.sheets(sh_).drawings.drawings_list.count+1) := drawing_;
 
 END Add_Image;
 
@@ -3418,6 +3492,53 @@ BEGIN
 END Set_Autofilter;
 
 
+PROCEDURE Set_Table (
+   col_start_ PLS_INTEGER,
+   col_end_   PLS_INTEGER,
+   row_start_ PLS_INTEGER,
+   row_end_   PLS_INTEGER,
+   style_     VARCHAR2,
+   tbl_name_  VARCHAR2    := null,
+   sheet_     PLS_INTEGER := null )
+IS
+   table_        tp_table;
+   tbl_id_       PLS_INTEGER := wb_.tables.count + 1;
+   sh_           PLS_INTEGER := nvl(sheet_, wb_.sheets.count);
+   tbl_on_sheet_ PLS_INTEGER := wb_.sheets(sh_).tables_list.count + 1;
+BEGIN
+   IF col_start_ IS null OR col_end_ IS null OR row_start_ IS null OR row_end_ IS null OR sh_ IS null THEN
+      Raise_App_Error ('A table''s range must be defined correctly, with full sheet and cell range values.');
+   END IF;
+   table_.tbl_range := tp_cell_range (
+      sheet_id => sh_,
+      tl       => tp_cell_loc (col_start_, row_start_, false, false),
+      br       => tp_cell_loc (col_end_, row_end_, false, false)
+   );
+   Name_Checker (tbl_name_);
+   table_.tbl_name := nvl (tbl_name_, 'Table'||to_char(tbl_id_));
+   table_.style    := style_;
+   Add_Col_Headings_To_Range (table_.tbl_range, allow_dup_ => false);
+   wb_.tables(tbl_id_) := table_;
+   wb_.sheets(sh_).tables_list(tbl_on_sheet_) := tbl_id_;
+END Set_Table;
+
+PROCEDURE Set_Table (
+   tbl_range_ tp_cell_range,
+   style_     VARCHAR2,
+   tbl_name_  VARCHAR2 := null )
+IS BEGIN
+   Set_Table (
+      col_start_ => tbl_range_.tl.c,
+      col_end_   => tbl_range_.br.c,
+      row_start_ => tbl_range_.tl.r,
+      row_end_   => tbl_range_.br.r,
+      style_     => style_,
+      tbl_name_  => tbl_name_,
+      sheet_     => tbl_range_.sheet_id
+   );
+END Set_Table;
+
+
 ---------------------------------------
 ---------------------------------------
 --
@@ -3510,17 +3631,23 @@ BEGIN
 
    s_ := wb_.sheets.first;
    WHILE s_ IS NOT null LOOP
-      IF wb_.sheets(s_).comments.count > 0 THEN
+      IF wb_.sheets(s_).comments.comments_list.count > 0 THEN
          nyce_xml.natr ('PartName', rep('/xl/comments:P1.xml', s_), attrs_);
          nyce_xml.attr ('ContentType', 'application/vnd.openxmlformats-officedocument.spreadsheetml.comments+xml', attrs_);
          Nyce_Xml.Xml_Node (doc_, nd_types_, 'Override', attrs_);
       END IF;
-      IF wb_.sheets(s_).drawings.count > 0 THEN
+      IF wb_.sheets(s_).drawings.drawings_list.count > 0 THEN
          nyce_xml.natr ('PartName', rep('/xl/drawings/drawing:P1.xml', s_), attrs_);
          nyce_xml.attr ('ContentType', 'application/vnd.openxmlformats-officedocument.drawing+xml', attrs_);
          Nyce_Xml.Xml_Node (doc_, nd_types_, 'Override', attrs_);
       END IF;
       s_ := wb_.sheets.next(s_);
+   END LOOP;
+
+   FOR t_ IN 1 .. wb_.tables.count LOOP
+      nyce_xml.natr ('PartName', rep('/xl/tables/table:P1.xml', to_char(t_)), attrs_);
+      nyce_xml.attr ('ContentType', 'application/vnd.openxmlformats-officedocument.spreadsheetml.table+xml', attrs_);
+      Nyce_Xml.Xml_Node (doc_, nd_types_, 'Override', attrs_);
    END LOOP;
 
    Add1Xml (excel_, '[Content_Types].xml', Dbms_XmlDom.getXmlType(doc_).getClobVal);
@@ -5740,6 +5867,64 @@ BEGIN
 
 END Finish_Drawings_Rels;
 
+PROCEDURE Finish_Tables (
+   excel_ IN OUT NOCOPY BLOB )
+IS
+   doc_     dbms_XmlDom.DomDocument;
+   attrs_   nyce_xml.xml_attrs_arr;
+   tbl_     tp_table;
+   nd_tbl_  dbms_XmlDom.DomNode;
+   nd_tcls_ dbms_XmlDom.DomNode;
+BEGIN
+
+   IF wb_.tables.count = 0 THEN
+      goto skip_tables;
+   END IF;
+
+   -- xl/tables/table:P1.xml
+   FOR t_ IN 1 .. wb_.tables.count LOOP
+
+      tbl_ := wb_.tables(t_);
+
+      doc_ := Dbms_XmlDom.newDomDocument;
+      Dbms_XmlDom.setVersion (doc_, '1.0" encoding="UTF-8" standalone="yes');
+
+      nyce_xml.natr ('xmlns', 'http://schemas.openxmlformats.org/spreadsheetml/2006/main', attrs_);
+      nyce_xml.attr ('id', to_char(t_), attrs_);
+      nyce_xml.attr ('name', tbl_.tbl_name, attrs_);
+      nyce_xml.attr ('displayName', tbl_.tbl_name, attrs_);
+      nyce_xml.attr ('ref', Alfan_Range(tbl_.tbl_range), attrs_);
+      nyce_xml.attr ('totalsRowShown', '0', attrs_);
+      nd_tbl_ := Nyce_Xml.Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'table', attrs_);
+
+      nyce_xml.natr ('ref', Alfan_Range(tbl_.tbl_range), attrs_);
+      Nyce_Xml.Xml_Node (doc_, nd_tbl_, 'autoFilter', attrs_);
+
+      nyce_xml.natr ('count', to_char(Range_Width(tbl_.tbl_range)), attrs_);
+      nd_tcls_ := Nyce_Xml.Xml_Node (doc_, nd_tbl_, 'tableColumns', attrs_);
+      FOR c_ IN 1 .. Range_Width(tbl_.tbl_range) LOOP
+         nyce_xml.natr ('id', to_char(c_), attrs_);
+         nyce_xml.attr ('name', tbl_.tbl_range.col_names(c_), attrs_);
+         Nyce_Xml.Xml_Node (doc_, nd_tcls_, 'tableColumn', attrs_);
+      END LOOP;
+
+      nyce_xml.natr ('name', tbl_.style, attrs_);
+      nyce_xml.attr ('showFirstColumn', '0', attrs_);
+      nyce_xml.attr ('showLastColumn', '0', attrs_);
+      nyce_xml.attr ('showRowStripes', '1', attrs_);
+      nyce_xml.attr ('showColumnStripes', '0', attrs_);
+      Nyce_Xml.Xml_Node (doc_, nd_tbl_, 'tableStyleInfo', attrs_);
+
+      Add1Xml (excel_, rep('xl/tables/table:P1.xml',t_), Dbms_XmlDom.getXmlType(doc_).getClobVal);
+      Dbms_XmlDom.freeDocument (doc_);
+
+   END LOOP;
+
+   <<skip_tables>>
+   null;
+
+END Finish_Tables;
+
 PROCEDURE Finish_Worksheet (
    excel_ IN OUT NOCOPY BLOB,
    s_     IN            PLS_INTEGER )
@@ -5757,11 +5942,12 @@ IS
    nd_dvs_  dbms_XmlDom.DomNode;
    nd_dv_   dbms_XmlDom.DomNode;
    nd_h_    dbms_XmlDom.DomNode;
+   nd_tps_  dbms_XmlDom.DomNode;
    row_     PLS_INTEGER := wb_.sheets(s_).rows.first;
    col_     PLS_INTEGER;
    col_min_ PLS_INTEGER := 16384;
    col_max_ PLS_INTEGER := 1;
-   id_      PLS_INTEGER := 1;
+   rel_     PLS_INTEGER := 1;
 BEGIN
 
    WHILE row_ IS NOT null LOOP
@@ -5931,9 +6117,10 @@ BEGIN
       nd_h_ := Nyce_Xml.Xml_Node (doc_, nd_ws_, 'hyperlinks');
       FOR h_ IN 1 .. wb_.sheets(s_).hyperlinks.count LOOP
          nyce_xml.natr ('ref', wb_.sheets(s_).hyperlinks(h_).cell, attrs_);
-         nyce_xml.attr ('r:id', rep ('rId:P1', id_), attrs_);
+         nyce_xml.attr ('r:id', rep ('rId:P1', rel_), attrs_);
          Nyce_Xml.Xml_Node (doc_, nd_h_, 'hyperlink', attrs_);
-         id_ := id_ + 1;
+         wb_.sheets(s_).hyperlinks(h_).ws_rel := rel_;
+         rel_ := rel_ + 1;
       END LOOP;
    END IF;
 
@@ -5945,15 +6132,29 @@ BEGIN
    nyce_xml.attr ('footer', '0.3', attrs_);
    Nyce_Xml.Xml_Node (doc_, nd_ws_, 'pageMargins', attrs_);
 
-   IF wb_.sheets(s_).drawings.count > 0 THEN
-      nyce_xml.natr ('r:id', rep ('rId:P1', id_), attrs_);
+   IF wb_.sheets(s_).drawings.drawings_list.count > 0 THEN
+      nyce_xml.natr ('r:id', rep ('rId:P1', rel_), attrs_);
       Nyce_Xml.Xml_Node (doc_, nd_ws_, 'drawing', attrs_);
-      id_ := id_ + 1;
+      wb_.sheets(s_).drawings.ws_rel := rel_;
+      rel_ := rel_ + 1;
    END IF;
 
-   IF wb_.sheets(s_).comments.count > 0 THEN
-      nyce_xml.natr ('r:id', 'rId' || id_, attrs_);
+   IF wb_.sheets(s_).comments.comments_list.count > 0 THEN
+      nyce_xml.natr ('r:id', 'rId' || rel_, attrs_);
       Nyce_Xml.Xml_Node (doc_, nd_ws_, 'legacyDrawing', attrs_);
+      wb_.sheets(s_).comments.ws_rel := rel_;
+      rel_ := rel_ + 2; -- ../drawings/vmlDrawing1.vml + ../comments1.xml will be added to the rel sheet
+   END IF;
+
+   IF wb_.sheets(s_).tables_list.count > 0 THEN
+      nyce_xml.natr ('count', to_char(wb_.sheets(s_).tables_list.count), attrs_);
+      nd_tps_ := Nyce_Xml.Xml_Node (doc_, nd_ws_, 'tableParts', attrs_);
+      FOR t_ IN 1 .. wb_.sheets(s_).tables_list.count LOOP
+         nyce_xml.natr ('r:id', rep ('rId:P1', rel_), attrs_);
+         Nyce_Xml.Xml_Node (doc_, nd_tps_, 'tablePart', attrs_);
+         wb_.tables(wb_.sheets(s_).tables_list(t_)).ws_rel := rel_;
+         rel_ := rel_ + 1;
+      END LOOP;
    END IF;
 
    Add1Xml (excel_, rep('xl/worksheets/sheet:P1.xml',to_char(s_)), Dbms_XmlDom.getXmlType(doc_).getClobVal);
@@ -5967,16 +6168,18 @@ PROCEDURE Finish_Ws_Relationships (
 IS
    id_            PLS_INTEGER := 1;
    nr_hyperlinks_ PLS_INTEGER := wb_.sheets(s_).hyperlinks.count;
-   nr_comments_   PLS_INTEGER := wb_.sheets(s_).comments.count;
+   nr_comments_   PLS_INTEGER := wb_.sheets(s_).comments.comments_list.count;
    nr_pivots_     PLS_INTEGER := wb_.sheets(s_).pivots_list.count;
-   nr_drawings_   PLS_INTEGER := wb_.sheets(s_).drawings.count;
+   nr_drawings_   PLS_INTEGER := wb_.sheets(s_).drawings.drawings_list.count;
+   nr_tables_     PLS_INTEGER := wb_.sheets(s_).tables_list.count;
    pivot_id_      PLS_INTEGER;
+   table_id_      PLS_INTEGER;
    doc_           dbms_XmlDom.DomDocument := Dbms_XmlDom.newDomDocument;
    attrs_         nyce_xml.xml_attrs_arr;
    nd_rels_       dbms_XmlDom.DomNode;
 BEGIN
 
-   IF nr_hyperlinks_ = 0 AND nr_comments_ = 0 AND nr_pivots_ = 0 AND nr_drawings_ = 0 THEN
+   IF nr_hyperlinks_ = 0 AND nr_comments_ = 0 AND nr_pivots_ = 0 AND nr_drawings_ = 0 AND nr_tables_ = 0 THEN
       goto skip_relationships;
    END IF;
 
@@ -5986,40 +6189,53 @@ BEGIN
 
    FOR h_ IN 1 .. nr_hyperlinks_ LOOP
       IF wb_.sheets(s_).hyperlinks(h_).url IS NOT null THEN
-         nyce_xml.natr ('Id', rep ('rId:P1', id_), attrs_);
+         nyce_xml.natr ('Id', rep ('rId:P1', wb_.sheets(s_).hyperlinks(h_).ws_rel), attrs_);
          nyce_xml.attr ('Type', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink', attrs_);
          nyce_xml.attr ('Target',  wb_.sheets(s_).hyperlinks(h_).url, attrs_);
          nyce_xml.attr ('TargetMode', 'External', attrs_);
          Nyce_Xml.Xml_Node (doc_, nd_rels_, 'Relationship', attrs_);
-         id_ := id_ + 1;
+         id_ := greatest (id_, wb_.sheets(s_).hyperlinks(h_).ws_rel);
       END IF;
    END LOOP;
+
+   FOR t_ IN 1 .. wb_.sheets(s_).tables_list.count LOOP
+      table_id_ := wb_.sheets(s_).tables_list(t_);
+      nyce_xml.natr ('Id', 'rId' || to_char(wb_.tables(table_id_).ws_rel), attrs_);
+      nyce_xml.attr ('Type', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/table', attrs_);
+      nyce_xml.attr ('Target', rep('../tables/table:P1.xml', table_id_), attrs_);
+      Nyce_Xml.Xml_Node (doc_, nd_rels_, 'Relationship', attrs_);
+      id_ := greatest (id_, wb_.tables(table_id_).ws_rel);
+   END LOOP;
+
    IF nr_drawings_ > 0 THEN
-      nyce_xml.natr ('Id', rep ('rId:P1', id_), attrs_);
+      nyce_xml.natr ('Id', rep ('rId:P1', wb_.sheets(s_).drawings.ws_rel), attrs_);
       nyce_xml.attr ('Type', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing', attrs_);
       nyce_xml.attr ('Target', rep ('../drawings/drawing:P1.xml', to_char(s_)), attrs_);
       Nyce_Xml.Xml_Node (doc_, nd_rels_, 'Relationship', attrs_);
-      id_ := id_ + 1;
+      id_ := greatest (id_, wb_.sheets(s_).drawings.ws_rel);
    END IF;
    IF nr_comments_ > 0 THEN
-      nyce_xml.natr ('Id', rep ('rId:P1', id_), attrs_);
+      nyce_xml.natr ('Id', rep ('rId:P1', wb_.sheets(s_).comments.ws_rel), attrs_);
       nyce_xml.attr ('Type', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/vmlDrawing', attrs_);
       nyce_xml.attr ('Target', rep ('../drawings/vmlDrawing:P1.vml', to_char(s_)), attrs_);
       Nyce_Xml.Xml_Node (doc_, nd_rels_, 'Relationship', attrs_);
-      id_ := id_ + 1;
-      nyce_xml.natr ('Id', rep('rId:P1', id_), attrs_);
+
+      nyce_xml.natr ('Id', rep('rId:P1', wb_.sheets(s_).comments.ws_rel+1), attrs_);
       nyce_xml.attr ('Type', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments', attrs_);
       nyce_xml.attr ('Target', rep ('../comments:P1.xml', to_char(s_)), attrs_);
       Nyce_Xml.Xml_Node (doc_, nd_rels_, 'Relationship', attrs_);
-      id_ := id_ + 1;
+      id_ := greatest (id_, wb_.sheets(s_).comments.ws_rel+1);
    END IF;
+
+   -- The rId value of pivot tables does not have a corresponding rId value on
+   -- the worksheet, so we'll just pick the next sequential number.
    FOR spid_ IN 1 .. wb_.sheets(s_).pivots_list.count LOOP
+      id_ := id_ + 1;
       pivot_id_ := wb_.sheets(s_).pivots_list(spid_);
-      nyce_xml.natr ('Id', 'rId' || to_char(id_), attrs_);
+      nyce_xml.natr ('Id', rep('rId:P1', to_char(id_)), attrs_);
       nyce_xml.attr ('Type', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotTable', attrs_);
       nyce_xml.attr ('Target', rep ('../pivotTables/pivotTable:P1.xml', pivot_id_), attrs_);
       Nyce_Xml.Xml_Node (doc_, nd_rels_, 'Relationship', attrs_);
-      id_ := id_ + 1;
    END LOOP;
 
    Add1Xml (excel_, rep('xl/worksheets/_rels/sheet:P1.xml.rels',to_char(s_)), Dbms_XmlDom.getXmlType(doc_).getClobVal);
@@ -6116,7 +6332,7 @@ IS
    row_ovfl_ NUMBER;
 BEGIN
 
-   IF wb_.sheets(s_).drawings.count = 0 THEN
+   IF wb_.sheets(s_).drawings.drawings_list.count = 0 THEN
       goto skip_drawings;
    END IF;
 
@@ -6126,9 +6342,9 @@ BEGIN
    nyce_xml.attr ('xmlns:a', 'http://schemas.openxmlformats.org/drawingml/2006/main', attrs_);
    nd_ws_ := Nyce_Xml.Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'wsDr', 'xdr', attrs_);
 
-   FOR img_ IN 1 .. wb_.sheets(s_).drawings.count LOOP
+   FOR img_ IN 1 .. wb_.sheets(s_).drawings.drawings_list.count LOOP
 
-      drawing_ := wb_.sheets(s_).drawings(img_);
+      drawing_ := wb_.sheets(s_).drawings.drawings_list(img_);
       Calc_Image_Col_And_Row (to_col_, to_row_, col_ovfl_, row_ovfl_, drawing_, s_);
 
       nyce_xml.natr ('editAs', 'oneCell', attrs_);
@@ -6217,12 +6433,12 @@ IS
    colspan_       NUMBER;
 BEGIN
 
-   IF wb_.sheets(s_).comments.count = 0 THEN
+   IF wb_.sheets(s_).comments.comments_list.count = 0 THEN
       goto skip_comments;
    END IF;
 
-   FOR c_ IN 1 .. wb_.sheets(s_).comments.count LOOP
-      ws_authors_(wb_.sheets(s_).comments(c_).author) := 0;
+   FOR c_ IN 1 .. wb_.sheets(s_).comments.comments_list.count LOOP
+      ws_authors_(wb_.sheets(s_).comments.comments_list(c_).author) := 0;
    END LOOP;
 
    -- xl/comments:P1.xml
@@ -6240,12 +6456,12 @@ BEGIN
    END LOOP;
 
    nd_cml_ := Nyce_Xml.Xml_Node (doc_, nd_cms_, 'commentList');
-   FOR cm_ IN 1 .. wb_.sheets(s_).comments.count LOOP
-      nyce_xml.natr ('ref', Alfan_Cell (wb_.sheets(s_).comments(cm_).column, wb_.sheets(s_).comments(cm_).row), attrs_);
-      nyce_xml.attr ('authorId', ws_authors_(wb_.sheets(s_).comments(cm_).author), attrs_);
+   FOR cm_ IN 1 .. wb_.sheets(s_).comments.comments_list.count LOOP
+      nyce_xml.natr ('ref', Alfan_Cell (wb_.sheets(s_).comments.comments_list(cm_).column, wb_.sheets(s_).comments.comments_list(cm_).row), attrs_);
+      nyce_xml.attr ('authorId', ws_authors_(wb_.sheets(s_).comments.comments_list(cm_).author), attrs_);
       nd_cm_ := Nyce_Xml.Xml_Node (doc_, nd_cml_, 'comment', attrs_);
       nd_tx_ := Nyce_Xml.Xml_Node (doc_, nd_cm_, 'text');
-      IF wb_.sheets(s_).comments(cm_).author IS NOT null THEN
+      IF wb_.sheets(s_).comments.comments_list(cm_).author IS NOT null THEN
          nd_r_  := Nyce_Xml.Xml_Node (doc_, nd_tx_, 'r');
          nd_pr_ := Nyce_Xml.Xml_Node (doc_, nd_r_, 'rPr');
          Nyce_Xml.Xml_Node (doc_, nd_pr_, 'b');
@@ -6263,7 +6479,7 @@ BEGIN
          Nyce_Xml.Xml_Node (doc_, nd_pr_, 'charset', attrs_);
 
          nyce_xml.natr ('xml:space', 'preserve', attrs_);
-         Nyce_Xml.Xml_Text_Node (doc_, nd_r_, 't', wb_.sheets(s_).comments(cm_).author, attrs_);
+         Nyce_Xml.Xml_Text_Node (doc_, nd_r_, 't', wb_.sheets(s_).comments.comments_list(cm_).author, attrs_);
       END IF;
       nd_r_  := Nyce_Xml.Xml_Node (doc_, nd_tx_, 'r');
       nd_pr_ := Nyce_Xml.Xml_Node (doc_, nd_r_, 'rPr');
@@ -6281,8 +6497,8 @@ BEGIN
       Nyce_Xml.Xml_Node (doc_, nd_pr_, 'charset', attrs_);
 
       nyce_xml.natr ('xml:space', 'preserve', attrs_);
-      nl_ := CASE WHEN wb_.sheets(s_).comments(cm_).author IS NOT null THEN chr(13) || chr(10) END;
-      Nyce_Xml.Xml_Text_Node (doc_, nd_r_, 't', nl_ || wb_.sheets(s_).comments(cm_).text, attrs_);
+      nl_ := CASE WHEN wb_.sheets(s_).comments.comments_list(cm_).author IS NOT null THEN chr(13) || chr(10) END;
+      Nyce_Xml.Xml_Text_Node (doc_, nd_r_, 't', nl_ || wb_.sheets(s_).comments.comments_list(cm_).text, attrs_);
    END LOOP;
 
    Add1Xml (excel_, rep('xl/comments:P1.xml',s_), Dbms_XmlDom.getXmlType(doc_).getClobVal);
@@ -6317,7 +6533,7 @@ BEGIN
    nyce_xml.attr ('o:connecttype', 'rect', attrs_);
    Nyce_Xml.Xml_Node (doc_, nd_st_, 'path', 'v', attrs_);
 
-   FOR cm_ IN 1 .. wb_.sheets(s_).comments.count LOOP
+   FOR cm_ IN 1 .. wb_.sheets(s_).comments.comments_list.count LOOP
 
       nyce_xml.natr ('id', rep('_x0000_s:P1', to_char(cm_)), attrs_);
       nyce_xml.attr ('type', '#_x0000_t202', attrs_);
@@ -6347,12 +6563,12 @@ BEGIN
       Nyce_Xml.Xml_Node (doc_, nd_cd_, 'MoveWithCells', 'x');
       Nyce_Xml.Xml_Node (doc_, nd_cd_, 'SizeWithCells', 'x');
 
-      comment_w_rem_ := wb_.sheets(s_).comments(cm_).width;
-      comment_h_     := wb_.sheets(s_).comments(cm_).height;
+      comment_w_rem_ := wb_.sheets(s_).comments.comments_list(cm_).width;
+      comment_h_     := wb_.sheets(s_).comments.comments_list(cm_).height;
       colspan_       := 1;
       LOOP
-         IF wb_.sheets(s_).widths.exists(wb_.sheets(s_).comments(cm_).column+colspan_) THEN
-            col_w_ := 256 * wb_.sheets(s_).widths(wb_.sheets(s_).comments(cm_).column+colspan_);
+         IF wb_.sheets(s_).widths.exists(wb_.sheets(s_).comments.comments_list(cm_).column+colspan_) THEN
+            col_w_ := 256 * wb_.sheets(s_).widths(wb_.sheets(s_).comments.comments_list(cm_).column+colspan_);
             col_w_ := trunc((col_w_+18)/256*7); -- assume default 11 point Calibri
          ELSE
             col_w_ := 64;
@@ -6365,17 +6581,17 @@ BEGIN
          doc_, nd_cd_, 'Anchor',
          rep (
             ':P1,15,:P2,30,:P3,:P4,:P5,:P6',
-            to_char(wb_.sheets(s_).comments(cm_).column),
-            to_char(wb_.sheets(s_).comments(cm_).row),
-            to_char(wb_.sheets(s_).comments(cm_).column+colspan_-1),
+            to_char(wb_.sheets(s_).comments.comments_list(cm_).column),
+            to_char(wb_.sheets(s_).comments.comments_list(cm_).row),
+            to_char(wb_.sheets(s_).comments.comments_list(cm_).column+colspan_-1),
             to_char(round(comment_w_rem_)),
-            to_char(wb_.sheets(s_).comments(cm_).row+1+trunc(comment_h_/20)),
+            to_char(wb_.sheets(s_).comments.comments_list(cm_).row+1+trunc(comment_h_/20)),
             to_char(mod(comment_h_, 20))
          ), 'x'
       );
       Nyce_Xml.Xml_Text_Node (doc_, nd_cd_, 'AutoFill', 'False', 'x');
-      Nyce_Xml.Xml_Text_Node (doc_, nd_cd_, 'Row', to_char(wb_.sheets(s_).comments(cm_).row-1), 'x');
-      Nyce_Xml.Xml_Text_Node (doc_, nd_cd_, 'Column', to_char(wb_.sheets(s_).comments(cm_).column-1), 'x');
+      Nyce_Xml.Xml_Text_Node (doc_, nd_cd_, 'Row', to_char(wb_.sheets(s_).comments.comments_list(cm_).row-1), 'x');
+      Nyce_Xml.Xml_Text_Node (doc_, nd_cd_, 'Column', to_char(wb_.sheets(s_).comments.comments_list(cm_).column-1), 'x');
    END LOOP;
 
    Add1Xml (excel_, rep('xl/drawings/vmlDrawing:P1.vml',s_), Dbms_XmlDom.getXmlType(doc_).getClobVal);
@@ -6389,8 +6605,8 @@ end Finish_Ws_Comments;
 
 FUNCTION Finish RETURN BLOB
 IS
-   excel_        BLOB;
-   s_            PLS_INTEGER;
+   excel_ BLOB;
+   s_     PLS_INTEGER;
 BEGIN
 
    -- Pad out the Pivot Cache before doing any Excel generation.  Pivot tables
@@ -6415,6 +6631,7 @@ BEGIN
    Finish_Workbook (excel_);                -- xl/workbook.xml
    Finish_Workbook_Rels (excel_);           -- xl/_rels/workbook.xml.rels
    Finish_Drawings_Rels (excel_);           -- xl/drawings/_rels/drawing1.xml.rels
+   Finish_Tables (excel_);                  -- xl/tables/table:P1.xml
 
    s_ := wb_.sheets.first;
    WHILE s_ IS not null LOOP
