@@ -1,16 +1,18 @@
 PL/SQL Developer Test script 3.0
-88
+95
 DECLARE
+   create_file_ CONSTANT BOOLEAN      := lower(nvl(:output_file,'no')) = 'yes';
+   test_level_  CONSTANT VARCHAR2(30) := '01-basicTests';
    test_name_   CONSTANT VARCHAR2(30) := 'ImageHypCommentDefnm';
-   file_start_  CONSTANT VARCHAR2(20) := 'TestOut_';
-   file_end_    CONSTANT VARCHAR2(20) := Cbh_Utils_API.Rep ('_:P1.xlsx', to_char(sysdate,'YYYYMMDD-HH24MI'));
+   file_end_    CONSTANT VARCHAR2(20) := Nyce_Utils.Rep ('_:P1.xlsx', to_char(sysdate,'YYYYMMDD-HH24MI'));
    file_name_   VARCHAR2(60);
+   xl_blob_     BLOB;
    sheet_       PLS_INTEGER;
    col_         PLS_INTEGER := 2;
    col_end_     PLS_INTEGER := col_ + 3;
    row_         PLS_INTEGER := 3;
    init_row_    PLS_INTEGER := row_;
-   data_range_  as_xlsx.tp_cell_range;
+   data_range_  nyce_xlsx.tp_cell_range;
    gen_file_    BOOLEAN := false;
 
    CURSOR get_entities IS
@@ -52,7 +54,7 @@ BEGIN
    Nyce_Xlsx.CellS (2, 11, '100103');
    Nyce_Xlsx.CellS (3, 11, 'Charlie the grey squirel');
    Nyce_Xlsx.CellS (2, 12, '100103');
-   Nyce_Xlsx.CellS (3, 12, 'Casablanka (the city_');
+   Nyce_Xlsx.CellS (3, 12, 'Casablanka (the city)');
    Nyce_Xlsx.CellS (2, 13, '100103');
    Nyce_Xlsx.CellS (3, 13, 'Bing Bong the bouncing compnay');
    Nyce_Xlsx.Defined_Name ('CustomerData', 2, 10, 3, 13, sheet_ => 1);
@@ -83,12 +85,21 @@ BEGIN
    data_range_.defined_name := 'MyDataSource';
    Nyce_Xlsx.Defined_Name (data_range_);
 
-   file_name_ := file_start_ || test_name_ || file_end_;
-   Nyce_Xlsx.Save (Nyce_Xlsx.Finish, 'EXCEL_OUT', file_name_);
-   Dbms_Output.Put_Line (file_name_ || ' saved to filesystem');
+   IF not create_file_ THEN
+      xl_blob_ := Nyce_Xlsx.Finish;
+      Dbms_Output.Put_Line ('Test script finished: ' || test_level_ || '-' || test_name_);
+   ELSE
+      file_name_ := test_level_ || '-' || test_name_ || file_end_;
+      Nyce_Xlsx.Save ('EXCEL_OUT', file_name_);
+      Dbms_Output.Put_Line (file_name_ || ' saved to filesystem');
+   END IF;
 
 END;
-0
+1
+output_file
+1
+no
+5
 3
 range_.tl.c
 range_.br.c

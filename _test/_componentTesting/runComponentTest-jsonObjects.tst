@@ -1,23 +1,16 @@
 PL/SQL Developer Test script 3.0
-51
+44
 DECLARE
    obj_  json_object_t := json_object_t('{
     "aggregates": {
         "aggregatesCount": 1,
-        "aggregateCols": [
-            {
-                "colId": 4,
-                "colName": "Sum of Amount",
-                "fn": "sum",
-                "value": 2365.42
-            }
-        ],
-        "excelTabHeader": [
-            "EUR",
-            "GBP",
-            "SEK",
-            "USD"
-        ]
+        "aggregateCols": [{
+             "colId": 4,
+             "colName": "Sum of Amount",
+             "fn": "sum",
+             "value": 2365.42
+        }],
+        "excelTabHeader": ["EUR","GBP","SEK","USD"]
     },
     "direction": "left",
     "count": 54
@@ -45,9 +38,9 @@ BEGIN
 
    -- what happens if you update a value
    Dbms_Output.Put_Line (obj_.stringify);
-   --obj_.patch ('direction', 'right'); -- this changes the order of the keys
-   obj_.mergepatch ('{"direction":"right"}');
-   obj_.patch ('{"direction":"square"}');
+   --obj_.put ('direction', 'right'); -- this changes the order of the keys
+   obj_.mergepatch ('{"direction":"up"}'); -- this doesn't change the order, also I tihnk it works "deeply" into levels of objects
+   --obj_.patch ('{"direction":"square"}');
    Dbms_Output.Put_Line (obj_.stringify);
 
 END;
