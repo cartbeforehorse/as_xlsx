@@ -1,5 +1,5 @@
 PL/SQL Developer Test script 3.0
-37
+39
 DECLARE
    create_file_ CONSTANT BOOLEAN      := lower(nvl(:output_file,'no')) = 'yes';
    test_level_  CONSTANT VARCHAR2(30) := '01-basicTests';
@@ -9,6 +9,8 @@ DECLARE
    xl_blob_     BLOB;
    qry_         SYS_REFCURSOR;
    col_fmts_    nyce_xlsx.tp_numFmt_cols;
+   col_count_   PLS_INTEGER;
+   row_count_   PLS_INTEGER;
 BEGIN
    OPEN qry_ FOR
       SELECT date '1900-02-26'+level "Oracle Date",
@@ -19,7 +21,7 @@ BEGIN
    Nyce_Xlsx.Init_Workbook;
    --col_fmts_(3) := Nyce_Xlsx.Get_numFmt ('dd mmm yyyy');
    col_fmts_(3) := nyce_xlsx.numFmt_('dt_mid');
-   Nyce_Xlsx.Query2SheetAndAutofilter (rc_ => qry_, col_fmts_ => col_fmts_, sheet_ => 1);
+   Nyce_Xlsx.Query2SheetAndAutofilter (col_count_, row_count_, rc_ => qry_, col_fmts_ => col_fmts_, sheet_ => 1);
    Nyce_Xlsx.Set_Column_Width (1, 15);
    Nyce_Xlsx.Set_Column_Width (2, 15);
    Nyce_Xlsx.Set_Column_Width (3, 15);

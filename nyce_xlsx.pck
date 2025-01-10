@@ -1,26 +1,24 @@
 CREATE OR REPLACE PACKAGE Nyce_Xlsx IS
 
-/*****************************************************************************
- *****************************************************************************
- *****************************************************************************
- *****************************************************************************
- **
- ** Author: Anton Scheffer
- ** Website: http://technology.amis.nl/blog
- ** See also: http://technology.amis.nl/blog/?p=10995
- **   # License
- **   Copyright (C) 2011 - 2024 by Anton Scheffer
- **   See associated LICENSE.md file
- **
- ** Modifications added by Osian ap Garth since 2017, version-controlled since
- ** 2021 in Git Hub:
- **    >> https://github.com/cartbeforehorse/as_xlsx
- **    Copyright(C) 2024 "Now you can, ey!" (nyce.software) Nyce_Xlsx.
- ** For usage notes and a bit of a discussion about the design changes between
- ** Anton's version and this, see documentation in README.md
- **
- *****************************************************************************
- ****************************************************************************/
+------------------------------------------------------------------------------
+------------------------------------------------------------------------------
+--
+-- Author: Anton Scheffer
+--   Website: http://technology.amis.nl/blog
+--   See also: http://technology.amis.nl/blog/?p=10995
+-- # License
+--     Copyright (C) 2011 - 2024 by Anton Scheffer
+--     See associated LICENSE.md file for details
+--
+-- Modifications added by Osian ap Garth since 2017, version-controlled since
+-- 2021 in Git Hub:
+--   >> https://github.com/cartbeforehorse/as_xlsx
+-- Copyright(C) 2025 "Now you can, ey!" (nyce.software) as Nyce_Xlsx.
+-- For usage notes and a bit of a discussion about the design changes between
+-- Anton's version and this, see documentation in README.md
+--
+------------------------------------------------------------------------------
+------------------------------------------------------------------------------
 
 
 ------------------------------------------------------------------------------
@@ -37,19 +35,33 @@ CREATE OR REPLACE PACKAGE Nyce_Xlsx IS
 --      the least interesting property of any variable!!
 --    - Commas go at the end of lines, not the start (as I am sure you do with
 --      every other programming language in the world, including English)
---    - Use the first of the formats below, not the second; it maintains clear
---      indentation when your function names get long:
+--    - When calling functions with multi-line parameters, please use the left
+--      convention from those two options below, not the right one!  It allows
+--      better "at a glance" scanning of the code and indentation that doesn't
+--      depend on the function name's length!
 --
---         Function_Name (           Function_Name ( hello_   => 'hi',
---            hello_   => 'hi',                      bye_     => 'see ya',
---            bye_     => 'see ya',                  staying_ => 'for tea' );
---            staying_ => 'for tea
---         );
+--        Package.Function (       Package.Function ( hello_   => 'hi',
+--           hello_   => 'hi',                        bye_     => 'see ya',
+--           bye_     => 'see ya',                    staying_ => 'for tea' );
+--           staying_ => 'for tea
+--        );
 --
 --    - Do not use code beautifiers; they make code ugly and seriously mess up
 --      version-control
+--    - Use AI by all means, but it's never really worked for me.  I prefer to
+--      look up Excel structural questions on the MS Documentation pages which
+--      are on these links.  Also, Excel conforms with ISO-29500-1:2016, and a
+--      PDF document describing this standards can be downloaded here too:
+--       => https://learn.microsoft.com/en-us/openspecs/office_standards/ms-xlsx/f780b2d6-8252-4074-9fe3-5d7bc4830968
+--       => https://www.iso.org/standard/71691.html
+--       => https://standards.iso.org/ittf/PubliclyAvailableStandards/index.html
 --
 
+--------------------------------------------------
+-- Constants
+--
+RANGE_DEFINED_NAME_ CONSTANT VARCHAR2(100) := 'DefinedName';
+RANGE_TABLE_        CONSTANT VARCHAR2(100) := 'Table';
 
 --------------------------------------------------
 -- Public Types
@@ -82,22 +94,15 @@ TYPE tp_cell_loc IS RECORD (
 
 TYPE tp_column_names  IS TABLE OF VARCHAR2(2000) INDEX BY PLS_INTEGER;
 TYPE tp_cell_range IS RECORD (
-   sheet_id     PLS_INTEGER,   -- sheet.name => My Perfect Sheet; nullable, a range doens't necessarily need a sheet
-   tl           tp_cell_loc,   -- (2, 3, false, true)
-   br           tp_cell_loc,   -- (6, 6, false, false) Alfan_Range() => 'My Perfect Sheet'!B$3:F6
-   defined_name VARCHAR2(100), -- 'MyDatacells'
-   local_sheet  BOOLEAN,       -- sets the defined name to be accessible only on `sheet_id`
+   range_type   VARCHAR2(11),   -- Table;DefinedName
+   defined_name VARCHAR2(1000), -- 'MyDatacells'
+   sheet_id     PLS_INTEGER,    -- sheet.name => My Perfect Sheet; nullable, a range doens't necessarily need a sheet
+   tl           tp_cell_loc,    -- (2, 3, false, true)
+   br           tp_cell_loc,    -- (6, 6, false, false) Alfan_Range() => 'My Perfect Sheet'!B$3:F6
+   local_sheet  BOOLEAN,        -- DN only: sets the defined name to be accessible only on `sheet_id`
+   style        VARCHAR2(1000), -- Tbl only: name of the table's style
+   ws_rel       PLS_INTEGER,    -- Tbl only: relId in the worksheet rels file
    col_names    tp_column_names ); -- makes our lives easier in building pivots
-/*
--- Might be better to model a table as a TP_CELL_RANGE, given the similarities with
--- defined names, plus the fact that they share the same namespace
-TYPE tp_table IS RECORD (
-   tbl_range tp_cell_range,
-   style     VARCHAR2(1000),
-   tbl_name  VARCHAR2(32767),
-   ws_rel    PLS_INTEGER );
-TYPE tp_tables IS TABLE OF tp_table INDEX BY PLS_INTEGER;
-*/
 
 TYPE tp_alignment IS RECORD (
    vertical   VARCHAR2(11),
@@ -878,13 +883,6 @@ TYPE tp_autofilter IS RECORD (
 );
 TYPE tp_autofilters IS TABLE OF tp_autofilter INDEX BY PLS_INTEGER;
 
-TYPE tp_table IS RECORD (
-   tbl_range tp_cell_range,
-   style     VARCHAR2(1000),
-   tbl_name  VARCHAR2(32767),
-   ws_rel    PLS_INTEGER );
-TYPE tp_tables IS TABLE OF tp_table INDEX BY PLS_INTEGER;
-
 TYPE tp_hyperlink IS RECORD (
    cell   VARCHAR2(10),
    url    VARCHAR2(1000),
@@ -977,7 +975,7 @@ TYPE tp_pivot_table IS RECORD (
 );
 TYPE tp_pivot_tables IS TABLE OF tp_pivot_table INDEX BY PLS_INTEGER;
 TYPE tp_pivots_list  IS TABLE OF PLS_INTEGER INDEX BY PLS_INTEGER;
-TYPE tp_tables_list  IS TABLE OF PLS_INTEGER INDEX BY PLS_INTEGER;
+TYPE tp_tables_list  IS TABLE OF VARCHAR2(100) INDEX BY PLS_INTEGER;
 
 -----
 -- image/drawing/picture types
@@ -1076,8 +1074,8 @@ TYPE tp_book IS RECORD (
    numFmts       tp_numFmts,
    cellXfs       tp_cellXfs,
    formulas      tp_formulas,
-   defined_names tp_defined_names,
-   tables        tp_tables,
+   defined_names tp_defined_names, -- defined-range-names + tables
+   tables_list   tp_tables_list,   -- [1 => 'Table1'], referencing defined_names
    pivot_caches  tp_pivot_caches,
    pivot_tables  tp_pivot_tables,
    images        tp_images
@@ -1263,40 +1261,35 @@ END Get_Guid;
 --   In Excel Formula tab you'll find the defined names section.  Each defined
 --   name must comply with Excel's variable-naming convention, and should also
 --   be unique within its scope.  This function checks those requirements.
---   Ideally, the alternative-name given (i.e. the name used when the proposed
---   name fails validation) should be calculated by this function.  Be we have
---   not yet worked out how that'll be implemented in practice, so for now the
---   calling function is assumed to give a valid alternative.
 FUNCTION Name_Checker (
    proposed_name_ IN VARCHAR2,
-   alt_name_      IN VARCHAR2,
-   bug_out_       IN BOOLEAN := true ) RETURN VARCHAR2
+   name_type_     IN VARCHAR2 := RANGE_DEFINED_NAME_ ) RETURN VARCHAR2
 IS
-   ret_name_ VARCHAR2(2000) := nvl (proposed_name_, alt_name_);
+   ret_name_ VARCHAR2(2000) := proposed_name_;
 BEGIN
    IF proposed_name_ IS NOT null THEN
       IF not regexp_like (proposed_name_, '^[a-zA-Z_]') THEN
-         IF bug_out_ THEN
-            Raise_App_Error ('A registered name must start with a letter or an underscore.');
-         END IF;
-         ret_name_ := alt_name_;
+         Raise_App_Error ('A registered name must start with a letter or an underscore.');
+      ELSIF not regexp_like (proposed_name_, '^[a-zA-Z0-9\._\]+$') THEN
+         Raise_App_Error (
+            'A registered name must not contain spaces or any operation characters, such as ' ||
+            'plus (+), divide (/) etc.  To keep it simple, use alpha-numeric and underscore only!'
+         );
       END IF;
-      IF not regexp_like (proposed_name_, '^[a-zA-Z0-9_\]+$') THEN
-         IF bug_out_ THEN
-            Raise_App_Error (
-               'A registered name must not contain spaces or any operation characters, such as ' ||
-               'plus (+), divide (/) etc.  To keep it simple, use alpha-numeric and underscore only!'
-            );
-         END IF;
-         ret_name_ := alt_name_;
-      END IF;
+   ELSIF proposed_name_ IS null AND name_type_ = RANGE_DEFINED_NAME_ THEN
+      Raise_App_Error ('A defined name may not have an empty descriptor!');
+   ELSIF proposed_name_ IS null AND name_type_ = RANGE_TABLE_ THEN
+      ret_name_ := 'Table' || to_char(wb_.tables_list.count+1);
    END IF;
-   -- We should also check for name duplication here?  Unfortunately, it's not
-   -- as easy as it sounds.  A registered name can have different scopes, over
-   -- the whole workbook, or just in within a sheet.  Also, we should remember
-   -- that "defined_names" is part of the existing functionality.  The problem
-   -- is that as_xlsx assumes that a defined name may only ever reference cell
-   -- ranges, while Excel uses them for many different things.
+   
+   IF wb_.defined_names.exists(ret_name_) THEN
+      Raise_App_Error ('Defined name ":P1" already exists on this workbook.', ret_name_);
+   END IF;
+   -- This duplication check is still a little naive.  Defined Names can exist
+   -- in different scopes, meaning they either exist globally on the workbook,
+   -- or locally to a specific sheet.  For now, this function allows us to use
+   -- each DN only once on the entire workbook, but we will need to look again
+   -- at how this works at a later date.
    RETURN ret_name_;
 END Name_Checker;
 
@@ -1706,7 +1699,7 @@ IS
    new_val_ VARCHAR2(32000);
    uq_      tp_unique_data;
 BEGIN
-   IF range_.col_names.count = 0 THEN -- else assume `col_names` is already correctly filled out
+   IF range_.col_names.count = 0 THEN -- check that `col_names` is not already filled out
       FOR c_ IN range_.tl.c .. range_.br.c LOOP
          new_val_ := wb_.sheets(sh_).rows(row_)(c_).ora_value.str_val;
          IF not allow_dup_ THEN
@@ -1985,7 +1978,7 @@ BEGIN
    wb_.cellXfs.delete;
    wb_.formulas.delete;
    wb_.defined_names.delete;
-   wb_.tables.delete;
+   wb_.tables_list.delete;
    FOR i_ IN 1 .. wb_.images.count LOOP
       dbms_lob.freeTemporary (wb_.images(i_).img_blob);
    END LOOP;
@@ -3489,12 +3482,15 @@ PROCEDURE Defined_Name (
    fix_brr_    BOOLEAN     := true,
    sheet_      PLS_INTEGER := null,
    localsheet_ BOOLEAN     := false )
-IS BEGIN
-   wb_.defined_names(name_) := tp_cell_range (
+IS
+   defined_name_ VARCHAR2(100) := Name_Checker (name_);
+BEGIN
+   wb_.defined_names(defined_name_) := tp_cell_range (
+      range_type   => RANGE_DEFINED_NAME_,
+      defined_name => defined_name_,
       sheet_id     => sheet_,
       tl           => tp_cell_loc (c => tl_col_, r => tl_row_, fixc => fix_tlc_, fixr => fix_tlr_),
       br           => tp_cell_loc (c => br_col_, r => br_row_, fixc => fix_brc_, fixr => fix_brr_),
-      defined_name => name_,
       local_sheet  => localsheet_
    );
 END Defined_Name;
@@ -3687,24 +3683,24 @@ PROCEDURE Set_Table (
    tbl_name_  VARCHAR2    := null,
    sheet_     PLS_INTEGER := null )
 IS
-   table_        tp_table;
-   tbl_id_       PLS_INTEGER := wb_.tables.count + 1;
-   sh_           PLS_INTEGER := nvl(sheet_, wb_.sheets.count);
-   tbl_on_sheet_ PLS_INTEGER := wb_.sheets(sh_).tables_list.count + 1;
+   table_id_   PLS_INTEGER   := wb_.tables_list.count + 1;
+   sh_         PLS_INTEGER   := nvl(sheet_, wb_.sheets.count);
+   table_name_ VARCHAR2(100) := Name_Checker (tbl_name_, RANGE_TABLE_);
 BEGIN
    IF col_start_ IS null OR col_end_ IS null OR row_start_ IS null OR row_end_ IS null OR sh_ IS null THEN
       Raise_App_Error ('A table''s range must be defined correctly, with full sheet and cell range values.');
    END IF;
-   table_.tbl_range := tp_cell_range (
-      sheet_id => sh_,
-      tl       => tp_cell_loc (col_start_, row_start_, false, false),
-      br       => tp_cell_loc (col_end_, row_end_, false, false)
+   wb_.tables_list(table_id_) := table_name_;
+   wb_.defined_names(table_name_) := tp_cell_range (
+      range_type   => RANGE_TABLE_,
+      defined_name => table_name_,
+      sheet_id     => sh_,
+      tl           => tp_cell_loc (col_start_, row_start_, false, false),
+      br           => tp_cell_loc (col_end_, row_end_, false, false),
+      style        => style_
    );
-   table_.tbl_name := Name_Checker (tbl_name_, 'Table'||to_char(tbl_id_), true);
-   table_.style    := style_;
-   Add_Col_Headings_To_Range (table_.tbl_range, allow_dup_ => false);
-   wb_.tables(tbl_id_) := table_;
-   wb_.sheets(sh_).tables_list(tbl_on_sheet_) := tbl_id_;
+   Add_Col_Headings_To_Range (wb_.defined_names(table_name_), allow_dup_ => false);
+   wb_.sheets(sh_).tables_list(table_id_) := table_name_;
 END Set_Table;
 
 PROCEDURE Set_Table (
@@ -3829,7 +3825,7 @@ BEGIN
       s_ := wb_.sheets.next(s_);
    END LOOP;
 
-   FOR t_ IN 1 .. wb_.tables.count LOOP
+   FOR t_ IN 1 .. wb_.tables_list.count LOOP
       nyce_xml.natr ('PartName', rep('/xl/tables/table:P1.xml', to_char(t_)), attrs_);
       nyce_xml.attr ('ContentType', 'application/vnd.openxmlformats-officedocument.spreadsheetml.table+xml', attrs_);
       Nyce_Xml.Xml_Node (doc_, nd_types_, 'Override', attrs_);
@@ -4423,18 +4419,20 @@ BEGIN
       s_   := wb_.sheets.next(s_);
    END LOOP;
 
-   IF wb_.defined_names.count > 0 THEN
+   IF wb_.defined_names.count - wb_.tables_list.count > 0 THEN
       nd_dnm_ := Nyce_Xml.Xml_Node (doc_, nd_wb_, 'definedNames');
       dn_ := wb_.defined_names.first;
       WHILE dn_ IS NOT null LOOP
-         nyce_xml.natr ('name', dn_, attrs_);
-         IF wb_.defined_names(dn_).local_sheet THEN
-            IF wb_.defined_names(dn_).sheet_id IS null THEN
-               Raise_App_Error ('Sheet Id must be defined for local-sheet function to be viable!');
+         IF wb_.defined_names(dn_).range_type = RANGE_DEFINED_NAME_ THEN
+            nyce_xml.natr ('name', dn_, attrs_);
+            IF wb_.defined_names(dn_).local_sheet THEN
+               IF wb_.defined_names(dn_).sheet_id IS null THEN
+                  Raise_App_Error ('Sheet Id must be defined for local-sheet function to be viable!');
+               END IF;
+               nyce_xml.attr ('localSheetId', to_char(wb_.defined_names(dn_).sheet_id), attrs_);
             END IF;
-            nyce_xml.attr ('localSheetId', to_char(wb_.defined_names(dn_).sheet_id), attrs_);
+            Nyce_Xml.Xml_Text_Node (doc_, nd_dnm_, 'definedName', Alfan_Sheet_Range(wb_.defined_names(dn_)), attrs_);
          END IF;
-         Nyce_Xml.Xml_Text_Node (doc_, nd_dnm_, 'definedName', Alfan_Sheet_Range(wb_.defined_names(dn_)), attrs_);
          dn_ := wb_.defined_names.next(dn_);
       END LOOP;
    END IF;
@@ -6053,39 +6051,39 @@ PROCEDURE Finish_Tables (
 IS
    doc_     dbms_XmlDom.DomDocument;
    attrs_   nyce_xml.xml_attrs_arr;
-   tbl_     tp_table;
+   tbl_     tp_cell_range;
    nd_tbl_  dbms_XmlDom.DomNode;
    nd_tcls_ dbms_XmlDom.DomNode;
 BEGIN
 
-   IF wb_.tables.count = 0 THEN
+   IF wb_.tables_list.count = 0 THEN
       goto skip_tables;
    END IF;
 
    -- xl/tables/table:P1.xml
-   FOR t_ IN 1 .. wb_.tables.count LOOP
+   FOR t_ IN 1 .. wb_.tables_list.count LOOP
 
-      tbl_ := wb_.tables(t_);
+      tbl_ := wb_.defined_names(wb_.tables_list(t_));
 
       doc_ := Dbms_XmlDom.newDomDocument;
       Dbms_XmlDom.setVersion (doc_, '1.0" encoding="UTF-8" standalone="yes');
 
       nyce_xml.natr ('xmlns', 'http://schemas.openxmlformats.org/spreadsheetml/2006/main', attrs_);
       nyce_xml.attr ('id', to_char(t_), attrs_);
-      nyce_xml.attr ('name', tbl_.tbl_name, attrs_);
-      nyce_xml.attr ('displayName', tbl_.tbl_name, attrs_);
-      nyce_xml.attr ('ref', Alfan_Range(tbl_.tbl_range), attrs_);
+      nyce_xml.attr ('name', tbl_.defined_name, attrs_);
+      nyce_xml.attr ('displayName', tbl_.defined_name, attrs_);
+      nyce_xml.attr ('ref', Alfan_Range(tbl_), attrs_);
       nyce_xml.attr ('totalsRowShown', '0', attrs_);
       nd_tbl_ := Nyce_Xml.Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'table', attrs_);
 
-      nyce_xml.natr ('ref', Alfan_Range(tbl_.tbl_range), attrs_);
+      nyce_xml.natr ('ref', Alfan_Range(tbl_), attrs_);
       Nyce_Xml.Xml_Node (doc_, nd_tbl_, 'autoFilter', attrs_);
 
-      nyce_xml.natr ('count', to_char(Range_Width(tbl_.tbl_range)), attrs_);
+      nyce_xml.natr ('count', to_char(Range_Width(tbl_)), attrs_);
       nd_tcls_ := Nyce_Xml.Xml_Node (doc_, nd_tbl_, 'tableColumns', attrs_);
-      FOR c_ IN 1 .. Range_Width(tbl_.tbl_range) LOOP
+      FOR c_ IN 1 .. Range_Width(tbl_) LOOP
          nyce_xml.natr ('id', to_char(c_), attrs_);
-         nyce_xml.attr ('name', tbl_.tbl_range.col_names(c_), attrs_);
+         nyce_xml.attr ('name', tbl_.col_names(c_), attrs_);
          Nyce_Xml.Xml_Node (doc_, nd_tcls_, 'tableColumn', attrs_);
       END LOOP;
 
@@ -6110,25 +6108,26 @@ PROCEDURE Finish_Worksheet (
    excel_ IN OUT NOCOPY BLOB,
    s_     IN            PLS_INTEGER )
 IS
-   doc_     dbms_XmlDom.DomDocument := Dbms_XmlDom.newDomDocument;
-   attrs_   nyce_xml.xml_attrs_arr;
-   nd_ws_   dbms_XmlDom.DomNode;
-   nd_svs_  dbms_XmlDom.DomNode;
-   nd_sv_   dbms_XmlDom.DomNode;
-   nd_cls_  dbms_XmlDom.DomNode;
-   nd_sd_   dbms_XmlDom.DomNode;
-   nd_r_    dbms_XmlDom.DomNode;
-   nd_c_    dbms_XmlDom.DomNode;
-   nd_mc_   dbms_XmlDom.DomNode;
-   nd_dvs_  dbms_XmlDom.DomNode;
-   nd_dv_   dbms_XmlDom.DomNode;
-   nd_h_    dbms_XmlDom.DomNode;
-   nd_tps_  dbms_XmlDom.DomNode;
-   row_     PLS_INTEGER := wb_.sheets(s_).rows.first;
-   col_     PLS_INTEGER;
-   col_min_ PLS_INTEGER := 16384;
-   col_max_ PLS_INTEGER := 1;
-   rel_     PLS_INTEGER := 1;
+   doc_      dbms_XmlDom.DomDocument := Dbms_XmlDom.newDomDocument;
+   attrs_    nyce_xml.xml_attrs_arr;
+   nd_ws_    dbms_XmlDom.DomNode;
+   nd_svs_   dbms_XmlDom.DomNode;
+   nd_sv_    dbms_XmlDom.DomNode;
+   nd_cls_   dbms_XmlDom.DomNode;
+   nd_sd_    dbms_XmlDom.DomNode;
+   nd_r_     dbms_XmlDom.DomNode;
+   nd_c_     dbms_XmlDom.DomNode;
+   nd_mc_    dbms_XmlDom.DomNode;
+   nd_dvs_   dbms_XmlDom.DomNode;
+   nd_dv_    dbms_XmlDom.DomNode;
+   nd_h_     dbms_XmlDom.DomNode;
+   nd_tps_   dbms_XmlDom.DomNode;
+   row_      PLS_INTEGER := wb_.sheets(s_).rows.first;
+   col_      PLS_INTEGER;
+   table_id_ PLS_INTEGER;
+   col_min_  PLS_INTEGER := 16384;
+   col_max_  PLS_INTEGER := 1;
+   rel_      PLS_INTEGER := 1;
 BEGIN
 
    WHILE row_ IS NOT null LOOP
@@ -6330,11 +6329,13 @@ BEGIN
    IF wb_.sheets(s_).tables_list.count > 0 THEN
       nyce_xml.natr ('count', to_char(wb_.sheets(s_).tables_list.count), attrs_);
       nd_tps_ := Nyce_Xml.Xml_Node (doc_, nd_ws_, 'tableParts', attrs_);
-      FOR t_ IN 1 .. wb_.sheets(s_).tables_list.count LOOP
+      table_id_ := wb_.sheets(s_).tables_list.first;
+      WHILE table_id_ IS NOT null LOOP
          nyce_xml.natr ('r:id', rep ('rId:P1', rel_), attrs_);
          Nyce_Xml.Xml_Node (doc_, nd_tps_, 'tablePart', attrs_);
-         wb_.tables(wb_.sheets(s_).tables_list(t_)).ws_rel := rel_;
+         wb_.defined_names(wb_.tables_list(table_id_)).ws_rel := rel_;
          rel_ := rel_ + 1;
+         table_id_ := wb_.sheets(s_).tables_list.next(table_id_);
       END LOOP;
    END IF;
 
@@ -6379,13 +6380,14 @@ BEGIN
       END IF;
    END LOOP;
 
-   FOR t_ IN 1 .. wb_.sheets(s_).tables_list.count LOOP
-      table_id_ := wb_.sheets(s_).tables_list(t_);
-      nyce_xml.natr ('Id', 'rId' || to_char(wb_.tables(table_id_).ws_rel), attrs_);
+   table_id_ := wb_.sheets(s_).tables_list.first;
+   WHILE table_id_ IS NOT null LOOP
+      nyce_xml.natr ('Id', 'rId' || to_char(wb_.defined_names(wb_.tables_list(table_id_)).ws_rel), attrs_);
       nyce_xml.attr ('Type', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/table', attrs_);
       nyce_xml.attr ('Target', rep('../tables/table:P1.xml', table_id_), attrs_);
       Nyce_Xml.Xml_Node (doc_, nd_rels_, 'Relationship', attrs_);
-      id_ := greatest (id_, wb_.tables(table_id_).ws_rel);
+      id_ := greatest (id_, wb_.defined_names(wb_.tables_list(table_id_)).ws_rel);
+      table_id_ := wb_.sheets(s_).tables_list.next(table_id_);
    END LOOP;
 
    IF nr_drawings_ > 0 THEN
