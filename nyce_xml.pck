@@ -98,7 +98,11 @@ CREATE OR REPLACE PACKAGE nyce_xml IS
    FUNCTION Make_Root_Node (
       doc_      IN OUT NOCOPY dbms_XmlDom.DomDocument,
       tag_name_ IN VARCHAR2,
-      ns_       IN VARCHAR2      := '',
+      ns_       IN VARCHAR2,
+      attrs_    IN xml_attrs_arr := xml_attrs_arr() ) RETURN dbms_XmlDom.DomNode;
+   FUNCTION Make_Root_Node (
+      doc_      IN OUT NOCOPY dbms_XmlDom.DomDocument,
+      tag_name_ IN VARCHAR2,
       attrs_    IN xml_attrs_arr := xml_attrs_arr() ) RETURN dbms_XmlDom.DomNode;
 
 
@@ -357,10 +361,18 @@ END Make_Root_Node;
 FUNCTION Make_Root_Node (
    doc_      IN OUT NOCOPY dbms_XmlDom.DomDocument,
    tag_name_ IN VARCHAR2,
-   ns_       IN VARCHAR2      := '',
+   ns_       IN VARCHAR2,
    attrs_    IN xml_attrs_arr := xml_attrs_arr() ) RETURN dbms_XmlDom.DomNode
 IS BEGIN
    RETURN Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), tag_name_, ns_, attrs_);
+END Make_Root_Node;
+
+FUNCTION Make_Root_Node (
+   doc_      IN OUT NOCOPY dbms_XmlDom.DomDocument,
+   tag_name_ IN VARCHAR2,
+   attrs_    IN xml_attrs_arr := xml_attrs_arr() ) RETURN dbms_XmlDom.DomNode
+IS BEGIN
+   RETURN Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), tag_name_, '', attrs_);
 END Make_Root_Node;
 
 FUNCTION Make_Node (
