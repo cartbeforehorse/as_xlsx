@@ -60,6 +60,9 @@ CREATE OR REPLACE PACKAGE Nyce_Xlsx IS
 --------------------------------------------------
 -- Constants
 --
+DBMS_CRYPTO_INSTALLED_ CONSTANT BOOLEAN := true;
+
+
 RANGE_DEFINED_NAME_ CONSTANT VARCHAR2(100) := 'DefinedName';
 RANGE_TABLE_        CONSTANT VARCHAR2(100) := 'Table';
 
@@ -643,11 +646,13 @@ PROCEDURE Set_Tabcolor (
    tabcolor_ VARCHAR2, -- hex Alpha-rgb value
    sheet_    PLS_INTEGER := null );
 
-FUNCTION Finish RETURN BLOB;
+FUNCTION Finish (
+   pw_ IN VARCHAR2 := '' ) RETURN BLOB;
 
 PROCEDURE Save (
-   directory_ VARCHAR2,
-   filename_  VARCHAR2 );
+   directory_ IN VARCHAR2,
+   filename_  IN VARCHAR2,
+   pw_        IN VARCHAR2 := '' );
 
 PROCEDURE Save (
    xl_blob_   IN BLOB,
@@ -1304,7 +1309,7 @@ PROCEDURE addtxt2utf8blob_init (
    blob_ IN OUT NOCOPY BLOB )
 IS BEGIN
    g_addtxt2utf8blob_tmp := null;
-   dbms_lob.createtemporary (blob_, true);
+   Dbms_Lob.createTemporary (blob_, true);
 END addtxt2utf8blob_init;
 
 PROCEDURE Addtxt2utf8blob_Finish (
@@ -1313,13 +1318,13 @@ IS
    raw_ RAW(32767);
 BEGIN
    raw_ := utl_i18n.string_to_raw (g_addtxt2utf8blob_tmp, 'AL32UTF8');
-   dbms_lob.writeappend (blob_, utl_raw.length(raw_), raw_);
+   Dbms_Lob.writeAppend (blob_, utl_raw.length(raw_), raw_);
 EXCEPTION
    WHEN value_error THEN
       raw_ := utl_i18n.string_to_raw(substr(g_addtxt2utf8blob_tmp,1,16381), 'AL32UTF8');
-      dbms_lob.writeappend (blob_, utl_raw.length(raw_), raw_);
+      Dbms_Lob.writeAppend (blob_, utl_raw.length(raw_), raw_);
       raw_ := utl_i18n.string_to_raw(substr(g_addtxt2utf8blob_tmp,16382), 'AL32UTF8');
-      dbms_lob.writeappend (blob_, utl_raw.length(raw_), raw_);
+      Dbms_Lob.writeAppend (blob_, utl_raw.length(raw_), raw_);
 END Addtxt2utf8blob_Finish;
 
 PROCEDURE addtxt2utf8blob (
@@ -1342,8 +1347,8 @@ IS
    len_ PLS_INTEGER := 32767;
 BEGIN
    fh_ := Utl_File.fopen (directory_, filename_, 'wb');
-   FOR i_ IN 0 .. trunc((dbms_lob.getlength(blob_)-1)/len_) LOOP
-      Utl_File.Put_Raw (fh_, dbms_lob.substr(blob_, len_, i_*len_+1));
+   FOR i_ IN 0 .. trunc((Dbms_Lob.getLength(blob_)-1)/len_) LOOP
+      Utl_File.Put_Raw (fh_, Dbms_Lob.Substr(blob_, len_, i_*len_+1));
    END LOOP;
    Utl_File.fclose (fh_);
 END Blob2File;
@@ -1362,8 +1367,21 @@ FUNCTION Little_Endian (
    big_   NUMBER,
    bytes_ PLS_INTEGER := 4 ) RETURN RAW
 IS BEGIN
-   RETURN utl_raw.substr (
-      utl_raw.cast_from_binary_integer (big_, utl_raw.little_endian), 1, bytes_
+   IF big_ < 0 THEN
+      RETURN Utl_Raw.Reverse (to_char(4294967296+big_, 'fm0XXXXXXX'));
+   ELSE
+      RETURN Utl_Raw.Reverse (to_char(big_, substr('fm0XXXXXXXXXXXXXXXXXXX', 1, 2+(2*bytes_))));
+   END IF;
+END Little_Endian;
+
+FUNCTION Little_Endian (
+   num_   RAW,
+   pos_   PLS_INTEGER := 1,
+   bytes_ PLS_INTEGER := null ) RETURN INTEGER
+IS BEGIN
+   RETURN to_number (
+      Utl_Raw.Reverse (Utl_Raw.Substr (num_, pos_, bytes_)),
+      'XXXXXXXXXXXXXXXX'
    );
 END Little_Endian;
 
@@ -1373,7 +1391,7 @@ FUNCTION Blob2Num (
    pos_  INTEGER ) RETURN NUMBER
 IS BEGIN
    RETURN utl_raw.cast_to_binary_integer (
-      dbms_lob.substr (blob_, len_, pos_), utl_raw.little_endian
+      Dbms_Lob.Substr (blob_, len_, pos_), utl_raw.little_endian
    );
 END Blob2Num;
 
@@ -1390,7 +1408,7 @@ IS
    compressed_ BOOLEAN := false;
    name_raw_   RAW(32767);
 BEGIN
-   len_ := nvl(Dbms_Lob.GetLength( content_ ), 0 );
+   len_ := nvl(Dbms_Lob.GetLength(content_), 0);
    IF len_ > 0 THEN
       blob_       := Utl_Compress.Lz_Compress (content_);
       clen_       := Dbms_Lob.GetLength (blob_)-18;
@@ -1402,7 +1420,7 @@ BEGIN
       blob_ := content_;
    END IF;
    IF zipped_blob_ IS null THEN
-      dbms_lob.createtemporary (zipped_blob_, true);
+      Dbms_Lob.createTemporary (zipped_blob_, true);
    END IF;
    name_raw_ := Utl_i18n.String_To_Raw (filename_, 'AL32UTF8');
    Dbms_Lob.Append (
@@ -1434,11 +1452,11 @@ BEGIN
       )
    );
    IF compressed_ THEN
-      dbms_lob.copy( zipped_blob_, blob_, clen_, dbms_lob.getlength( zipped_blob_ ) + 1, 11 ); -- compressed content
+      Dbms_Lob.Copy (zipped_blob_, blob_, clen_, Dbms_Lob.getLength(zipped_blob_)+1, 11); -- compressed content
    ELSIF clen_ > 0 THEN
-      dbms_lob.copy( zipped_blob_, blob_, clen_, dbms_lob.getlength( zipped_blob_ ) + 1, 1 ); --  content
+      Dbms_Lob.Copy (zipped_blob_, blob_, clen_, Dbms_Lob.getLength(zipped_blob_)+1, 1); --  content
    END IF;
-   IF dbms_lob.istemporary(blob_) = 1 THEN
+   IF Dbms_Lob.isTemporary(blob_) = 1 THEN
       Dbms_Lob.FreeTemporary (blob_);
    END IF;
 END Add1File;
@@ -1474,16 +1492,16 @@ IS
       'Implementation by Anton Scheffer, ' || VERSION_
    );
 BEGIN
-   offs_dir_header_ := dbms_lob.getlength (zipped_blob_);
+   offs_dir_header_ := Dbms_Lob.getLength (zipped_blob_);
    offset_ := 1;
-   WHILE Dbms_Lob.Substr(zipped_blob_, utl_raw.length(LOCAL_FILE_HEADER_), offset_) = LOCAL_FILE_HEADER_ LOOP
+   WHILE Dbms_Lob.Substr(zipped_blob_, Utl_Raw.Length(LOCAL_FILE_HEADER_), offset_) = LOCAL_FILE_HEADER_ LOOP
       nr_ := nr_ + 1;
       Dbms_Lob.Append (
          zipped_blob_,
          Utl_Raw.Concat (
             hextoraw('504B0102'),      -- Central directory file header signature
             hextoraw('1400'),          -- version 2.0
-            dbms_lob.substr(zipped_blob_, 26, offset_+4),
+            Dbms_Lob.Substr(zipped_blob_, 26, offset_+4),
             hextoraw('0000'),          -- File comment length
             hextoraw('0000'),          -- Disk number where file starts
             hextoraw('0000'),          -- Internal file attributes => 0000=binary-file; 0100(ascii)=text-file
@@ -1497,7 +1515,7 @@ BEGIN
                   hextoraw('2000B681') -- a file
             END,                       -- External file attributes
             little_endian(offset_-1),  -- Relative offset of local file header
-            dbms_lob.substr(zipped_blob_, blob2num(zipped_blob_,2,offset_+26),offset_+30) -- File name
+            Dbms_Lob.Substr(zipped_blob_, blob2num(zipped_blob_,2,offset_+26),offset_+30) -- File name
          )
       );
       offset_ := offset_ + 30 +
@@ -1505,7 +1523,7 @@ BEGIN
          blob2num (zipped_blob_, 2, offset_+26 ) + -- File name length
          blob2num (zipped_blob_, 2, offset_+28 );  -- Extra field length
    END LOOP;
-   offs_end_header_ := dbms_lob.getlength(zipped_blob_);
+   offs_end_header_ := Dbms_Lob.getLength(zipped_blob_);
    Dbms_Lob.Append (
        zipped_blob_,
        Utl_Raw.Concat (
@@ -1980,7 +1998,7 @@ BEGIN
    wb_.defined_names.delete;
    wb_.tables_list.delete;
    FOR i_ IN 1 .. wb_.images.count LOOP
-      dbms_lob.freeTemporary (wb_.images(i_).img_blob);
+      Dbms_Lob.freeTemporary (wb_.images(i_).img_blob);
    END LOOP;
    wb_.images.delete;
    wb_ := null;
@@ -3326,11 +3344,11 @@ BEGIN
    IF img_ix_ IS null THEN
 
       img_ix_ := wb_.images.count + 1;
-      dbms_lob.createTemporary (img_rec_.img_blob, true);
+      Dbms_Lob.createTemporary (img_rec_.img_blob, true);
 
-      dbms_lob.copy (img_rec_.img_blob, img_blob_, dbms_lob.lobmaxsize, 1, 1);
+      Dbms_Lob.Copy (img_rec_.img_blob, img_blob_, Dbms_Lob.lobMaxSize, 1, 1);
       img_rec_.img_hash := hash_;
-      file_chunk_ := dbms_lob.substr (img_blob_, 14, 1);
+      file_chunk_ := Dbms_Lob.Substr (img_blob_, 14, 1);
 
       --
       -- Different processing for different types of image...
@@ -3389,9 +3407,9 @@ BEGIN
       THEN -- jpg
          Dbms_Output.Put_Line ('file is JPG');
 
-         offset_ := 5 + to_number(utl_raw.substr(file_chunk_,5,2), 'xxxx');
+         offset_ := 5 + to_number(Utl_Raw.Substr(file_chunk_,5,2), 'xxxx');
          LOOP
-            file_chunk_ := dbms_lob.substr (img_blob_, 4, offset_);
+            file_chunk_ := Dbms_Lob.Substr (img_blob_, 4, offset_);
             hex_        := substr( rawtohex(file_chunk_),1,4);
             EXIT WHEN hex_ IN ('FFDA', 'FFD9') -- SOS Start of Scan; EOI End Of Image
                    OR substr (hex_, 1, 2) != 'FF';
@@ -3399,7 +3417,7 @@ BEGIN
                offset_ := offset_ + 2;
             ELSE
                IF hex_ = 'FFC0' /* SOF0 (Start Of Frame 0) marker*/ THEN
-                  hex_ := rawtohex (dbms_lob.substr (img_blob_, 4, offset_+5));
+                  hex_ := rawtohex (Dbms_Lob.Substr (img_blob_, 4, offset_+5));
                   img_rec_.width  := to_number (substr(hex_,5), 'xxxx');
                   img_rec_.height := to_number (substr(hex_,1,4), 'xxxx');
                   exit;
@@ -3448,7 +3466,7 @@ IS
 BEGIN
    Dbms_Lob.fileOpen (bfile_);
    Dbms_Lob.createTemporary (img_blob_, true);
-   Dbms_Lob.loadFromFile (img_blob_, bfile_, dbms_lob.getLength(bfile_));
+   Dbms_Lob.loadFromFile (img_blob_, bfile_, Dbms_Lob.getLength(bfile_));
    Dbms_Lob.fileClose (bfile_);
    Add_Image (
       col_         => col_,
@@ -3741,7 +3759,7 @@ BEGIN
    -- [Content_Types].xml
    Dbms_XmlDom.setVersion (doc_, '1.0" encoding="UTF-8" standalone="yes');
    nyce_xml.natr ('xmlns', 'http://schemas.openxmlformats.org/package/2006/content-types', attrs_);
-   nd_types_ := Nyce_Xml.Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'Types', attrs_);
+   nd_types_ := Nyce_Xml.Make_Root_Node (doc_, 'Types', attrs_);
 
    IF wb_.images.count > 0 THEN
       FOR img_ IN wb_.images.first .. wb_.images.last LOOP
@@ -3847,7 +3865,7 @@ BEGIN
    -- _rels/.rels
    Dbms_XmlDom.setVersion (doc_, '1.0" encoding="UTF-8" standalone="yes');
    nyce_xml.natr ('xmlns', 'http://schemas.openxmlformats.org/package/2006/relationships', attrs_);
-   nd_rels_ := Nyce_Xml.Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'Relationships', attrs_);
+   nd_rels_ := Nyce_Xml.Make_Root_Node (doc_, 'Relationships', attrs_);
 
    nyce_xml.natr ('Id', 'rId1', attrs_);
    nyce_xml.attr ('Type', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument', attrs_);
@@ -3888,7 +3906,7 @@ BEGIN
    nyce_xml.attr ('xmlns:dcterms', 'http://purl.org/dc/terms/', attrs_);
    nyce_xml.attr ('xmlns:dcmitype', 'http://purl.org/dc/dcmitype/', attrs_);
    nyce_xml.attr ('xmlns:xsi', 'http://www.w3.org/2001/XMLSchema-instance', attrs_);
-   nd_cprop_ := Nyce_Xml.Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'coreProperties', 'cp', attrs_);
+   nd_cprop_ := Nyce_Xml.Make_Root_Node (doc_, 'coreProperties', 'cp', attrs_);
 
    Nyce_Xml.Xml_Text_Node (doc_, nd_cprop_, 'creator',        sys_context('userenv','os_user'), 'dc');
    Nyce_Xml.Xml_Text_Node (doc_, nd_cprop_, 'description',    rep('Build by version: :P1', VERSION_), 'dc');
@@ -3908,7 +3926,7 @@ BEGIN
 
    nyce_xml.natr ('xmlns', 'http://schemas.openxmlformats.org/officeDocument/2006/extended-properties', attrs_);
    nyce_xml.attr ('xmlns:vt', 'http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes', attrs_);
-   nd_prop_ := Nyce_Xml.Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'Properties', attrs_);
+   nd_prop_ := Nyce_Xml.Make_Root_Node (doc_, 'Properties', attrs_);
 
    Nyce_Xml.Xml_Text_Node (doc_, nd_prop_, 'Application', 'Microsoft Excel');
    Nyce_Xml.Xml_Text_Node (doc_, nd_prop_, 'DocSecurity', '0');
@@ -3955,7 +3973,7 @@ BEGIN
    nyce_xml.natr ('xmlns', 'http://schemas.openxmlformats.org/spreadsheetml/2006/main', attrs_);
    nyce_xml.attr ('count', to_char(wb_.str_cnt), attrs_);
    nyce_xml.attr ('uniqueCount', wb_.strings.count, attrs_);
-   nd_sst_ := Nyce_Xml.Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'sst', attrs_);
+   nd_sst_ := Nyce_Xml.Make_Root_Node (doc_, 'sst', attrs_);
 
    nyce_xml.natr ('xml:space', 'preserve', attrs_);
    FOR str_ix_ IN 0 .. wb_.str_ind.count - 1 LOOP
@@ -3993,7 +4011,7 @@ BEGIN
    nyce_xml.attr ('xmlns:mc', 'http://schemas.openxmlformats.org/markup-compatibility/2006', attrs_);
    nyce_xml.attr ('mc:Ignorable', 'x14ac', attrs_);
    nyce_xml.attr ('xmlns:x14ac', 'http://schemas.microsoft.com/office/spreadsheetml/2009/9/ac', attrs_);
-   nd_stl_ := Nyce_Xml.Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'styleSheet', attrs_);
+   nd_stl_ := Nyce_Xml.Make_Root_Node (doc_, 'styleSheet', attrs_);
 
    IF wb_.numFmts.count > 0 THEN
       nyce_xml.natr ('count', to_char(wb_.numFmts.count), attrs_);
@@ -4385,7 +4403,7 @@ BEGIN
    Dbms_XmlDom.setVersion (doc_, '1.0" encoding="UTF-8" standalone="yes');
    nyce_xml.natr ('xmlns', 'http://schemas.openxmlformats.org/spreadsheetml/2006/main', attrs_);
    nyce_xml.attr ('xmlns:r', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships', attrs_);
-   nd_wb_ := Nyce_Xml.Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'workbook', attrs_);
+   nd_wb_ := Nyce_Xml.Make_Root_Node (doc_, 'workbook', attrs_);
 
    nyce_xml.natr ('appName', 'xl', attrs_);
    nyce_xml.attr ('lastEdited', '5', attrs_);
@@ -4496,7 +4514,7 @@ BEGIN
    Dbms_XmlDom.setVersion (doc_, '1.0" encoding="UTF-8" standalone="yes');
 
    nyce_xml.natr ('xmlns', 'http://schemas.openxmlformats.org/package/2006/relationships', attrs_);
-   nd_rls_ := Nyce_Xml.Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'Relationships', attrs_);
+   nd_rls_ := Nyce_Xml.Make_Root_Node (doc_, 'Relationships', attrs_);
 
    nyce_xml.natr ('Id', 'rId1', attrs_);
    nyce_xml.attr ('Type', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings', attrs_);
@@ -4662,7 +4680,7 @@ BEGIN
       nyce_xml.attr ('recordCount', to_char(Range_Height(cache_.ds_range)), attrs_);
       nyce_xml.attr ('xmlns:xr', 'http://schemas.microsoft.com/office/spreadsheetml/2014/revision', attrs_);
       nyce_xml.attr ('xr:uid', Get_Guid, attrs_); --'{C898DCD4-A18D-452F-B655-4FAEB857F78F}';
-      nd_pcd_ := Nyce_Xml.Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'pivotCacheDefinition', attrs_);
+      nd_pcd_ := Nyce_Xml.Make_Root_Node (doc_, 'pivotCacheDefinition', attrs_);
 
       nyce_xml.natr ('type', 'worksheet', attrs_);
       nd_cs_ := Nyce_Xml.Xml_Node (doc_, nd_pcd_, 'cacheSource', attrs_);
@@ -4729,7 +4747,7 @@ BEGIN
       nyce_xml.attr ('mc:Ignorable', 'xr', attrs_);
       nyce_xml.attr ('xmlns:xr', 'http://schemas.microsoft.com/office/spreadsheetml/2014/revision', attrs_);
       nyce_xml.attr ('count', to_char(cache_.ds_range.br.r - cache_.ds_range.tl.r), attrs_);
-      nd_pcd_ := Nyce_Xml.Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'pivotCacheRecords', attrs_);
+      nd_pcd_ := Nyce_Xml.Make_Root_Node (doc_, 'pivotCacheRecords', attrs_);
 
       FOR r_ IN cache_.ds_range.tl.r+1 .. cache_.ds_range.br.r LOOP
          nd_row_ := Nyce_Xml.Xml_Node (doc_, nd_pcd_, 'r');
@@ -4753,7 +4771,7 @@ BEGIN
       Dbms_XmlDom.setVersion (doc_, '1.0" encoding="UTF-8" standalone="yes');
 
       nyce_xml.natr ('xmlns', 'http://schemas.openxmlformats.org/package/2006/relationships', attrs_);
-      nd_rels_ := Nyce_Xml.Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'Relationships', attrs_);
+      nd_rels_ := Nyce_Xml.Make_Root_Node (doc_, 'Relationships', attrs_);
 
       nyce_xml.natr ('Id', 'rId1', attrs_);
       nyce_xml.attr ('Type', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotCacheRecords', attrs_);
@@ -5862,7 +5880,7 @@ BEGIN
       nyce_xml.attr ('outline', '1', attrs_);
       nyce_xml.attr ('outlineData', '1', attrs_);
       nyce_xml.attr ('multipleFieldFilters', '0', attrs_);
-      nd_ptd_ := Nyce_Xml.Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'pivotTableDefinition', attrs_);
+      nd_ptd_ := Nyce_Xml.Make_Root_Node (doc_, 'pivotTableDefinition', attrs_);
 
       wb_.pivot_tables(pt_).pivot_height := j_piv_.get_object('v-tree').get_number('height') + j_piv_.get_array('xlPtHead').get_size;
       wb_.pivot_tables(pt_).pivot_width  := treat(j_piv_.get_array('xlPtHead').get(0) as json_array_t).get_size;
@@ -5994,7 +6012,7 @@ BEGIN
       Dbms_XmlDom.setVersion (doc_, '1.0" encoding="UTF-8" standalone="yes');
 
       nyce_xml.natr ('xmlns', 'http://schemas.openxmlformats.org/package/2006/relationships', attrs_);
-      nd_rels_ := Nyce_Xml.Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'Relationships', attrs_);
+      nd_rels_ := Nyce_Xml.Make_Root_Node (doc_, 'Relationships', attrs_);
 
       nyce_xml.natr ('Id', 'rId1', attrs_);
       nyce_xml.attr ('Type', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotCacheDefinition', attrs_);
@@ -6024,7 +6042,7 @@ BEGIN
    Dbms_XmlDom.setVersion (doc_, '1.0" encoding="UTF-8" standalone="yes');
 
    nyce_xml.natr ('xmlns', 'http://schemas.openxmlformats.org/package/2006/relationships', attrs_);
-   nd_rels_ := Nyce_Xml.Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'Relationships', attrs_);
+   nd_rels_ := Nyce_Xml.Make_Root_Node (doc_, 'Relationships', attrs_);
 
    FOR dr_ IN 1 .. wb_.images.count LOOP
       nyce_xml.natr ('Id', 'rId' || dr_, attrs_);
@@ -6074,7 +6092,7 @@ BEGIN
       nyce_xml.attr ('displayName', tbl_.defined_name, attrs_);
       nyce_xml.attr ('ref', Alfan_Range(tbl_), attrs_);
       nyce_xml.attr ('totalsRowShown', '0', attrs_);
-      nd_tbl_ := Nyce_Xml.Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'table', attrs_);
+      nd_tbl_ := Nyce_Xml.Make_Root_Node (doc_, 'table', attrs_);
 
       nyce_xml.natr ('ref', Alfan_Range(tbl_), attrs_);
       Nyce_Xml.Xml_Node (doc_, nd_tbl_, 'autoFilter', attrs_);
@@ -6146,7 +6164,7 @@ BEGIN
    --nyce_xml.attr ('xmlns:x14', 'http://schemas.microsoft.com/office/spreadsheetml/2009/9/main', attrs_);
    nyce_xml.attr ('mc:Ignorable', 'x14ac', attrs_);
    nyce_xml.attr ('xr:uid', Get_Guid, attrs_);
-   nd_ws_ := Nyce_Xml.Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'worksheet', attrs_);
+   nd_ws_ := Nyce_Xml.Make_Root_Node (doc_, 'worksheet', attrs_);
    IF wb_.sheets(s_).tabcolor IS NOT null THEN
       nyce_xml.natr ('rgb', wb_.sheets(s_).tabcolor, attrs_);
       Nyce_Xml.Xml_Node (doc_, Nyce_Xml.Xml_Node(doc_,nd_ws_,'sheetPr'), 'tabColor', attrs_);
@@ -6367,7 +6385,7 @@ BEGIN
 
    Dbms_XmlDom.setVersion (doc_, '1.0" encoding="UTF-8" standalone="yes');
    nyce_xml.natr ('xmlns', 'http://schemas.openxmlformats.org/package/2006/relationships', attrs_);
-   nd_rels_ := Nyce_Xml.Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'Relationships', attrs_);
+   nd_rels_ := Nyce_Xml.Make_Root_Node (doc_, 'Relationships', attrs_);
 
    FOR h_ IN 1 .. nr_hyperlinks_ LOOP
       IF wb_.sheets(s_).hyperlinks(h_).url IS NOT null THEN
@@ -6523,7 +6541,7 @@ BEGIN
    Dbms_XmlDom.setVersion (doc_, '1.0" encoding="UTF-8" standalone="yes');
    nyce_xml.natr ('xmlns:xdr', 'http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing', attrs_);
    nyce_xml.attr ('xmlns:a', 'http://schemas.openxmlformats.org/drawingml/2006/main', attrs_);
-   nd_ws_ := Nyce_Xml.Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'wsDr', 'xdr', attrs_);
+   nd_ws_ := Nyce_Xml.Make_Root_Node (doc_, 'wsDr', 'xdr', attrs_);
 
    FOR img_ IN 1 .. wb_.sheets(s_).drawings.drawings_list.count LOOP
 
@@ -6628,7 +6646,7 @@ BEGIN
    Dbms_XmlDom.setVersion (doc_, '1.0" encoding="UTF-8" standalone="yes');
 
    nyce_xml.natr ('xmlns', 'http://schemas.openxmlformats.org/spreadsheetml/2006/main', attrs_);
-   nd_cms_ := Nyce_Xml.Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'comments', attrs_);
+   nd_cms_ := Nyce_Xml.Make_Root_Node (doc_, 'comments', attrs_);
    nd_aus_ := Nyce_Xml.Xml_Node (doc_, nd_cms_, 'authors');
    author_ := ws_authors_.first;
    WHILE author_ IS NOT null OR ws_authors_.next(author_) IS NOT null LOOP
@@ -6694,7 +6712,7 @@ BEGIN
    nyce_xml.natr ('xmlns:v', 'urn:schemas-microsoft-com:vml', attrs_);
    nyce_xml.attr ('xmlns:o', 'urn:schemas-microsoft-com:office:office', attrs_);
    nyce_xml.attr ('xmlns:x', 'urn:schemas-microsoft-com:office:excel', attrs_);
-   nd_xml_ := Nyce_Xml.Xml_Node (doc_, Dbms_XmlDom.makeNode(doc_), 'xml', attrs_);
+   nd_xml_ := Nyce_Xml.Make_Root_Node (doc_, 'xml', attrs_);
 
    nyce_xml.natr ('v:ext', 'edit', attrs_);
    nd_sl_ := Nyce_Xml.Xml_Node (doc_, nd_xml_, 'shapelayout', 'o', attrs_);
@@ -6786,7 +6804,461 @@ BEGIN
 
 end Finish_Ws_Comments;
 
-FUNCTION Finish RETURN BLOB
+-------------************************************************************
+------*******************************************************************
+--***********************************************************************
+-----------
+--- Encryption work goes here
+--
+--
+$IF Nyce_Xlsx.DBMS_CRYPTO_INSTALLED_ $THEN
+
+FUNCTION Encrypt_File (
+   xl_file_ IN BLOB,
+   user_pw_ IN VARCHAR2 ) RETURN BLOB
+IS
+
+   CLR_RED_   CONSTANT RAW(1) := hextoraw('00'); -- Red; c_CLR_Red
+   CLR_BLACK_ CONSTANT RAW(1) := hextoraw('01'); -- Black; c_CLR_Black
+
+   TYPE tp_children IS TABLE OF PLS_INTEGER INDEX BY PLS_INTEGER;
+   TYPE tp_directory_entry IS RECORD (
+      raw_name     RAW(64),
+      entry_type   RAW(1),
+      colour       RAW(1) := CLR_RED_,
+      left         PLS_INTEGER := -1,
+      right        PLS_INTEGER := -1,
+      root         PLS_INTEGER := -1,
+      children     tp_children,
+      length       PLS_INTEGER := 0,
+      first_sector PLS_INTEGER := 0 );
+   TYPE tp_directory_list  IS TABLE OF tp_directory_entry INDEX BY PLS_INTEGER;
+   TYPE tp_sector_ids IS TABLE OF PLS_INTEGER INDEX BY PLS_INTEGER;
+
+   DIR_STORAGE_  CONSTANT RAW(1) := hexToRaw('01'); -- User storage
+   DIR_STREAM_   CONSTANT RAW(1) := hexToRaw('02'); -- User stream
+   DIR_ROOT_     CONSTANT RAW(1) := hexToRaw('05'); -- Root storage
+
+   -- SAT = Sector Allocation Table
+   FREE_SEC_ID_      CONSTANT PLS_INTEGER := -1; -- Free sector, may exist in the file, but is not part of any stream
+   CHAIN_END_SEC_ID_ CONSTANT PLS_INTEGER := -2; -- Trailing SecID in a SecID chain
+   SAT_SEC_ID_       CONSTANT PLS_INTEGER := -3; -- Sector is used by the sector allocation table
+
+   primary_        RAW(200) := hexToRaw ('58000000010000004C0000007B00460046003900410033004600300033002D0035003600450046002D0034003600310033002D0042004400440035002D003500410034003100430031004400300037003200340036007D004E0000004D006900630072006F0073006F00660074002E0043006F006E007400610069006E00650072002E0045006E006300720079007000740069006F006E005400720061006E00730066006F0072006D00000001000000010000000100000000000000000000000000000004000000');
+   se_data_space_  RAW(64)  := hexToRaw ('0800000001000000320000005300740072006F006E00670045006E006300720079007000740069006F006E005400720061006E00730066006F0072006D000000');
+   data_space_map_ RAW(112) := hexToRaw ('08000000010000006800000001000000000000002000000045006E0063007200790070007400650064005000610063006B00610067006500320000005300740072006F006E00670045006E006300720079007000740069006F006E004400610074006100530070006100630065000000');
+   version_        RAW(76)  := hexToRaw ('3C0000004D006900630072006F0073006F00660074002E0043006F006E007400610069006E00650072002E004400610074006100530070006100630065007300010000000100000001000000');
+
+   encryption_info_   RAW(32767);
+   encrypted_package_ BLOB;
+
+   dir_list_     tp_directory_list; -- t_dir
+   filesystem_   BLOB;
+   short_stream_ BLOB;
+   sctr_sz_      PLS_INTEGER := 512;
+   ssctr_sz_     PLS_INTEGER := 64;
+   ss_cutoff_    PLS_INTEGER := 4096;
+   sc_id_        tp_sector_ids;
+   ssc_id_       tp_sector_ids;
+   msc_id_       tp_sector_ids;
+   sector_count_ PLS_INTEGER;
+   sector_diff_  PLS_INTEGER;
+   root_dir_     PLS_INTEGER;
+   storage_dir_  PLS_INTEGER;
+   storage2_dir_ PLS_INTEGER;
+   sorted_       BOOLEAN;
+   dir_swap_     PLS_INTEGER;
+   sectr_count_  PLS_INTEGER;
+   sectrs_req_   PLS_INTEGER;
+   header_       RAW(512);
+
+   FUNCTION Is_Less (
+      dir_entry1_ IN tp_directory_entry,
+      dir_entry2_ IN tp_directory_entry ) RETURN BOOLEAN
+   IS BEGIN
+      RETURN CASE sign (Utl_Raw.Length(dir_entry1_.raw_name) - Utl_Raw.Length(dir_entry2_.raw_name))
+         WHEN -1 THEN true
+         WHEN  1 THEN false
+         ELSE upper(utl_i18n.raw_to_char(dir_entry1_.raw_name, 'AL16UTF16LE')) -- what character set is this?
+                 < upper(utl_i18n.raw_to_char(dir_entry2_.raw_name, 'AL16UTF16LE'))
+      END;
+   END Is_Less;
+
+   FUNCTION Add_Dir_Entry (
+      dir_name_   IN VARCHAR2,
+      entry_type_ IN RAW,
+      parent_     IN PLS_INTEGER := null,
+      stream_     IN BLOB        := null,
+      prefix_     IN RAW         := null ) RETURN PLS_INTEGER
+   IS
+      dir_count_ PLS_INTEGER := dir_list_.count;
+      dir_entry_ tp_directory_entry;
+   BEGIN
+      dir_entry_.entry_type := entry_type_;
+      dir_entry_.raw_name   := Utl_Raw.Concat(prefix_, Utl_I18n.String_To_Raw(dir_name_,'AL16UTF16LE'));
+      IF parent_ IS NOT null THEN
+         dir_list_(parent_).children(dir_list_(parent_).children.count) := dir_count_;
+      END IF;
+      IF entry_type_ = DIR_STREAM_ THEN
+         dir_entry_.length := Dbms_Lob.getLength (stream_);
+         IF dir_entry_.length >= ss_cutoff_ THEN
+            Dbms_Lob.Append (filesystem_, stream_);
+            IF mod (dir_entry_.length, sctr_sz_) > 0 THEN
+               Dbms_Lob.writeAppend (
+                  filesystem_,
+                  sctr_sz_ - mod(dir_entry_.length, sctr_sz_),
+                  Utl_Raw.Copies('00', sctr_sz_)
+               );
+            END IF;
+            dir_entry_.first_sector := sc_id_.count;
+            FOR i_ IN sc_id_.count .. sc_id_.count + trunc((dir_entry_.length-1)/sctr_sz_)-1 LOOP
+               sc_id_(i_) := i_ + 1;
+            END LOOP;
+            sc_id_(sc_id_.count) := CHAIN_END_SEC_ID_;
+         ELSE
+            Dbms_Lob.Append (short_stream_, stream_);
+            IF mod(dir_entry_.length, ssctr_sz_) > 0 THEN
+               Dbms_Lob.writeAppend (short_stream_, ssctr_sz_ - mod(dir_entry_.length, ssctr_sz_), utl_raw.copies('00', ssctr_sz_));
+            END IF;
+            dir_entry_.first_sector := ssc_id_.count;
+            FOR i_ IN ssc_id_.count .. ssc_id_.count + trunc((dir_entry_.length-1)/ssctr_sz_)-1 LOOP
+               ssc_id_(i_) := i_ + 1;
+            END LOOP;
+            ssc_id_(ssc_id_.count) := CHAIN_END_SEC_ID_;
+         END IF;
+      END IF;
+      dir_list_(dir_count_) := dir_entry_;
+      RETURN dir_count_;
+   END Add_Dir_Entry;
+
+   PROCEDURE Add_Dir_Entry (
+      dir_name_   IN VARCHAR2,
+      entry_type_ IN RAW,
+      parent_     IN PLS_INTEGER := null,
+      stream_     IN BLOB        := null,
+      prefix_     IN RAW         := null )
+   IS
+      throw_nr_ PLS_INTEGER;
+   BEGIN
+      throw_nr_ := Add_Dir_Entry (dir_name_, entry_type_, parent_, stream_, prefix_);
+   END Add_Dir_Entry;
+
+   PROCEDURE Do_Encryption (
+      pw_in_   IN VARCHAR2,
+      xl_file_ IN BLOB,
+      package_ IN OUT NOCOPY BLOB,
+      info_    IN OUT NOCOPY RAW )
+   IS
+      -- bk = block-key
+      ENCR_VER_HASH_INPUT_BK_ CONSTANT RAW(8) := hexToRaw ('fea7d2763b4b9e79'); -- encrVerifierHashInputBlockKey
+      ENCR_VER_HASH_VALUE_BK_ CONSTANT RAW(8) := hexToRaw ('d7aa0f6d3061344e'); -- encrVerifierHashValueBlockKey
+      ENCR_KEY_VAL_BK_        CONSTANT RAW(8) := hexToRaw ('146e0be7abacd0d6'); -- encryptedKeyValueBlockKey
+      ENCR_INTEGRITY_SALT_BK_ CONSTANT RAW(8) := hexToRaw ('5fb2ad010cb9e1f6'); -- encrIntegritySaltBlockKey
+      ENCR_INTEGRITY_HMAV_BK_ CONSTANT RAW(8) := hexToRaw ('a0677f02b22c8433'); -- encrIntegrityHmacValueBlocKkey
+
+      ALGO_              CONSTANT PLS_INTEGER := Dbms_Crypto.ENCRYPT_AES + Dbms_Crypto.CHAIN_CBC + Dbms_Crypto.PAD_ZERO; -- c_algo
+      KEY_BITS_          CONSTANT PLS_INTEGER := 256 / 8;
+
+      hash_sh1_          CONSTANT PLS_INTEGER := Dbms_Crypto.Hash_Sh1;
+      hmac_sh1_          CONSTANT PLS_INTEGER := Dbms_Crypto.Hmac_Sh1;
+      HASH_ALGO_         CONSTANT VARCHAR2(4) := 'SHA1';
+      HASH_LEN_          CONSTANT PLS_INTEGER := Utl_Raw.Length (Dbms_Crypto.Hash('00', hash_sh1_));
+      BLOCK_SIZE_        CONSTANT PLS_INTEGER := 16;
+      SPIN_COUNT_        CONSTANT PLS_INTEGER := 1000;
+      SALT_SIZE_         CONSTANT PLS_INTEGER := 16;
+      SALT_              CONSTANT RAW(3999)   := Dbms_Crypto.randomBytes (SALT_SIZE_);
+      DATA_SALT_         CONSTANT RAW(3999)   := Dbms_Crypto.randomBytes (SALT_SIZE_);
+      PW_                CONSTANT RAW(32767)  := Utl_i18n.String_To_Raw (pw_in_, 'AL16UTF16LE');
+      xl_size_           CONSTANT INTEGER     := Dbms_Lob.getLength (xl_file_);
+
+      decrypted_key_val_ RAW(100)    := Dbms_Crypto.randomBytes(KEY_BITS_);
+      salt_raw_          RAW(100)    := Dbms_Crypto.randomBytes(HASH_LEN_);
+      last_block_        PLS_INTEGER := trunc ((xl_size_-1)/4096);
+      r_key_             RAW(100);
+      r_inp_             RAW(100);
+      iv_raw_            RAW(100);
+      enc_key_val_       VARCHAR2(100);
+      xl_block_          RAW(4096);
+      mac_               RAW(100);
+      enc_hmac_key_      VARCHAR2(100);
+      enc_hmac_value_    VARCHAR2(100);
+      enc_vrifr_input_   VARCHAR2(100);
+      enc_vrifr_value_   VARCHAR2(100);
+      hash_raw_          RAW(100);
+
+      doc_    dbms_XmlDom.DomDocument := Dbms_XmlDom.newDomDocument;
+      nd_enc_ dbms_XmlDom.DomNode;
+      nd_ke_  dbms_XmlDom.DomNode;
+      attrs_  nyce_xml.xml_attrs_arr;
+
+      FUNCTION Generate_Key (
+         block_key_ IN RAW ) RETURN RAW
+      IS
+         hash_buf_ RAW(1000);
+      BEGIN
+         hash_buf_ := Dbms_Crypto.Hash (Utl_Raw.Concat(SALT_,PW_), hash_sh1_);
+         FOR i_ IN 0 .. SPIN_COUNT_ - 1 LOOP
+            hash_buf_ := Dbms_Crypto.Hash (Utl_Raw.Concat(Little_Endian(i_),hash_buf_), hash_sh1_);
+         END LOOP;
+         hash_buf_ := Dbms_Crypto.Hash (Utl_Raw.Concat(hash_buf_,block_key_), hash_sh1_);
+         IF HASH_LEN_ < KEY_BITS_ THEN
+            hash_buf_ := Utl_Raw.Concat (hash_buf_, utl_raw.copies(hextoraw('36'), KEY_BITS_));
+         END IF;
+         RETURN Utl_Raw.Substr (hash_buf_, 1, KEY_BITS_);
+      END Generate_Key;
+
+   BEGIN
+      r_key_       := Generate_Key (ENCR_KEY_VAL_BK_);
+      iv_raw_      := Dbms_Crypto.Encrypt (decrypted_key_val_, ALGO_, r_key_, salt_);
+      enc_key_val_ := Utl_Raw.Cast_To_Varchar2 (Utl_Encode.Base64_Encode(iv_raw_));
+      package_     := Little_Endian (xl_size_, 8);
+      FOR i_ IN 0 .. last_block_ LOOP
+         iv_raw_ := Dbms_Crypto.Hash (Utl_Raw.Concat(DATA_SALT_,Little_Endian(i_)), hash_sh1_);
+         IF HASH_LEN_ < BLOCK_SIZE_ THEN
+            iv_raw_ := Utl_Raw.Concat (iv_raw_, Utl_Raw.Copies(hexToRaw('36'), BLOCK_SIZE_));
+         END IF;
+         iv_raw_   := Utl_Raw.Substr (iv_raw_, 1, BLOCK_SIZE_);
+         xl_block_ := Dbms_Lob.Substr (xl_file_, 4096, i_*4096 + 1);
+         IF i_ = last_block_ AND mod (Utl_Raw.Length(xl_block_), BLOCK_SIZE_) != 0 THEN
+            xl_block_ := Utl_Raw.Concat (
+               xl_block_, Utl_Raw.Copies (
+                  'FF', BLOCK_SIZE_-mod(Utl_Raw.Length(xl_block_), BLOCK_SIZE_)
+               )
+            );
+         END IF;
+         Dbms_Lob.Append (
+            package_,
+            Dbms_Crypto.Encrypt (xl_block_, ALGO_, decrypted_key_val_, iv_raw_)
+         );
+      END LOOP;
+      mac_    := Dbms_Crypto.Mac (package_, hmac_sh1_, salt_raw_);
+      iv_raw_ := Dbms_Crypto.Hash (Utl_Raw.Concat (DATA_SALT_, ENCR_INTEGRITY_SALT_BK_), hash_sh1_);
+      IF Utl_Raw.Length(iv_raw_) < BLOCK_SIZE_ THEN
+         iv_raw_ := Utl_Raw.Concat (iv_raw_, Utl_Raw.Copies (hexToRaw('00'), BLOCK_SIZE_));
+      END IF;
+      iv_raw_   := Utl_Raw.Substr (iv_raw_, 1, BLOCK_SIZE_);
+      salt_raw_ := Dbms_Crypto.Encrypt (salt_raw_, ALGO_, decrypted_key_val_, iv_raw_);
+      enc_hmac_key_ := Utl_Raw.Cast_To_Varchar2 (Utl_Encode.Base64_Encode(salt_raw_));
+      iv_raw_   := Dbms_Crypto.Hash (Utl_Raw.Concat (DATA_SALT_, ENCR_INTEGRITY_HMAV_BK_), hash_sh1_);
+      IF Utl_Raw.Length(iv_raw_) < BLOCK_SIZE_ THEN
+         iv_raw_ := Utl_Raw.Concat (iv_raw_, Utl_Raw.Copies(hexToRaw('00'), BLOCK_SIZE_));
+      END IF;
+
+      iv_raw_   := Utl_Raw.Substr (iv_raw_, 1, BLOCK_SIZE_);
+      hash_raw_ := Dbms_Crypto.Encrypt (mac_, ALGO_, decrypted_key_val_, iv_raw_);
+      enc_hmac_value_ := Utl_Raw.Cast_To_Varchar2 (Utl_Encode.Base64_Encode(hash_raw_));
+
+      r_inp_ := Dbms_Crypto.randomBytes (SALT_SIZE_);
+      r_key_ := Generate_Key (ENCR_VER_HASH_INPUT_BK_);
+      hash_raw_ := Dbms_Crypto.Encrypt (r_inp_, ALGO_, r_key_, SALT_);
+      enc_vrifr_input_ := Utl_Raw.Cast_To_Varchar2 (Utl_Encode.Base64_Encode(hash_raw_));
+      r_key_ := Generate_Key (ENCR_VER_HASH_VALUE_BK_);
+      r_inp_ := Dbms_Crypto.Hash (r_inp_, hash_sh1_);
+      hash_raw_ := Dbms_Crypto.Encrypt (r_inp_, ALGO_, r_key_, SALT_);
+      enc_vrifr_value_ := Utl_Raw.Cast_To_Varchar2 (Utl_Encode.Base64_Encode(hash_raw_));
+
+      -- then generate the XML
+      Dbms_XmlDom.setVersion (doc_, '1.0" encoding="UTF-8" standalone="yes');
+
+      nyce_xml.natr ('xmlns', 'http://schemas.microsoft.com/office/2006/encryption', attrs_);
+      nyce_xml.attr ('xmlns:p', 'http://schemas.microsoft.com/office/2006/keyEncryptor/password', attrs_);
+      nd_enc_ := Nyce_Xml.Make_Root_Node (doc_, 'encryption', attrs_);
+
+      nyce_xml.natr ('saltSize',        to_char(SALT_SIZE_),  attrs_);
+      nyce_xml.attr ('blockSize',       to_char(BLOCK_SIZE_), attrs_);
+      nyce_xml.attr ('keyBits',         to_char(KEY_BITS_*8), attrs_);
+      nyce_xml.attr ('hashSize',        to_char(HASH_LEN_),   attrs_);
+      nyce_xml.attr ('cipherAlgorithm', 'AES',                attrs_);
+      nyce_xml.attr ('cipherChaining',  'ChainingModeCBC',    attrs_);
+      nyce_xml.attr ('hashAlgorithm',   HASH_ALGO_,           attrs_);
+      nyce_xml.attr ('saltValue', Utl_Raw.Cast_To_Varchar2(Utl_Encode.Base64_Encode(DATA_SALT_)), attrs_);
+      Nyce_Xml.Xml_Node (doc_, nd_enc_, 'keyData', attrs_);
+
+      nyce_xml.natr ('encryptedHmacKey',   enc_hmac_key_,   attrs_);
+      nyce_xml.attr ('encryptedHmacValue', enc_hmac_value_, attrs_);
+      Nyce_Xml.Xml_Node (doc_, nd_enc_, 'dataIntegrity', attrs_);
+
+      nyce_xml.natr ('uri', 'http://schemas.microsoft.com/office/2006/keyEncryptor/password', attrs_);
+      nd_ke_ := Nyce_Xml.Xml_Node (doc_, nd_enc_, 'keyEncryptors/keyEncryptor', attrs_);
+
+      nyce_xml.natr ('spinCount',                  to_char(SPIN_COUNT_), attrs_);
+      nyce_xml.attr ('saltSize',                   to_char(SALT_SIZE_),  attrs_);
+      nyce_xml.attr ('blockSize',                  to_char(BLOCK_SIZE_), attrs_);
+      nyce_xml.attr ('keyBits',                    to_char(KEY_BITS_*8), attrs_);
+      nyce_xml.attr ('hashSize',                   to_char(HASH_LEN_),   attrs_);
+      nyce_xml.attr ('cipherAlgorithm',            'AES',                attrs_);
+      nyce_xml.attr ('cipherChaining',             'ChainingModeCBC',    attrs_);
+      nyce_xml.attr ('hashAlgorithm',              HASH_ALGO_,           attrs_);
+      nyce_xml.attr ('saltValue', Utl_Raw.Cast_To_Varchar2(Utl_Encode.Base64_Encode(SALT_)), attrs_);
+      nyce_xml.attr ('encryptedVerifierHashInput', enc_vrifr_input_,     attrs_);
+      nyce_xml.attr ('encryptedVerifierHashValue', enc_vrifr_value_,     attrs_);
+      nyce_xml.attr ('encryptedKeyValue',          enc_key_val_,         attrs_);
+      Nyce_Xml.Xml_Node (doc_, nd_ke_, 'p:encryptedKey', attrs_);
+      info_ := Utl_Raw.Concat (
+         hexToRaw('0400040040000000'), Utl_Raw.Cast_To_Raw (Dbms_XmlDom.getXmlType(doc_).getClobVal)
+      );
+   END Do_Encryption;
+
+BEGIN
+
+   Do_Encryption (user_pw_, xl_file_, encrypted_package_, encryption_info_);
+
+   filesystem_ := Utl_Raw.Copies ('00', sctr_sz_);
+   Dbms_Lob.createTemporary (short_stream_, true);
+   root_dir_ := Add_Dir_Entry ('Root Entry', DIR_ROOT_);
+   Add_Dir_Entry ('EncryptedPackage', DIR_STREAM_, root_dir_, encrypted_package_);
+   storage_dir_ := Add_Dir_Entry ('DataSpaces', DIR_STORAGE_, root_dir_, prefix_ => '0600');
+   Add_Dir_Entry ('Version', DIR_STREAM_, storage_dir_, version_);
+   Add_Dir_Entry ('DataSpaceMap', DIR_STREAM_, storage_dir_, data_space_map_);
+   storage2_dir_ := Add_Dir_Entry ('DataSpaceInfo', DIR_STORAGE_, storage_dir_);
+   Add_Dir_Entry ('StrongEncryptionDataSpace', DIR_STREAM_, storage2_dir_, se_data_space_);
+   Add_Dir_Entry ('TransformInfo', DIR_STORAGE_, storage_dir_);
+   storage2_dir_ := Add_Dir_Entry ('StrongEncryptionTransform', DIR_STORAGE_, storage2_dir_);
+   Add_Dir_Entry ('Primary', DIR_STREAM_, storage2_dir_, primary_, prefix_ => '0600');
+   Add_Dir_Entry ('EncryptionInfo', DIR_STREAM_, root_dir_, encryption_info_);
+   Dbms_Lob.freeTemporary (encrypted_package_);
+
+   -- write the short sector stream
+   Dbms_Lob.Append (filesystem_, short_stream_);
+   IF mod(Dbms_Lob.getLength(short_stream_), sctr_sz_) > 0 THEN
+      Dbms_Lob.writeAppend (
+         filesystem_, sctr_sz_ - mod(Dbms_Lob.getLength(short_stream_), sctr_sz_),
+         Utl_Raw.Copies ('00', sctr_sz_)
+      );
+   END IF;
+   dir_list_(0).length       := Dbms_Lob.getLength (short_stream_);
+   dir_list_(0).first_sector := sc_id_.count;
+   FOR i_ IN sc_id_.count .. sc_id_.count + trunc((Dbms_Lob.getLength(short_stream_)-1)/sctr_sz_)-1 LOOP
+      sc_id_(i_) := i_ + 1;
+   END LOOP;
+   sc_id_(sc_id_.count) := CHAIN_END_SEC_ID_;
+   --
+   -- write the ssat
+   FOR i_ IN 0 .. ssc_id_.count - 1 LOOP
+      Dbms_Lob.writeAppend (filesystem_, 4, Little_Endian(ssc_id_(i_)));
+   END LOOP;
+   IF mod (ssc_id_.count*4, sctr_sz_) > 0 THEN
+      Dbms_Lob.writeAppend (
+         filesystem_, sctr_sz_ - mod(ssc_id_.count*4, sctr_sz_),
+         Utl_Raw.Copies (Little_Endian(FREE_SEC_ID_), sctr_sz_)
+      );
+   END IF;
+   sector_count_ := sc_id_.count;
+   FOR i_ IN sc_id_.count .. sc_id_.count + trunc((ssc_id_.count*4-1)/sctr_sz_)-1 LOOP
+      sc_id_(i_) := i_ + 1;
+   END LOOP;
+   sc_id_(sc_id_.count) := CHAIN_END_SEC_ID_;
+   sector_diff_ := sc_id_.count - sector_count_;
+
+   FOR i_ IN 0 .. dir_list_.last LOOP
+      IF dir_list_(i_).children.count = 1 THEN
+         dir_list_(i_).root := dir_list_(i_).children(0);
+         dir_list_(dir_list_(i_).children(0)).colour := CLR_BLACK_;
+      ELSIF dir_list_(i_).children.count > 1 THEN
+         sorted_ := false;
+         WHILE not sorted_ LOOP
+            sorted_ := true;
+            FOR j_ IN 0 .. dir_list_(i_).children.count - 2 LOOP
+               IF Is_Less (dir_list_(dir_list_(i_).children(j_+1)), dir_list_(dir_list_(i_).children(j_))) THEN
+                  dir_swap_               := dir_list_(i_).children(j_);
+                  dir_list_(i_).children(j_)   := dir_list_(i_).children(j_+1);
+                  dir_list_(i_).children(j_+1) := dir_swap_;
+                  sorted_ := false;
+               END IF;
+            END LOOP;
+         END LOOP;
+         dir_swap_              := dir_list_(i_).children(1);
+         dir_list_(i_).root          := dir_swap_;
+         dir_list_(dir_swap_).left   := dir_list_(i_).children(0);
+         dir_list_(dir_swap_).colour := CLR_BLACK_;
+         IF dir_list_(i_).children.count > 2 THEN
+            dir_list_(dir_swap_).right := dir_list_(i_).children(2);
+            IF dir_list_(i_).children.count > 3 THEN
+               dir_list_(dir_list_(i_).children(2)).right  := dir_list_(i_).children(3);
+               dir_list_(dir_list_(i_).children(0)).colour := CLR_BLACK_;
+               dir_list_(dir_list_(i_).children(2)).colour := CLR_BLACK_;
+            END IF;
+         END IF;
+      END IF;
+   END LOOP;
+   
+   FOR i_ IN 0 .. dir_list_.count - 1 LOOP
+      Dbms_Lob.writeAppend (
+         filesystem_, 128,
+         Utl_Raw.Concat (
+            Utl_Raw.Overlay ('00', dir_list_(i_).raw_name, 64),
+            Little_Endian (Utl_Raw.Length(dir_list_(i_).raw_name)+2, 2),
+            dir_list_(i_).entry_type,
+            dir_list_(i_).colour,
+            Little_Endian(dir_list_(i_).left),
+            Little_Endian(dir_list_(i_).right),
+            Little_Endian(dir_list_(i_).root),
+            Utl_Raw.Copies('00', 36),
+            Little_Endian(dir_list_(i_).first_sector),
+            Little_Endian(dir_list_(i_).length),
+            Utl_Raw.Copies('00',4)
+         )
+      );
+   END LOOP;
+   IF mod (dir_list_.count*128, sctr_sz_) > 0 THEN
+      Dbms_Lob.writeAppend (filesystem_, sctr_sz_-mod(dir_list_.count*128, sctr_sz_), Utl_Raw.Copies('00',sctr_sz_));
+   END IF;
+   sectr_count_ := sc_id_.count;
+   FOR i_ IN sectr_count_ .. sectr_count_ + trunc((dir_list_.count*128-1)/sctr_sz_)-1 LOOP
+      sc_id_(i_) := i_ + 1;
+   END LOOP;
+   sc_id_(sc_id_.count) := CHAIN_END_SEC_ID_;
+   --
+   -- write the sat
+   sectrs_req_ := floor (sc_id_.count* 4/sctr_sz_);
+   FOR i_ IN 0 .. sectrs_req_ LOOP
+      msc_id_(msc_id_.count) := sc_id_.count;
+      sc_id_(sc_id_.count)   := SAT_SEC_ID_;
+   END LOOP;
+   IF sectrs_req_ != floor (sc_id_.count* 4/sctr_sz_) THEN
+      msc_id_(msc_id_.count) := sc_id_.count;
+      sc_id_(sc_id_.count)   := SAT_SEC_ID_;
+   END IF;
+   FOR i_ IN 0 .. sc_id_.count - 1 LOOP
+      Dbms_Lob.writeAppend (filesystem_, 4, Little_Endian(sc_id_(i_)));
+   END LOOP;
+   IF mod(sc_id_.count*4, sctr_sz_) > 0 THEN
+      Dbms_Lob.writeAppend (
+         filesystem_, sctr_sz_-mod(sc_id_.count*4, sctr_sz_),
+         Utl_Raw.Copies(Little_Endian(FREE_SEC_ID_), sctr_sz_)
+      );
+   END IF;
+   header_ := Utl_Raw.Concat (
+      hexToRaw ('D0CF11E0A1B11AE1'),
+      Utl_Raw.Copies ('00', 16),
+      hexToRaw ('3E000300'),
+      hexToRaw ('FEFF'),
+      Little_Endian (round(log(2,sctr_sz_)), 2),
+      Little_Endian (round(log(2,ssctr_sz_)), 2),
+      Utl_Raw.Copies ('00', 10),
+      Little_Endian (msc_id_.count),
+      Little_Endian (sectr_count_),
+      Utl_Raw.Copies ('00', 4),
+      Little_Endian (ss_cutoff_),
+      Little_Endian (sector_count_)
+   );
+   header_ := Utl_Raw.Concat (
+      header_, Little_Endian(sector_diff_),
+      Little_Endian(CHAIN_END_SEC_ID_), Utl_Raw.Copies('00',4)
+   );
+   FOR i_ IN 0 .. msc_id_.count - 1 LOOP
+      header_ := Utl_Raw.Concat (header_, Little_Endian(msc_id_(i_)));
+   END LOOP;
+   header_ := Utl_Raw.Concat (header_, Utl_Raw.Copies (Little_Endian(FREE_SEC_ID_), 109-msc_id_.count));
+   Dbms_Lob.Copy (filesystem_, header_, 512, 1, 1);
+   Dbms_Lob.freeTemporary (short_stream_);
+   RETURN filesystem_;
+
+END Encrypt_File;
+$END
+
+FUNCTION Finish (
+   pw_ IN VARCHAR2 := '' ) RETURN BLOB
 IS
    excel_ BLOB;
    s_     PLS_INTEGER;
@@ -6828,15 +7300,21 @@ BEGIN
    Finish_Zip (excel_);
    Clear_Workbook;
 
+   $IF Nyce_Xlsx.DBMS_CRYPTO_INSTALLED_ $THEN
+      IF pw_ IS NOT null THEN
+         excel_ := Encrypt_File (excel_, pw_);
+      END IF;
+   $END
    RETURN excel_;
 
 END Finish;
 
 PROCEDURE Save (
    directory_ IN VARCHAR2,
-   filename_  IN VARCHAR2 )
+   filename_  IN VARCHAR2,
+   pw_        IN VARCHAR2 := '' )
 IS BEGIN
-   Blob2File (Finish, directory_, filename_);
+   Blob2File (Finish(pw_), directory_, filename_);
 END Save;
 
 PROCEDURE Save (
