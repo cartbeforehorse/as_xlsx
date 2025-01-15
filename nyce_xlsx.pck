@@ -3330,7 +3330,7 @@ IS
    drawing_    tp_drawing;
    offset_     NUMBER;
    length_     NUMBER;
-   file_chunk_ RAW(14);
+   file_chunk_ RAW(32);
    hex_        VARCHAR2(8);
 BEGIN
 
@@ -3348,7 +3348,7 @@ BEGIN
 
       Dbms_Lob.Copy (img_rec_.img_blob, img_blob_, Dbms_Lob.lobMaxSize, 1, 1);
       img_rec_.img_hash := hash_;
-      file_chunk_ := Dbms_Lob.Substr (img_blob_, 14, 1);
+      file_chunk_ := Dbms_Lob.Substr (img_blob_, 32, 1);
 
       --
       -- Different processing for different types of image...
@@ -3426,6 +3426,12 @@ BEGIN
             END IF;
          END LOOP;
          img_rec_.extension := 'jpeg';
+
+      ELSIF utl_raw.substr (file_chunk_,1,2) = '424D' /* BM */ THEN -- bmp
+         Dbms_Output.Put_Line ('file is BMP');
+         img_rec_.width     := to_number (Utl_Raw.Reverse(Utl_Raw.Substr(file_chunk_,19,4)), 'XXXXXXXX');
+         img_rec_.height    := to_number (Utl_Raw.Reverse(Utl_Raw.Substr(file_chunk_,23,4)), 'XXXXXXXX');
+         img_rec_.extension := 'bmp';
 
       ELSE -- unknown - use the values passed in
          Dbms_Output.Put_Line ('file is not PNG/GIF/JPG');
@@ -3515,11 +3521,14 @@ END Defined_Name;
 
 PROCEDURE Defined_Name (
    range_ IN tp_cell_range )
-IS BEGIN
+IS
+   rg_ tp_cell_range := range_;
+BEGIN
    IF range_.defined_name IS null THEN
       Raise_App_Error ('Defined name cannot be empty!');
    END IF;
-   wb_.defined_names(range_.defined_name) := range_;
+   rg_.range_type := RANGE_DEFINED_NAME_;
+   wb_.defined_names(range_.defined_name) := rg_;
 END Defined_Name;
 
 FUNCTION Range_From_Defined_Name (
@@ -4551,6 +4560,18 @@ BEGIN
    Dbms_XmlDom.freeDocument (doc_);
 
 END Finish_Workbook_Rels;
+
+PROCEDURE Finish_Media (
+   excel_ IN OUT NOCOPY BLOB )
+IS BEGIN
+   FOR img_ IN 1 .. wb_.images.count LOOP
+      Add1File (
+         zipped_blob_ => excel_,
+         filename_    => rep ('xl/media/image:P1.:P2', img_, wb_.images(img_).extension),
+         content_     => wb_.images(img_).img_blob
+      );
+   END LOOP;
+END Finish_Media;
 
 PROCEDURE Build_Pivot_Caches_And_Tables
 IS
@@ -6027,36 +6048,33 @@ END Finish_Pivot_Tables;
 
 
 PROCEDURE Finish_Drawings_Rels (
-   excel_ IN OUT NOCOPY BLOB )
+   excel_ IN OUT NOCOPY BLOB,
+   s_     IN            PLS_INTEGER )
 IS
+   img_id_  PLS_INTEGER;
    doc_     dbms_XmlDom.DomDocument := Dbms_XmlDom.newDomDocument;
    attrs_   nyce_xml.xml_attrs_arr;
    nd_rels_ dbms_XmlDom.DomNode;
 BEGIN
 
-   IF wb_.images.count = 0 THEN
+   IF wb_.sheets(s_).drawings.drawings_list.count = 0 THEN
       goto skip_drawings_rels;
    END IF;
 
-   -- xl/drawings/_rels/drawing1.xml.rels
+   -- xl/drawings/_rels/drawing:P1.xml.rels
    Dbms_XmlDom.setVersion (doc_, '1.0" encoding="UTF-8" standalone="yes');
-
    nyce_xml.natr ('xmlns', 'http://schemas.openxmlformats.org/package/2006/relationships', attrs_);
    nd_rels_ := Nyce_Xml.Make_Root_Node (doc_, 'Relationships', attrs_);
 
-   FOR dr_ IN 1 .. wb_.images.count LOOP
-      nyce_xml.natr ('Id', 'rId' || dr_, attrs_);
+   FOR dr_ IN 1 .. wb_.sheets(s_).drawings.drawings_list.count LOOP
+      img_id_ := wb_.sheets(s_).drawings.drawings_list(dr_).img_id;
+      nyce_xml.natr ('Id', 'rId' || to_char(dr_), attrs_);
       nyce_xml.attr ('Type', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/image', attrs_);
-      nyce_xml.attr ('Target', rep ('../media/image:P1.:P2', dr_, wb_.images(dr_).extension), attrs_);
+      nyce_xml.attr ('Target', rep ('../media/image:P1.:P2', to_char(img_id_), wb_.images(img_id_).extension), attrs_);
       Nyce_Xml.Xml_Node (doc_, nd_rels_, 'Relationship', attrs_);
-      Add1File (
-         zipped_blob_ => excel_,
-         filename_    => rep ('xl/media/image:P1.:P2', dr_, wb_.images(dr_).extension),
-         content_     => wb_.images(dr_).img_blob
-      );
    END LOOP;
 
-   Add1Xml (excel_, 'xl/drawings/_rels/drawing1.xml.rels', Dbms_XmlDom.getXmlType(doc_).getClobVal);
+   Add1Xml (excel_, rep('xl/drawings/_rels/drawing:P1.xml.rels',s_), Dbms_XmlDom.getXmlType(doc_).getClobVal);
    Dbms_XmlDom.freeDocument (doc_);
 
    <<skip_drawings_rels>>
@@ -6543,9 +6561,9 @@ BEGIN
    nyce_xml.attr ('xmlns:a', 'http://schemas.openxmlformats.org/drawingml/2006/main', attrs_);
    nd_ws_ := Nyce_Xml.Make_Root_Node (doc_, 'wsDr', 'xdr', attrs_);
 
-   FOR img_ IN 1 .. wb_.sheets(s_).drawings.drawings_list.count LOOP
+   FOR dr_ IN 1 .. wb_.sheets(s_).drawings.drawings_list.count LOOP
 
-      drawing_ := wb_.sheets(s_).drawings.drawings_list(img_);
+      drawing_ := wb_.sheets(s_).drawings.drawings_list(dr_);
       Calc_Image_Col_And_Row (to_col_, to_row_, col_ovfl_, row_ovfl_, drawing_, s_);
 
       nyce_xml.natr ('editAs', 'oneCell', attrs_);
@@ -6567,7 +6585,7 @@ BEGIN
       nd_nv_ := Nyce_Xml.Xml_Node (doc_, nd_pi_, 'nvPicPr', 'xdr');
 
       nyce_xml.natr ('id', '3', attrs_);
-      nyce_xml.attr ('name', coalesce (drawing_.name, 'Picture '||img_), attrs_);
+      nyce_xml.attr ('name', coalesce (drawing_.name, 'Picture '||dr_), attrs_);
       IF drawing_.title       IS NOT null THEN nyce_xml.attr('title', drawing_.title, attrs_); END IF;
       IF drawing_.description IS NOT null THEN nyce_xml.attr('descr', drawing_.description, attrs_); END IF;
       Nyce_Xml.Xml_Node (doc_, nd_nv_, 'cNvPr', 'xdr', attrs_);
@@ -6579,7 +6597,7 @@ BEGIN
       nd_bf_ := Nyce_Xml.Xml_Node (doc_, nd_pi_, 'blipFill', 'xdr');
 
       nyce_xml.natr ('xmlns:r', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships', attrs_);
-      nyce_xml.attr ('r:embed', rep ('rId:P1', to_char(drawing_.img_id)), attrs_);
+      nyce_xml.attr ('r:embed', rep ('rId:P1', to_char(dr_)), attrs_);
       nd_bl_ := Nyce_Xml.Xml_Node (doc_, nd_bf_, 'blip', 'a', attrs_);
       nd_et_ := Nyce_Xml.Xml_Node (doc_, nd_bl_, 'extLst', 'a');
 
@@ -6818,8 +6836,8 @@ FUNCTION Encrypt_File (
    user_pw_ IN VARCHAR2 ) RETURN BLOB
 IS
 
-   CLR_RED_   CONSTANT RAW(1) := hextoraw('00'); -- Red; c_CLR_Red
-   CLR_BLACK_ CONSTANT RAW(1) := hextoraw('01'); -- Black; c_CLR_Black
+   CLR_RED_   CONSTANT RAW(1) := hextoraw('00'); -- Red
+   CLR_BLACK_ CONSTANT RAW(1) := hextoraw('01'); -- Black
 
    TYPE tp_children IS TABLE OF PLS_INTEGER INDEX BY PLS_INTEGER;
    TYPE tp_directory_entry IS RECORD (
@@ -6852,7 +6870,7 @@ IS
    encryption_info_   RAW(32767);
    encrypted_package_ BLOB;
 
-   dir_list_     tp_directory_list; -- t_dir
+   dir_list_     tp_directory_list;
    filesystem_   BLOB;
    short_stream_ BLOB;
    sctr_sz_      PLS_INTEGER := 512;
@@ -6944,10 +6962,7 @@ IS
    END Add_Dir_Entry;
 
    PROCEDURE Do_Encryption (
-      pw_in_   IN VARCHAR2,
-      xl_file_ IN BLOB,
-      package_ IN OUT NOCOPY BLOB,
-      info_    IN OUT NOCOPY RAW )
+      package_ IN OUT NOCOPY BLOB )
    IS
       -- bk = block-key
       ENCR_VER_HASH_INPUT_BK_ CONSTANT RAW(8) := hexToRaw ('fea7d2763b4b9e79'); -- encrVerifierHashInputBlockKey
@@ -6968,7 +6983,7 @@ IS
       SALT_SIZE_         CONSTANT PLS_INTEGER := 16;
       SALT_              CONSTANT RAW(3999)   := Dbms_Crypto.randomBytes (SALT_SIZE_);
       DATA_SALT_         CONSTANT RAW(3999)   := Dbms_Crypto.randomBytes (SALT_SIZE_);
-      PW_                CONSTANT RAW(32767)  := Utl_i18n.String_To_Raw (pw_in_, 'AL16UTF16LE');
+      PW_                CONSTANT RAW(32767)  := Utl_i18n.String_To_Raw (user_pw_, 'AL16UTF16LE');
       xl_size_           CONSTANT INTEGER     := Dbms_Lob.getLength (xl_file_);
 
       decrypted_key_val_ RAW(100)    := Dbms_Crypto.randomBytes(KEY_BITS_);
@@ -7027,8 +7042,7 @@ IS
             );
          END IF;
          Dbms_Lob.Append (
-            package_,
-            Dbms_Crypto.Encrypt (xl_block_, ALGO_, decrypted_key_val_, iv_raw_)
+            package_, Dbms_Crypto.Encrypt (xl_block_, ALGO_, decrypted_key_val_, iv_raw_)
          );
       END LOOP;
       mac_    := Dbms_Crypto.Mac (package_, hmac_sh1_, salt_raw_);
@@ -7094,14 +7108,14 @@ IS
       nyce_xml.attr ('encryptedVerifierHashValue', enc_vrifr_value_,     attrs_);
       nyce_xml.attr ('encryptedKeyValue',          enc_key_val_,         attrs_);
       Nyce_Xml.Xml_Node (doc_, nd_ke_, 'p:encryptedKey', attrs_);
-      info_ := Utl_Raw.Concat (
+      encryption_info_ := Utl_Raw.Concat (
          hexToRaw('0400040040000000'), Utl_Raw.Cast_To_Raw (Dbms_XmlDom.getXmlType(doc_).getClobVal)
       );
    END Do_Encryption;
 
 BEGIN
 
-   Do_Encryption (user_pw_, xl_file_, encrypted_package_, encryption_info_);
+   Do_Encryption (encrypted_package_);
 
    filesystem_ := Utl_Raw.Copies ('00', sctr_sz_);
    Dbms_Lob.createTemporary (short_stream_, true);
@@ -7167,7 +7181,7 @@ BEGIN
                END IF;
             END LOOP;
          END LOOP;
-         dir_swap_              := dir_list_(i_).children(1);
+         dir_swap_                   := dir_list_(i_).children(1);
          dir_list_(i_).root          := dir_swap_;
          dir_list_(dir_swap_).left   := dir_list_(i_).children(0);
          dir_list_(dir_swap_).colour := CLR_BLACK_;
@@ -7229,18 +7243,13 @@ BEGIN
       );
    END IF;
    header_ := Utl_Raw.Concat (
-      hexToRaw ('D0CF11E0A1B11AE1'),
-      Utl_Raw.Copies ('00', 16),
-      hexToRaw ('3E000300'),
-      hexToRaw ('FEFF'),
+      hexToRaw ('D0CF11E0A1B11AE1'), Utl_Raw.Copies ('00', 16),
+      hexToRaw ('3E000300'), hexToRaw ('FEFF'),
       Little_Endian (round(log(2,sctr_sz_)), 2),
       Little_Endian (round(log(2,ssctr_sz_)), 2),
-      Utl_Raw.Copies ('00', 10),
-      Little_Endian (msc_id_.count),
-      Little_Endian (sectr_count_),
-      Utl_Raw.Copies ('00', 4),
-      Little_Endian (ss_cutoff_),
-      Little_Endian (sector_count_)
+      Utl_Raw.Copies ('00', 10), Little_Endian (msc_id_.count),
+      Little_Endian (sectr_count_), Utl_Raw.Copies ('00', 4),
+      Little_Endian (ss_cutoff_), Little_Endian (sector_count_)
    );
    header_ := Utl_Raw.Concat (
       header_, Little_Endian(sector_diff_),
@@ -7285,7 +7294,7 @@ BEGIN
    Finish_Theme (excel_);                   -- xl/theme/theme1.xml
    Finish_Workbook (excel_);                -- xl/workbook.xml
    Finish_Workbook_Rels (excel_);           -- xl/_rels/workbook.xml.rels
-   Finish_Drawings_Rels (excel_);           -- xl/drawings/_rels/drawing1.xml.rels
+   Finish_Media (excel_);                   -- xl/media/image:P1.[bmp/gif/jpg/png]
    Finish_Tables (excel_);                  -- xl/tables/table:P1.xml
 
    s_ := wb_.sheets.first;
@@ -7293,6 +7302,7 @@ BEGIN
       Finish_Worksheet (excel_, s_);        -- xl/worksheets/sheet:P1.xml
       Finish_Ws_Relationships (excel_, s_); -- xl/worksheets/_rels/sheet:P1.xml.rels
       Finish_Ws_Drawings (excel_, s_);      -- xl/drawings/drawing:P1.xml
+      Finish_Drawings_Rels (excel_, s_);    -- xl/drawings/_rels/drawing:P1.xml.rels
       Finish_Ws_Comments (excel_, s_);      -- xl/drawings/vmlDrawing:P1.vml
       s_ := wb_.sheets.next(s_);
    END LOOP;

@@ -1,9 +1,9 @@
 PL/SQL Developer Test script 3.0
-96
+120
 DECLARE
    create_file_ CONSTANT BOOLEAN      := lower(nvl(:output_file,'no')) = 'yes';
    test_level_  CONSTANT VARCHAR2(30) := '01-basicTests';
-   test_name_   CONSTANT VARCHAR2(30) := 'ImageHypCommentMultipage';
+   test_name_   CONSTANT VARCHAR2(30) := 'MoreImages';
    file_end_    CONSTANT VARCHAR2(20) := Nyce_Utils.Rep ('_:P1.xlsx', to_char(sysdate,'YYYYMMDD-HH24MI'));
    file_name_   VARCHAR2(60);
    xl_blob_     BLOB;
@@ -59,8 +59,19 @@ BEGIN
       scale_       => 0.1,
       sheet_       => sheet_
    );
+   Nyce_Xlsx.Load_Image (
+      col_         => 2,
+      row_         => 10,
+      dir_         => 'EXCEL_STORAGE',
+      filename_    => 'bitmap-green.bmp',
+      name_        => 'Bitmap Image Name',
+      title_       => 'Bitmap Title',
+      description_ => 'A splash for bitmaps',
+      scale_       => 0.5,
+      sheet_       => sheet_
+   );
 
-   sheet_ := Nyce_Xlsx.New_Sheet ('Data and Pivot');
+   sheet_ := Nyce_Xlsx.New_Sheet ('Data');
 
    Nyce_Xlsx.CellS (col_,   row_, 'Identity Type', sheet_ => sheet_);
    Nyce_Xlsx.CellS (col_+1, row_, 'Identity', sheet_ => sheet_);
@@ -85,6 +96,19 @@ BEGIN
    data_range_.br           := Nyce_Xlsx.tp_cell_loc (col_ + 3, row_, true, true);
    data_range_.defined_name := 'MyDataSource';
    Nyce_Xlsx.Defined_Name (data_range_);
+
+   sheet_ := Nyce_Xlsx.New_Sheet ('Number Four');
+   Nyce_Xlsx.Load_Image (
+      col_         => 2,
+      row_         => 2,
+      dir_         => 'EXCEL_STORAGE',
+      filename_    => 'excel.png',
+      name_        => 'Excel Image Name 2',
+      title_       => 'Excel Logo Title 2',
+      description_ => 'Excel Logo Duplicate',
+      scale_       => 0.1,
+      sheet_       => sheet_
+   );
 
    IF not create_file_ THEN
       xl_blob_ := Nyce_Xlsx.Finish;
