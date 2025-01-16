@@ -151,12 +151,18 @@ PROCEDURE Init_Workbook;
 PROCEDURE Clear_Workbook;
 
 FUNCTION New_Sheet (
-   sheetname_ VARCHAR2 := null,
-   tab_color_ VARCHAR2 := null ) RETURN PLS_INTEGER;
+   sheetname_      IN VARCHAR2    := null,
+   tab_color_      IN VARCHAR2    := null,
+   show_gridlines_ IN BOOLEAN     := null,
+   grid_colour_ix_ IN PLS_INTEGER := null,
+   show_headers_   IN BOOLEAN     := null ) RETURN PLS_INTEGER;
 
 PROCEDURE New_Sheet (
-   sheetname_ VARCHAR2 := null,
-   tab_color_ VARCHAR2 := null );
+   sheetname_      IN VARCHAR2    := null,
+   tab_color_      IN VARCHAR2    := null,
+   show_gridlines_ IN BOOLEAN     := null,
+   grid_colour_ix_ IN PLS_INTEGER := null,
+   show_headers_   IN BOOLEAN     := null );
 
 PROCEDURE Set_Sheet_Name (
    sheet_  IN PLS_INTEGER,
@@ -1003,24 +1009,27 @@ TYPE tp_drawings IS RECORD (
 -- sheet type
 --
 TYPE tp_sheet IS RECORD (
-   wb_rel       PLS_INTEGER,
-   rows         tp_rows,
-   widths       tp_widths,
-   tabcolor     VARCHAR2(8),
-   fontId       PLS_INTEGER,
-   name         VARCHAR2(100),
-   freeze_rows  PLS_INTEGER,
-   freeze_cols  PLS_INTEGER,
-   autofilters  tp_autofilters,
-   hyperlinks   tp_hyperlinks,
-   col_fmts     tp_col_fmts,
-   row_fmts     tp_row_fmts,
-   comments     tp_comments,
-   mergecells   tp_mergecells,
-   validations  tp_validations,
-   tables_list  tp_tables_list,
-   pivots_list  tp_pivots_list,
-   drawings     tp_drawings
+   wb_rel         PLS_INTEGER,
+   sheet_name     VARCHAR2(100),
+   rows           tp_rows,
+   widths         tp_widths,
+   show_gridlines BOOLEAN,
+   grid_colour_ix PLS_INTEGER,
+   show_headers   BOOLEAN,
+   tabcolor       VARCHAR2(8),
+   fontId         PLS_INTEGER,
+   freeze_rows    PLS_INTEGER,
+   freeze_cols    PLS_INTEGER,
+   autofilters    tp_autofilters,
+   hyperlinks     tp_hyperlinks,
+   col_fmts       tp_col_fmts,
+   row_fmts       tp_row_fmts,
+   comments       tp_comments,
+   mergecells     tp_mergecells,
+   validations    tp_validations,
+   tables_list    tp_tables_list,
+   pivots_list    tp_pivots_list,
+   drawings       tp_drawings
 );
 TYPE tp_sheets IS TABLE OF tp_sheet INDEX BY PLS_INTEGER;
 
@@ -1665,7 +1674,7 @@ FUNCTION Alfan_Sheet_Range (
    fix_brr_ IN BOOLEAN := true ) RETURN VARCHAR2
 IS BEGIN
    RETURN Alfan_Sheet_Range (
-      wb_.sheets(sheet_).name, col_tl_, row_tl_, col_br_, row_br_,
+      wb_.sheets(sheet_).sheet_name, col_tl_, row_tl_, col_br_, row_br_,
       fix_tlc_, fix_tlr_, fix_brc_, fix_brr_
    );
 END Alfan_Sheet_Range;
@@ -1682,13 +1691,13 @@ END Alfan_Sheet_Range;
 FUNCTION Sheet_Name (
    sheet_ IN PLS_INTEGER ) RETURN VARCHAR2
 IS BEGIN
-   RETURN wb_.sheets(sheet_).name;
+   RETURN wb_.sheets(sheet_).sheet_name;
 END Sheet_Name;
 
 FUNCTION Sheet_Name (
    range_ IN tp_cell_range ) RETURN VARCHAR2
 IS BEGIN
-   RETURN wb_.sheets(range_.sheet_id).name;
+   RETURN wb_.sheets(range_.sheet_id).sheet_name;
 END Sheet_Name;
 
 FUNCTION Range_Height (
@@ -2014,16 +2023,22 @@ BEGIN
 END Set_Tabcolor;
 
 FUNCTION New_Sheet (
-   sheetname_ VARCHAR2 := null,
-   tab_color_ VARCHAR2 := null ) RETURN PLS_INTEGER
+   sheetname_      IN VARCHAR2    := null,
+   tab_color_      IN VARCHAR2    := null,
+   show_gridlines_ IN BOOLEAN     := null,
+   grid_colour_ix_ IN PLS_INTEGER := null, -- index in default color palette 0 - 55
+   show_headers_   IN BOOLEAN     := null ) RETURN PLS_INTEGER
 IS
    s_          PLS_INTEGER   := wb_.sheets.count + 1;
    sheet_name_ VARCHAR2(100) := nvl (sheetname_, 'Sheet ' || s_);
 BEGIN
-   wb_.sheets(s_).name := nvl (
+   wb_.sheets(s_).sheet_name := nvl (
       Dbms_XmlGen.Convert(translate(sheet_name_, 'a/\[]*:?', 'a')),
       'Sheet' || s_
    );
+   wb_.sheets(s_).show_gridlines := show_gridlines_;
+   wb_.sheets(s_).grid_colour_ix := grid_colour_ix_;
+   wb_.sheets(s_).show_headers   := show_headers_;
    IF wb_.strings.count = 0 THEN
       wb_.str_cnt := 0;
    END IF;
@@ -2043,19 +2058,24 @@ BEGIN
 END New_Sheet;
 
 PROCEDURE New_Sheet (
-   sheetname_ VARCHAR2 := null,
-   tab_color_ VARCHAR2 := null )
+   sheetname_      IN VARCHAR2    := null,
+   tab_color_      IN VARCHAR2    := null,
+   show_gridlines_ IN BOOLEAN     := null,
+   grid_colour_ix_ IN PLS_INTEGER := null,
+   show_headers_   IN BOOLEAN     := null )
 IS
    throw_ PLS_INTEGER;
 BEGIN
-   throw_ := New_Sheet (sheetname_, tab_color_); --ignore
+   throw_ := New_Sheet (
+      sheetname_, tab_color_, show_gridlines_, grid_colour_ix_, show_headers_
+   );
 END New_Sheet;
 
 PROCEDURE Set_Sheet_Name (
    sheet_  IN PLS_INTEGER,
    name_   IN VARCHAR2 )
 IS BEGIN
-   wb_.sheets(sheet_).name := nvl (
+   wb_.sheets(sheet_).sheet_name := nvl (
       Dbms_xmlgen.Convert (translate(name_, 'a/\[]*:?', 'a')),
       'Sheet'  || sheet_
    );
@@ -3956,7 +3976,7 @@ BEGIN
    nd_vec_ := Nyce_Xml.Xml_Node (doc_, nd_top_, 'vector', 'vt', attrs_);
    s_ := wb_.sheets.first;
    WHILE s_ IS NOT null LOOP
-      Nyce_Xml.Xml_Text_Node (doc_, nd_vec_, 'lpstr', wb_.sheets(s_).name, 'vt');
+      Nyce_Xml.Xml_Text_Node (doc_, nd_vec_, 'lpstr', wb_.sheets(s_).sheet_name, 'vt');
       s_ := wb_.sheets.next(s_);
    END LOOP;
    Nyce_Xml.Xml_Text_Node (doc_, nd_prop_, 'LinksUpToDate', 'false');
@@ -4437,7 +4457,7 @@ BEGIN
    nd_shs_ := Nyce_Xml.Xml_Node (doc_, nd_wb_, 'sheets');
    s_ := wb_.sheets.first;
    WHILE s_ IS NOT null LOOP
-      nyce_xml.natr ('name', wb_.sheets(s_).name, attrs_);
+      nyce_xml.natr ('name', wb_.sheets(s_).sheet_name, attrs_);
       nyce_xml.attr ('sheetId', to_char(s_), attrs_);
       nyce_xml.attr ('r:id', rep ('rId:P1', to_char(rel_)), attrs_);
       Nyce_Xml.Xml_Node (doc_, nd_shs_, 'sheet', attrs_);
@@ -6198,8 +6218,14 @@ BEGIN
 
    nd_svs_ := Nyce_Xml.Xml_Node (doc_, nd_ws_, 'sheetViews');
    nyce_xml.catr (attrs_);
-   IF s_ = 1 THEN nyce_xml.attr ('tabSelected', '1', attrs_); END IF;
-   nyce_xml.attr ('workbookViewId', '0', attrs_);
+   IF wb_.sheets(s_).grid_colour_ix IS NOT null THEN
+      nyce_xml.attr ('defaultGridColor', '0', attrs_);
+      nyce_xml.attr ('colorId', to_char(wb_.sheets(s_).grid_colour_ix), attrs_);
+   END IF;
+   nyce_xml.attr ('showGridLines',     '0', attrs_, not wb_.sheets(s_).show_gridlines);
+   nyce_xml.attr ('showRowColHeaders', '0', attrs_, not wb_.sheets(s_).show_headers);
+   nyce_xml.attr ('tabSelected',       '1', attrs_, s_=1);
+   nyce_xml.attr ('workbookViewId',    '0', attrs_);
    nd_sv_  := Nyce_Xml.Xml_Node (doc_, nd_svs_, 'sheetView', attrs_);
 
    IF wb_.sheets(s_).freeze_rows + wb_.sheets(s_).freeze_cols > 0 THEN
