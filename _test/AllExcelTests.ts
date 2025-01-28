@@ -83,6 +83,18 @@ Var1Type=String
 Var1InputValue=
 Var1OutputValue=
 [Item8]
+Description=runExcelTest-01-Base07-BordersAndFormulas
+TestScript=01-basicTests\runExcelTest-01-Base07-BordersAndFormulas.tst
+NewSession=False
+Enabled=True
+Performance=
+Var1Name=output_file
+Var1Enabled=True
+Var1Global=True
+Var1Type=String
+Var1InputValue=
+Var1OutputValue=
+[Item9]
 Description=runExcelTest-02-Tables01-SimpleiTable
 TestScript=02-tableTests\runExcelTest-02-Tables01-SimpleiTable.tst
 NewSession=False
@@ -94,7 +106,7 @@ Var1Global=True
 Var1Type=String
 Var1InputValue=
 Var1OutputValue=
-[Item9]
+[Item10]
 Description=runExcelTest-02-Tables02-MultiTablesOnPage
 TestScript=02-tableTests\runExcelTest-02-Tables02-MultiTablesOnPage.tst
 NewSession=False
@@ -106,7 +118,7 @@ Var1Global=True
 Var1Type=String
 Var1InputValue=
 Var1OutputValue=
-[Item10]
+[Item11]
 Description=runExcelTest-02-Tables03-TablesWithOtherRels
 TestScript=02-tableTests\runExcelTest-02-Tables03-TablesWithOtherRels.tst
 NewSession=False
@@ -118,7 +130,7 @@ Var1Global=True
 Var1Type=String
 Var1InputValue=
 Var1OutputValue=
-[Item11]
+[Item12]
 Description=runExcelTest-02-Tables04-q2sNoTableWithTitles
 TestScript=02-tableTests\runExcelTest-02-Tables04-q2sNoTableWithTitles.tst
 NewSession=False
@@ -130,7 +142,7 @@ Var1Global=True
 Var1Type=String
 Var1InputValue=
 Var1OutputValue=
-[Item12]
+[Item13]
 Description=runExcelTest-02-Tables05-q2tMultiplesTesting
 TestScript=02-tableTests\runExcelTest-02-Tables05-q2tMultiplesTesting.tst
 NewSession=False
@@ -142,7 +154,7 @@ Var1Global=True
 Var1Type=String
 Var1InputValue=
 Var1OutputValue=
-[Item13]
+[Item14]
 Description=runExcelTest-02-Tables06-EncryptQ2tMultiplesTesting
 TestScript=02-tableTests\runExcelTest-02-Tables06-EncryptQ2tMultiplesTesting.tst
 NewSession=False
