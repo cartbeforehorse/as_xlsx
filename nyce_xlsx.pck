@@ -8141,9 +8141,7 @@ END Get_Zip_Info;
 FUNCTION Get_Central_File_Header (
    cfh_          OUT tp_central_file_hdr,
    zip_          IN  BLOB,
-   file_ix_      IN  NUMBER,
-   file_name_    IN  VARCHAR2 CHARACTER SET any_cs := null, -- always null
-   cfh_encoding_ IN  VARCHAR2 := null ) RETURN BOOLEAN      -- always null
+   file_ix_      IN  NUMBER ) RETURN BOOLEAN
 IS
    rv_        BOOLEAN := false;
    ix_        INTEGER := 1;
@@ -8151,46 +8149,30 @@ IS
    zip_info_  tp_zip_info;
    raw_name_  RAW(32767);
    utf8_name_ RAW(32767);
+   zip_chunk_ RAW(32767);
+BEGIN
 
-   FUNCTION Get_Encoding (
-      encoding_ IN VARCHAR2 ) RETURN VARCHAR2
-   IS
-      enc_ VARCHAR2(32767) := encoding_;
-   BEGIN
-      IF encoding_ IS NOT null THEN
-         IF Nls_Charset_Id (encoding_) IS null THEN
-            enc_ := Utl_I18n.Map_Charset (encoding_, Utl_I18n.GENERIC_CONTEXT, Utl_I18n.IANA_TO_ORACLE);
-         END IF;
-      END IF;
-      RETURN nvl (enc_, 'US8PC437'); -- IBM codepage 437
-   END Get_Encoding;
+   IF file_ix_ IS null THEN
+      RETURN false;
+   END IF;
 
-   /*FUNCTION Char_To_Raw (
-      txt_      IN VARCHAR2 CHARACTER SET any_cs,
-      encoding_ IN VARCHAR2 := null ) RETURN RAW
-   IS BEGIN
-      IF IsNchar (txt_) THEN -- on my 12.1 database, which is not AL32UTF8,
-                             -- Utl_I18n.String_To_Raw(txt_, Get_Encoding(encoding_)) does not work
-         RETURN Utl_Raw.Convert (
-            Utl_I18n.String_To_Raw (txt_), Get_Encoding(encoding_), Nls_Charset_Name(Nls_Charset_Id('NCHAR_CS'))
-         );
-      END IF;
-      RETURN Utl_I18n.String_To_Raw (txt_, Get_Encoding(encoding_));
-   END Char_To_Raw;*/
+   Get_Zip_Info (zip_, zip_info_);
+   IF nvl (zip_info_.count, 0) < 1 THEN -- no (zip) file or empty zip file
+      RETURN false;
+   END IF;
 
-   FUNCTION Parse_Central_File_Header RETURN BOOLEAN
-   IS
-      zip_chunk_ RAW(32767) := Dbms_Lob.substr (zip_, 46, f_ptr_);
-   BEGIN
+   f_ptr_ := zip_info_.idx_cd;
+   LOOP
+      zip_chunk_ := Dbms_Lob.substr (zip_, 46, f_ptr_);
       IF Utl_Raw.Substr (zip_chunk_, 1, 4) != CENTRAL_FILE_HEADER_ THEN
-         RETURN false;
+         exit;
       END IF;
+
       cfh_.crc32 := Utl_Raw.Substr (zip_chunk_, 17, 4);
       cfh_.n := Little_Endian (zip_chunk_, 29, 2);
       cfh_.m := Little_Endian (zip_chunk_, 31, 2);
       cfh_.k := Little_Endian (zip_chunk_, 33, 2);
       cfh_.len := 46 + cfh_.n + cfh_.m + cfh_.k;
-
       cfh_.utf8 := bitand(to_number(Utl_Raw.Substr(zip_chunk_, 10, 1), 'XX'), 8) > 0;
       IF cfh_.n > 0 THEN
          cfh_.name1 := Dbms_Lob.Substr(zip_, least(cfh_.n, 32767), f_ptr_+46);
@@ -8198,39 +8180,22 @@ IS
       cfh_.compressed_len := Little_Endian (zip_chunk_, 21, 4);
       cfh_.original_len   := Little_Endian (zip_chunk_, 25, 4);
       cfh_.offset         := Little_Endian (zip_chunk_, 43, 4);
-      RETURN true;
-   END Parse_Central_File_Header;
-
-BEGIN
-   IF file_name_ IS null AND file_ix_ IS null THEN
-      RETURN false;
-   END IF;
-   Get_Zip_Info (zip_, zip_info_);
-   IF nvl (zip_info_.count, 0) < 1 THEN -- no (zip) file or empty zip file
-      RETURN false;
-   END IF;
-
-   /*IF file_name_ IS NOT null THEN
-      raw_name_  := Char_To_Raw (file_name_, cfh_encoding_);
-      utf8_name_ := Char_To_Raw (file_name_, 'AL32UTF8');
-   END IF;*/
-
-   f_ptr_ := zip_info_.idx_cd;
-   LOOP
-      EXIT WHEN not Parse_Central_File_Header;
       IF ix_ = file_ix_ OR cfh_.name1 = CASE WHEN cfh_.utf8 THEN utf8_name_ ELSE raw_name_ END THEN
          rv_ := true;
-         EXIT;
+         exit;
       END IF;
+
       f_ptr_ := f_ptr_ + cfh_.len;
       ix_ := ix_ + 1;
    END LOOP;
+
    cfh_.idx := ix_;
-   cfh_.encoding := Get_Encoding (cfh_encoding_);
+   cfh_.encoding := 'US8PC437';
    RETURN rv_;
+
 END Get_Central_File_Header;
 
-FUNCTION Parse_File (
+FUNCTION Decompress_And_Get_Part (
    zipfile_ IN BLOB,
    cfh_     IN tp_central_file_hdr ) RETURN BLOB
 IS
@@ -8247,10 +8212,12 @@ BEGIN
    IF nvl (cfh_.original_len, 0) = 0 THEN
       RETURN empty_blob();
    END IF;
+
    zip_chunk_ := Dbms_Lob.substr (zipfile_, 30, cfh_.offset+1);
    IF Utl_Raw.substr (zip_chunk_, 1, 4) != LOCAL_FILE_HEADER_ THEN
       Raise_App_Error ('Error parsing the zipfile in Parse_File()');
    END IF;
+
    compression_method_ := Utl_Raw.substr (zip_chunk_, 9, 2);
    n_ := Little_Endian (zip_chunk_, 27, 2);
    m_ := Little_Endian (zip_chunk_, 29, 2);
@@ -8281,8 +8248,10 @@ BEGIN
       Dbms_Lob.Copy (rv_, zipfile_, cfh_.compressed_len, 1, cfh_.offset+31+n_+m_);
       RETURN rv_;
    END IF;
+
    Raise_App_Error ('Unhandled compression method :P1', compression_method_);
-END Parse_File;
+
+END Decompress_And_Get_Part;
 
 FUNCTION Get_Count (
    zipped_blob_ IN BLOB ) RETURN INTEGER
@@ -8306,32 +8275,31 @@ IS
    TYPE tp_string_lens IS TABLE OF VARCHAR2(32767);
    TYPE tp_boolean_tab IS TABLE OF BOOLEAN INDEX BY PLS_INTEGER;
 
-   xl_             BLOB := CASE WHEN excel_ IS null THEN File_To_Blob (dir_, filename_) END;
-   cell_nr_val_             NUMBER;
-   part_count_     PLS_INTEGER := Get_Count (xl_);
-   cfh_            tp_central_file_hdr;
-   part_name_      VARCHAR2(32767);
-   wb_part_        BLOB;
-   wb_rels_part_   BLOB;
-   ss_part_        BLOB; -- ss => shared strings
-   sheet_part_     BLOB;
-   csid_utf8_      INTEGER := Nls_Charset_Id('AL32UTF8');
-   ss_bulk_        tp_strings;
-   ss_lengths_     tp_string_lens;
-   quote_prefix_   tp_boolean_tab;
-   date_styles_    tp_boolean_tab;
-   time_styles_    tp_boolean_tab;
-   cell_meta_      tp_xl_cell_meta;
-   empty_cols_     BOOLEAN;
-   prev_col_nr_    NUMBER(10);
-   prev_row_nr_    NUMBER(10);
-   null_cell_     tp_xl_cell_meta;
+   xl_           BLOB := CASE WHEN excel_ IS null THEN File_To_Blob (dir_, filename_) END;
+   cell_nr_val_  NUMBER;
+   part_count_   PLS_INTEGER := Get_Count (xl_);
+   cfh_          tp_central_file_hdr;
+   part_name_    VARCHAR2(32767);
+   wb_part_      BLOB;
+   wb_rels_part_ BLOB;
+   ss_part_      BLOB; -- ss => shared strings
+   sheet_part_   BLOB;
+   csid_utf8_    INTEGER := Nls_Charset_Id('AL32UTF8');
+   ss_bulk_      tp_strings;
+   ss_lengths_   tp_string_lens;
+   quote_prefix_ tp_boolean_tab;
+   date_styles_  tp_boolean_tab;
+   time_styles_  tp_boolean_tab;
+   cell_meta_    tp_xl_cell_meta;
+   empty_cols_   BOOLEAN;
+   prev_col_nr_  NUMBER(10);
+   prev_row_nr_  NUMBER(10);
+   null_cell_    tp_xl_cell_meta;
 
    CURSOR get_excel_file_sheets IS
-      SELECT xt2.seq, CASE xt1.d1904
-                WHEN '1' THEN 'true' WHEN '0' THEN 'false'
-                ELSE lower(xt1.d1904)
-             END d1904, xt2.name, xt3.target
+      SELECT xt2.seq, xt2.name, xt3.target, CASE xt1.d1904
+                WHEN '1' THEN 'true' WHEN '0' THEN 'false' ELSE lower(xt1.d1904)
+             END d1904
       FROM   xmlTable (
                 xmlNamespaces (
                    default 'http://schemas.openxmlformats.org/spreadsheetml/2006/main',
@@ -8415,11 +8383,11 @@ BEGIN
       part_name_ := lower (Utl_Raw.Cast_To_Varchar2(cfh_.name1));
 
       IF part_name_ LIKE '%workbook.xml' THEN
-         wb_part_      := Parse_File (xl_, cfh_);
+         wb_part_      := Decompress_And_Get_Part (xl_, cfh_);
       ELSIF part_name_ LIKE '%workbook.xml.rels' THEN
-         wb_rels_part_ := Parse_File (xl_, cfh_);
+         wb_rels_part_ := Decompress_And_Get_Part (xl_, cfh_);
       ELSIF part_name_ LIKE '%sharedstrings.xml' THEN
-         ss_part_ := Parse_File (xl_, cfh_);
+         ss_part_ := Decompress_And_Get_Part (xl_, cfh_);
          SELECT xt1.txt, xt1.len
          BULK COLLECT INTO ss_bulk_, ss_lengths_
          FROM   xmlTable (
@@ -8432,7 +8400,7 @@ BEGIN
                            len INTEGER             path 'string-length(string-join(.//*:t/text(), ""))'
                 ) xt1;
       ELSIF part_name_ LIKE '%styles.xml' THEN
-         FOR style_ IN parse_styles_part (Parse_File(xl_,cfh_)) LOOP
+         FOR style_ IN parse_styles_part (Decompress_And_Get_Part(xl_,cfh_)) LOOP
             IF (style_.id BETWEEN 14 AND 17) OR instr(style_.format,'d')>0 OR instr(style_.format,'y')>0 THEN
                date_styles_(style_.seq) := null;
             ELSIF (style_.id BETWEEN 18 AND 22) OR style_.id BETWEEN 45 AND 47 OR instr(style_.format,'h')>0 OR instr(style_.format,'m')>0 THEN
@@ -8462,7 +8430,7 @@ BEGIN
          FOR pt_ IN 1 .. part_count_ LOOP
             EXIT WHEN not Get_Central_File_Header (cfh_, xl_, pt_);
             IF Utl_Raw.Cast_To_Varchar2(cfh_.name1) LIKE '%' || sh_.target THEN
-               sheet_part_ := Parse_File (xl_, cfh_);
+               sheet_part_ := Decompress_And_Get_Part (xl_, cfh_);
                cell_meta_.sheet_nr   := sh_.seq;
                cell_meta_.sheet_name := sh_.name;
                cell_meta_.row_nr     := 0;
