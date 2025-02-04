@@ -125,6 +125,25 @@ TYPE param_rec IS RECORD (
 TYPE params_arr IS TABLE OF param_rec INDEX BY PLS_INTEGER;
 
 
+-------------
+-- reader types
+TYPE tp_xl_cell_meta IS RECORD (
+   sheet_nr   NUMBER(2),
+   sheet_name VARCHAR(4000),
+   row_nr     NUMBER(10),
+   col_nr     NUMBER(10),
+   cell       VARCHAR2(100),
+   cell_type  VARCHAR2(6),
+   string_val VARCHAR2(4000),
+   number_val NUMBER,
+   date_val   DATE,
+   formula    VARCHAR2(4000),
+   clob_val   CLOB,
+   string_len INTEGER
+);
+TYPE tp_xl_cell_metas IS TABLE OF tp_xl_cell_meta;
+
+
 --------------------------------------------------
 -- Fonts and fills stored by name.  By design these are globally accessibel to
 -- the outside world
@@ -782,6 +801,32 @@ PROCEDURE Create_Params_Sheet (
    show_user_   IN BOOLEAN     := true,
    sheet_       IN PLS_INTEGER := null );
 
+------------------------------------------------------------------------------
+-- Reader functions
+--   Read_Xl() overload (with the dir_, filename_) is very inefficient because
+--   of the way that PL/SQL cannot directly pass on pipelined data from nested
+--   (second-level) functions.
+FUNCTION Read_Xl (
+   excel_          IN BLOB     := null,
+   sheets_         IN VARCHAR2 := null,
+   cell_           IN VARCHAR2 := null,
+   include_clobs_  IN VARCHAR2 := null,
+   add_empty_cols_ IN VARCHAR2 := null,
+   dir_            IN VARCHAR2 := null,
+   filename_       IN VARCHAR2 := null ) RETURN tp_xl_cell_metas PIPELINED;
+
+FUNCTION Read_Xl_From_Disk ( -- this is an inefficient function!!
+   dir_            IN VARCHAR2,
+   filename_       IN VARCHAR2,
+   sheets_         IN VARCHAR2 := null,
+   cell_           IN VARCHAR2 := null,
+   include_clobs_  IN VARCHAR2 := null,
+   add_empty_cols_ IN VARCHAR2 := null ) RETURN tp_xl_cell_metas PIPELINED;
+
+FUNCTION File_To_Blob (
+   dir_      IN VARCHAR2,
+   filename_ IN VARCHAR2 ) RETURN BLOB;
+
 
 END Nyce_Xlsx;
 /
@@ -789,13 +834,17 @@ CREATE OR REPLACE PACKAGE BODY Nyce_Xlsx IS
 
 VERSION_ CONSTANT VARCHAR2(20) := 'as_xlsx20';
 
+LOB_DURATION_             CONSTANT PLS_INTEGER := dbms_lob.call;
 LOCAL_FILE_HEADER_        CONSTANT RAW(4) := hextoraw('504B0304'); -- Local file header signature
 END_OF_CENTRAL_DIRECTORY_ CONSTANT RAW(4) := hextoraw('504B0506'); -- End of central directory signature
+CENTRAL_FILE_HEADER_      CONSTANT RAW(4) := hextoraw('504B0102'); -- Central directory file header signature
 
 CELL_DT_STRING_           CONSTANT VARCHAR2(10) := 'string';
 CELL_DT_NUMBER_           CONSTANT VARCHAR2(10) := 'number';
 CELL_DT_DATE_             CONSTANT VARCHAR2(10) := 'date';
 CELL_DT_HYPERLINK_        CONSTANT VARCHAR2(10) := 'hyperlink';
+
+
 
 -- These are default Excel formats, not Oracle!  These can get complicated and
 -- long with specialised requirements, so allow for plenty of character space.
@@ -844,7 +893,7 @@ TYPE tp_cell_value IS RECORD (
 TYPE tp_cell IS RECORD (
    datatype    VARCHAR2(30), -- string|number|date|bool|hyperlink
    ora_value   tp_cell_value,
-   value       NUMBER,
+   nr_val      NUMBER,
    style       PLS_INTEGER,
    formula_idx PLS_INTEGER
 );
@@ -1064,9 +1113,40 @@ TYPE tp_book IS RECORD (
    images        tp_images
 );
 
-
 wb_                   tp_book;
 g_addtxt2utf8blob_tmp VARCHAR2(32767);
+
+
+---------------------------------------
+---------------------------------------
+--
+-- Reader types
+--   CD => Central Directory
+--
+--
+TYPE tp_zip_info IS RECORD (
+   length   INTEGER,
+   count    INTEGER,
+   len_cd   INTEGER,
+   idx_cd   INTEGER,
+   idx_eocd INTEGER
+);
+TYPE tp_central_file_hdr IS RECORD (
+   offset             INTEGER, -- supports larger numbers than PLS_INTEGER
+   compressed_len     INTEGER,
+   original_len       INTEGER,
+   len                PLS_INTEGER,
+   n                  PLS_INTEGER,
+   m                  PLS_INTEGER,
+   k                  PLS_INTEGER,
+   utf8               BOOLEAN,
+   encrypted          BOOLEAN,
+   crc32              RAW(4),
+   external_file_attr RAW(4),
+   encoding           VARCHAR2(3999),
+   idx                INTEGER,
+   name1              RAW(32767)
+);
 
 
 ---------------------------------------
@@ -1551,10 +1631,12 @@ END Print_Range;
 --
 FUNCTION Col_Alfan(
    col_ IN VARCHAR2 ) RETURN PLS_INTEGER
-IS BEGIN
-   RETURN ascii(substr(col_,-1)) - 64
-      + nvl((ascii(substr(col_,-2,1))-64) * 26, 0)
-      + nvl((ascii(substr(col_,-3,1))-64) * 676, 0);
+IS
+   just_col_ VARCHAR2(1000) := rtrim(col_, '0123456789');
+BEGIN
+   RETURN ascii(substr(just_col_,-1)) - 64
+      + nvl((ascii(substr(just_col_,-2,1))-64) * 26, 0)
+      + nvl((ascii(substr(just_col_,-3,1))-64) * 676, 0);
 END Col_Alfan;
 
 FUNCTION Alfan_Col (
@@ -2773,7 +2855,7 @@ BEGIN
    wb_.sheets(sh_).rows(row_)(col_).ora_value := tp_cell_value (
       str_val => '', num_val => value_, dt_val => null
    );
-   wb_.sheets(sh_).rows(row_)(col_).value     := value_;
+   wb_.sheets(sh_).rows(row_)(col_).nr_val    := value_;
    wb_.sheets(sh_).rows(row_)(col_).style     := CASE
       WHEN xfId_ IS NOT null THEN xfId_
       ELSE get_XfId (
@@ -2879,7 +2961,7 @@ BEGIN
    wb_.sheets(sh_).rows(row_)(col_).ora_value := tp_cell_value (
       str_val => value_, num_val => null, dt_val => null
    );
-   wb_.sheets(sh_).rows(row_)(col_).value     := Add_String(value_);
+   wb_.sheets(sh_).rows(row_)(col_).nr_val    := Add_String(value_);
    IF align_.wrapText IS null AND instr(value_, chr(13)) > 0 THEN
       align_.wrapText := true;
    END IF;
@@ -2971,6 +3053,20 @@ BEGIN
    RETURN xl_date_as_num_;
 END Date_To_Xl_Nr;
 
+FUNCTION Xl_Nr_To_Date (
+   offset_  IN NUMBER,
+   use1904_ IN BOOLEAN := false ) RETURN DATE
+IS
+   rtn_date_ DATE;
+BEGIN
+   IF use1904_ THEN
+      rtn_date_ := to_date ('1904-01-01', 'YYYY-MM-DD') + offset_;
+   ELSE
+      rtn_date_ := to_date ('1900-03-01', 'YYYY-MM-DD') + offset_ - CASE WHEN offset_<61 THEN 60 ELSE 61 END;
+   END IF;
+   RETURN rtn_date_;
+END Xl_Nr_To_Date;
+
 PROCEDURE Cell (  -- date version
    col_       IN PLS_INTEGER,
    row_       IN PLS_INTEGER,
@@ -2991,7 +3087,7 @@ BEGIN
    wb_.sheets(sh_).rows(row_)(col_).ora_value := tp_cell_value (
       str_val => '', num_val => null, dt_val => value_
    );
-   wb_.sheets(sh_).rows(row_)(col_).value := Date_To_Xl_Nr(value_);
+   wb_.sheets(sh_).rows(row_)(col_).nr_val := Date_To_Xl_Nr(value_);
    IF xfId_ IS null THEN
       IF num_fmt_id_ IS null
          AND not (    wb_.sheets(sh_).col_fmts.exists(col_)
@@ -3120,7 +3216,7 @@ BEGIN
 
    FOR r_ IN first_row_ .. last_row_ LOOP
 
-      str_ix_  := wb_.sheets(sh_).rows(r_)(col_).value;
+      str_ix_  := wb_.sheets(sh_).rows(r_)(col_).nr_val;
       str_val_ := substr (wb_.str_ind(str_ix_), 1, 50);
 
       IF fills_.exists(str_val_) THEN
@@ -3164,7 +3260,7 @@ BEGIN
    wb_.sheets(sh_).rows(row_)(col_).ora_value := tp_cell_value (
       str_val => val_, num_val => null, dt_val => null
    );
-   wb_.sheets(sh_).rows(row_)(col_).value     := Add_String(val_);
+   wb_.sheets(sh_).rows(row_)(col_).nr_val    := Add_String(val_);
    wb_.sheets(sh_).rows(row_)(col_).style     := Get_XfId (
       sh_, col_, row_, fontId_ => Get_Font('Calibri', theme_ => 10, underline_ => true)
    );
@@ -6265,7 +6361,7 @@ BEGIN
          IF wb_.sheets(s_).rows(row_)(col_).formula_idx IS NOT null THEN
             Nyce_Xml.Xml_Text_Node (doc_, nd_c_, 'f', wb_.formulas(wb_.sheets(s_).rows(row_)(col_).formula_idx));
          END IF;
-         Nyce_Xml.Xml_Text_Node (doc_, nd_c_, 'v', to_char(wb_.sheets(s_).rows(row_)(col_).value, 'TM9', 'NLS_NUMERIC_CHARACTERS=.,'));
+         Nyce_Xml.Xml_Text_Node (doc_, nd_c_, 'v', to_char(wb_.sheets(s_).rows(row_)(col_).nr_val, 'TM9', 'NLS_NUMERIC_CHARACTERS=.,'));
          col_ := wb_.sheets(s_).rows(row_).next(col_);
       END LOOP;
       row_ := wb_.sheets(s_).rows.next(row_);
@@ -7733,7 +7829,7 @@ BEGIN
       col_pos_, row_pos_, sheet_, title_, title_xfId_, col_fmts_
    );
 END Query2Table;
--------------------------------------------------------------
+
 PROCEDURE Query2Table ( -- ref-cursor
    col_count_   IN OUT NOCOPY PLS_INTEGER,
    row_count_   IN OUT NOCOPY PLS_INTEGER,
@@ -7988,6 +8084,529 @@ BEGIN
    Set_Column_Width (4, 40, sh_);
 
 END Create_Params_Sheet;
+
+
+------------------------------------------------------------------------------
+------------------------------------------------------------------------------
+------------------------------------------------------------------------------
+--
+-- Read: functions for reading from XLSX files from here down
+--
+--
+PROCEDURE Get_Zip_Info (
+   zip_      IN  BLOB,
+   zip_info_ OUT tp_zip_info )
+IS
+   zip_chunk_   RAW(32767);
+   ix_          INTEGER;
+   chunk_size_  PLS_INTEGER := 2024;
+   chunk_start_ INTEGER;
+BEGIN
+
+   zip_info_.length := nvl (Dbms_Lob.getLength(zip_), 0);
+   IF zip_info_.length < 22 THEN -- no (zip) file or empty zip file
+      RETURN;
+   END IF;
+   chunk_start_ := greatest (zip_info_.length - chunk_size_ + 1, 1);
+   zip_chunk_   := Dbms_Lob.Substr (zip_, chunk_size_, chunk_start_);
+   ix_          := Utl_Raw.length (zip_chunk_)-21;
+   LOOP
+      EXIT WHEN ix_ < 1 OR Utl_Raw.Substr (zip_chunk_,ix_,4) = END_OF_CENTRAL_DIRECTORY_;
+      ix_ := ix_ - 1;
+   END LOOP;
+   IF ix_ > 0 THEN
+      ix_ := ix_ + chunk_start_ - 1;
+   ELSE
+      ix_ := zip_info_.length - 21;
+      LOOP
+         EXIT WHEN ix_ < 1 OR Dbms_Lob.Substr(zip_,4,ix_) = END_OF_CENTRAL_DIRECTORY_;
+         ix_ := ix_ - 1;
+      END LOOP;
+   END IF;
+   IF ix_ <= 0 THEN
+      Raise_App_Error ('Error parsing the zipfile');
+   END IF;
+   zip_chunk_ := Dbms_Lob.Substr (zip_, 22, ix_);
+   IF Utl_Raw.substr(zip_chunk_,5,2) != Utl_Raw.Substr(zip_chunk_,7,2)  -- this disk = disk with start of Central Dir
+      OR Utl_Raw.substr(zip_chunk_,9,2) != Utl_Raw.Substr(zip_chunk_,11,2) -- complete CD on this disk
+   THEN
+      Raise_App_Error ('Error parsing the zipfile');
+   END IF;
+   zip_info_.idx_eocd := ix_;
+   zip_info_.idx_cd   := Little_Endian (zip_chunk_, 17, 4) + 1;
+   zip_info_.count    := Little_Endian (zip_chunk_, 9, 2);
+   zip_info_.len_cd   := zip_info_.idx_eocd - zip_info_.idx_cd;
+END Get_Zip_Info;
+
+FUNCTION Get_Central_File_Header (
+   cfh_          OUT tp_central_file_hdr,
+   zip_          IN  BLOB,
+   file_ix_      IN  NUMBER ) RETURN BOOLEAN
+IS
+   rv_        BOOLEAN := false;
+   ix_        INTEGER := 1;
+   f_ptr_     INTEGER;
+   zip_info_  tp_zip_info;
+   raw_name_  RAW(32767);
+   utf8_name_ RAW(32767);
+   zip_chunk_ RAW(32767);
+BEGIN
+
+   IF file_ix_ IS null THEN
+      RETURN false;
+   END IF;
+
+   Get_Zip_Info (zip_, zip_info_);
+   IF nvl (zip_info_.count, 0) < 1 THEN -- no (zip) file or empty zip file
+      RETURN false;
+   END IF;
+
+   f_ptr_ := zip_info_.idx_cd;
+   LOOP
+      zip_chunk_ := Dbms_Lob.substr (zip_, 46, f_ptr_);
+      IF Utl_Raw.Substr (zip_chunk_, 1, 4) != CENTRAL_FILE_HEADER_ THEN
+         exit;
+      END IF;
+
+      cfh_.crc32 := Utl_Raw.Substr (zip_chunk_, 17, 4);
+      cfh_.n := Little_Endian (zip_chunk_, 29, 2);
+      cfh_.m := Little_Endian (zip_chunk_, 31, 2);
+      cfh_.k := Little_Endian (zip_chunk_, 33, 2);
+      cfh_.len := 46 + cfh_.n + cfh_.m + cfh_.k;
+      cfh_.utf8 := bitand(to_number(Utl_Raw.Substr(zip_chunk_, 10, 1), 'XX'), 8) > 0;
+      IF cfh_.n > 0 THEN
+         cfh_.name1 := Dbms_Lob.Substr(zip_, least(cfh_.n, 32767), f_ptr_+46);
+      END IF;
+      cfh_.compressed_len := Little_Endian (zip_chunk_, 21, 4);
+      cfh_.original_len   := Little_Endian (zip_chunk_, 25, 4);
+      cfh_.offset         := Little_Endian (zip_chunk_, 43, 4);
+      IF ix_ = file_ix_ OR cfh_.name1 = CASE WHEN cfh_.utf8 THEN utf8_name_ ELSE raw_name_ END THEN
+         rv_ := true;
+         exit;
+      END IF;
+
+      f_ptr_ := f_ptr_ + cfh_.len;
+      ix_ := ix_ + 1;
+   END LOOP;
+
+   cfh_.idx := ix_;
+   cfh_.encoding := 'US8PC437';
+   RETURN rv_;
+
+END Get_Central_File_Header;
+
+FUNCTION Decompress_And_Get_Part (
+   zipfile_ IN BLOB,
+   cfh_     IN tp_central_file_hdr ) RETURN BLOB
+IS
+   rv_                 BLOB;
+   zip_chunk_          RAW(3999);
+   compression_method_ VARCHAR2(4);
+   n_                  INTEGER;
+   m_                  INTEGER;
+BEGIN
+
+   IF cfh_.original_len IS null THEN
+      Raise_App_Error ('File length not given!  Assume that file was not found in function Parse_File()');
+   END IF;
+   IF nvl (cfh_.original_len, 0) = 0 THEN
+      RETURN empty_blob();
+   END IF;
+
+   zip_chunk_ := Dbms_Lob.substr (zipfile_, 30, cfh_.offset+1);
+   IF Utl_Raw.substr (zip_chunk_, 1, 4) != LOCAL_FILE_HEADER_ THEN
+      Raise_App_Error ('Error parsing the zipfile in Parse_File()');
+   END IF;
+
+   compression_method_ := Utl_Raw.substr (zip_chunk_, 9, 2);
+   n_ := Little_Endian (zip_chunk_, 27, 2);
+   m_ := Little_Endian (zip_chunk_, 29, 2);
+   IF compression_method_ = '0800' THEN
+      IF cfh_.original_len < 32767 AND cfh_.compressed_len < 32748 THEN
+         RETURN Utl_Compress.Lz_Uncompress (
+            Utl_Raw.Concat(
+               hexToRaw('1F8B0800000000000003'),
+               Dbms_Lob.substr (zipfile_, cfh_.compressed_len, cfh_.offset + 31 + n_ + m_),
+               cfh_.crc32,
+               Utl_Raw.substr (Utl_Raw.Reverse(to_char(cfh_.original_len,'fm0XXXXXXXXXXXXXXX')),1,4)
+            )
+         );
+      END IF;
+      rv_ := hexToRaw('1F8B0800000000000003'); -- gzip header
+      Dbms_Lob.Copy (rv_, zipfile_, cfh_.compressed_len, 11, cfh_.offset+31+n_+m_);
+      Dbms_Lob.Append (
+         rv_, Utl_Raw.Concat (
+            cfh_.crc32, Utl_Raw.Substr (Utl_Raw.Reverse(to_char(cfh_.original_len,'fm0XXXXXXXXXXXXXXX')),1,4)
+         )
+      );
+      RETURN Utl_Compress.Lz_Uncompress(rv_);
+   ELSIF compression_method_ = '0000' THEN
+      IF cfh_.original_len < 32767 AND cfh_.compressed_len < 32767 THEN
+         RETURN Dbms_Lob.Substr (zipfile_, cfh_.compressed_len, cfh_.offset+31+n_+m_);
+      END IF;
+      Dbms_Lob.createTemporary (rv_, true, LOB_DURATION_);
+      Dbms_Lob.Copy (rv_, zipfile_, cfh_.compressed_len, 1, cfh_.offset+31+n_+m_);
+      RETURN rv_;
+   END IF;
+
+   Raise_App_Error ('Unhandled compression method :P1', compression_method_);
+
+END Decompress_And_Get_Part;
+
+FUNCTION Get_Count (
+   zipped_blob_ IN BLOB ) RETURN INTEGER
+IS
+   zip_info_ tp_zip_info;
+BEGIN
+   Get_Zip_Info (zipped_blob_, zip_info_);
+   RETURN nvl (zip_info_.count, 0);
+END Get_Count;
+
+FUNCTION Read_Xl (
+   excel_          IN BLOB     := null,
+   sheets_         IN VARCHAR2 := null,
+   cell_           IN VARCHAR2 := null,
+   include_clobs_  IN VARCHAR2 := null,
+   add_empty_cols_ IN VARCHAR2 := null,
+   dir_            IN VARCHAR2 := null,
+   filename_       IN VARCHAR2 := null ) RETURN tp_xl_cell_metas PIPELINED
+IS
+   TYPE tp_strings     IS TABLE OF VARCHAR2(32767);
+   TYPE tp_string_lens IS TABLE OF VARCHAR2(32767);
+   TYPE tp_boolean_tab IS TABLE OF BOOLEAN INDEX BY PLS_INTEGER;
+
+   xl_           BLOB := CASE WHEN excel_ IS null THEN File_To_Blob (dir_, filename_) END;
+   cell_nr_val_  NUMBER;
+   part_count_   PLS_INTEGER := Get_Count (xl_);
+   cfh_          tp_central_file_hdr;
+   part_name_    VARCHAR2(32767);
+   wb_part_      BLOB;
+   wb_rels_part_ BLOB;
+   ss_part_      BLOB; -- ss => shared strings
+   sheet_part_   BLOB;
+   csid_utf8_    INTEGER := Nls_Charset_Id('AL32UTF8');
+   ss_bulk_      tp_strings;
+   ss_lengths_   tp_string_lens;
+   quote_prefix_ tp_boolean_tab;
+   date_styles_  tp_boolean_tab;
+   time_styles_  tp_boolean_tab;
+   cell_meta_    tp_xl_cell_meta;
+   empty_cols_   BOOLEAN;
+   prev_col_nr_  NUMBER(10);
+   prev_row_nr_  NUMBER(10);
+   null_cell_    tp_xl_cell_meta;
+
+   CURSOR get_excel_file_sheets IS
+      SELECT xt2.seq, xt2.name, xt3.target, CASE xt1.d1904
+                WHEN '1' THEN 'true' WHEN '0' THEN 'false' ELSE lower(xt1.d1904)
+             END d1904
+      FROM   xmlTable (
+                xmlNamespaces (
+                   default 'http://schemas.openxmlformats.org/spreadsheetml/2006/main',
+                   'http://purl.oclc.org/ooxml/spreadsheetml/main' as "x"
+                ), '(/workbook, /x:workbook)'
+                passing xmltype (xmldata => wb_part_, csid => csid_utf8_)
+                columns d1904  VARCHAR2(4000) path '*:workbookPr/@date1904',
+                        sheets xmltype        path '*:sheets'
+             ) xt1
+             CROSS JOIN xmlTable (
+                '*:sheets/*:sheet'
+                passing xt1.sheets
+                columns seq FOR ordinality,
+                        name    VARCHAR2(4000) path '@name',
+                        sheetid VARCHAR2(4000) path '@sheetId',
+                        rid     VARCHAR2(4000) path '@*:id[namespace-uri(.) =
+                           ("http://schemas.openxmlformats.org/officeDocument/2006/relationships",
+                            "http://purl.oclc.org/ooxml/officeDocument/relationships")]',
+                        state   VARCHAR2(4000) path '@state'
+             ) xt2
+             INNER JOIN xmlTable (
+                xmlNamespaces (
+                   default 'http://schemas.openxmlformats.org/package/2006/relationships'
+                ), '/Relationships/Relationship'
+                passing xmlType (xmldata => wb_rels_part_, csid => csid_utf8_)
+                columns type    VARCHAR2(4000) path '@Type',
+                        target  VARCHAR2(4000) path '@Target',
+                        id      VARCHAR2(4000) path '@Id'
+             ) xt3
+                ON xt3.id = xt2.rid
+      ORDER BY xt2.sheetid;
+
+   CURSOR parse_styles_part (styles_part_ IN BLOB) IS
+      SELECT xt2.seq - 1 seq, xt2.id, xt2.quoteprefix, lower(xt3.format) format
+      FROM   xmlTable (
+                xmlNamespaces (
+                   default 'http://schemas.openxmlformats.org/spreadsheetml/2006/main',
+                   'http://purl.oclc.org/ooxml/spreadsheetml/main' as "x"
+                ), '(/styleSheet, /x:styleSheet)'
+                passing xmltype (xmldata => styles_part_, csid => csid_utf8_)
+                columns cellxfs xmltype path '(cellXfs, x:cellXfs)',
+                        numfmts xmltype path '(numFmts, x:numFmts)'
+             ) xt1
+             CROSS JOIN xmlTable (
+                '/*:cellXfs/*:xf'
+                passing xt1.cellxfs
+                columns seq FOR ordinality,
+                        id          INTEGER        path '@numFmtId',
+                        quoteprefix VARCHAR2(4000) path '@quotePrefix'
+             ) xt2
+             LEFT JOIN xmlTable (
+                '/*:numFmts/*:numFmt'
+                passing xt1.numfmts
+                columns id3    INTEGER        path '@numFmtId',
+                        format VARCHAR2(4000) path '@formatCode'
+             ) xt3
+                ON xt3.id3 = xt2.id;
+
+   CURSOR parse_sheet_data (xml_part_ IN BLOB) IS
+      SELECT *
+      FROM   xmlTable (
+                xmlNamespaces (
+                   default 'http://schemas.openxmlformats.org/spreadsheetml/2006/main',
+                   'http://purl.oclc.org/ooxml/spreadsheetml/main' as "x"
+                ), '(/worksheet/sheetData/row/c, /x:worksheet/x:sheetData/x:row/x:c)'
+                passing xmlType (xmldata => xml_part_, csid => csid_utf8_)
+                columns c_val   VARCHAR2(4000) path '*:v',
+                        f       VARCHAR2(4000) path '*:f',
+                        c_type  VARCHAR2(4000) path '@t',
+                        c_ref   VARCHAR2(32)   path '@r',
+                        c_style INTEGER        path '@s',
+                        c_row   INTEGER        path './../@r',
+                        txt VARCHAR2(4000 CHAR) path 'substring(string-join(.//*:t/text(), ""), 1, 3900)',
+                        len INTEGER        path 'string-length(string-join(.//*:t/text(),""))'
+             );
+
+BEGIN
+   FOR pt_ IN 1 .. part_count_ LOOP
+
+      EXIT WHEN not Get_Central_File_Header (cfh_, xl_, pt_);
+      part_name_ := lower (Utl_Raw.Cast_To_Varchar2(cfh_.name1));
+
+      IF part_name_ LIKE '%workbook.xml' THEN
+         wb_part_      := Decompress_And_Get_Part (xl_, cfh_);
+      ELSIF part_name_ LIKE '%workbook.xml.rels' THEN
+         wb_rels_part_ := Decompress_And_Get_Part (xl_, cfh_);
+      ELSIF part_name_ LIKE '%sharedstrings.xml' THEN
+         ss_part_ := Decompress_And_Get_Part (xl_, cfh_);
+         SELECT xt1.txt, xt1.len
+         BULK COLLECT INTO ss_bulk_, ss_lengths_
+         FROM   xmlTable (
+                   xmlNamespaces (
+                      default 'http://schemas.openxmlformats.org/spreadsheetml/2006/main',
+                      'http://purl.oclc.org/ooxml/spreadsheetml/main' as "x"
+                   ), '(/sst/si, /x:sst/x:si)'
+                   passing xmltype (xmldata => ss_part_, csid => csid_utf8_)
+                   columns txt VARCHAR2(4000 CHAR) path 'substring(string-join(.//*:t/text(),""), 1, 3900)',
+                           len INTEGER             path 'string-length(string-join(.//*:t/text(), ""))'
+                ) xt1;
+      ELSIF part_name_ LIKE '%styles.xml' THEN
+         FOR style_ IN parse_styles_part (Decompress_And_Get_Part(xl_,cfh_)) LOOP
+            IF (style_.id BETWEEN 14 AND 17) OR instr(style_.format,'d')>0 OR instr(style_.format,'y')>0 THEN
+               date_styles_(style_.seq) := null;
+            ELSIF (style_.id BETWEEN 18 AND 22) OR style_.id BETWEEN 45 AND 47 OR instr(style_.format,'h')>0 OR instr(style_.format,'m')>0 THEN
+               time_styles_(style_.seq) := null;
+            ELSIF style_.quoteprefix IN ('1','true') THEN
+               quote_prefix_(style_.seq) := null;
+            END IF;
+         END LOOP;
+      END IF;
+
+   END LOOP;
+
+   IF wb_part_ IS null OR wb_rels_part_ IS null THEN
+      raise no_data_needed;
+   END IF;
+   IF upper (substr(add_empty_cols_,1,1)) IN ('Y','T','1') THEN
+      empty_cols_ := true;
+      null_cell_.cell_type := CELL_DT_STRING_;
+   END IF;
+
+   -- Loop on the sheets of our excel file; we then cross-ref this with values
+   -- passed from the caller to see if they want to interrogate that sheet.
+   FOR sh_ IN get_excel_file_sheets LOOP
+      IF sheets_ IS null OR instr(':'||sheets_||':', ':'||sh_.seq||':') > 0
+                         OR instr(':'||sheets_||':', ':'||sh_.name||':') > 0
+      THEN
+         FOR pt_ IN 1 .. part_count_ LOOP
+            EXIT WHEN not Get_Central_File_Header (cfh_, xl_, pt_);
+            IF Utl_Raw.Cast_To_Varchar2(cfh_.name1) LIKE '%' || sh_.target THEN
+               sheet_part_ := Decompress_And_Get_Part (xl_, cfh_);
+               cell_meta_.sheet_nr   := sh_.seq;
+               cell_meta_.sheet_name := sh_.name;
+               cell_meta_.row_nr     := 0;
+               prev_col_nr_ := 0;
+               prev_row_nr_ := 0;
+               null_cell_.sheet_nr   := sh_.seq;
+               null_cell_.sheet_name := sh_.name;
+               FOR sd_ IN parse_sheet_data (sheet_part_) LOOP
+                  IF cell_ != sd_.c_ref THEN
+                     continue;
+                  END IF;
+                  IF sd_.c_ref IS null THEN
+                     IF cell_meta_.row_nr = sd_.c_row THEN
+                        cell_meta_.col_nr := cell_meta_.col_nr + 1;
+                     ELSE
+                        cell_meta_.col_nr := 1;
+                     END IF;
+                  ELSE
+                     cell_meta_.col_nr := Col_Alfan (sd_.c_ref);
+                  END IF;
+                  cell_meta_.row_nr     := nvl (sd_.c_row, cell_meta_.row_nr+1);
+                  cell_meta_.cell       := sd_.c_ref;
+                  cell_meta_.formula    := sd_.f;
+                  cell_meta_.string_val := null;
+                  cell_meta_.number_val := null;
+                  cell_meta_.date_val   := null;
+                  cell_meta_.clob_val   := null;
+                  cell_meta_.string_len := null;
+                  IF empty_cols_ AND (
+                        cell_meta_.col_nr > prev_col_nr_+1
+                        OR ( cell_meta_.col_nr > 1 AND cell_meta_.row_nr > prev_row_nr_)
+                     )
+                  THEN
+                     null_cell_.row_nr := cell_meta_.row_nr;
+                     FOR n_ IN CASE
+                           WHEN cell_meta_.col_nr > prev_col_nr_+1 THEN prev_col_nr_+1
+                           ELSE 1
+                        END .. cell_meta_.col_nr - 1
+                     LOOP
+                        null_cell_.col_nr := n_;
+                        null_cell_.cell   := Alfan_Col(n_) || null_cell_.row_nr;
+                        PIPE row (null_cell_);
+                     END LOOP;
+                  END IF;
+                  IF sd_.c_type = 's' THEN
+                     cell_meta_.cell_type := CELL_DT_STRING_;
+                     IF sd_.c_val IS NOT null THEN
+                        cell_meta_.string_val := ss_bulk_(to_number(sd_.c_val)+1);
+                        cell_meta_.string_len := ss_lengths_( to_number( sd_.c_val )+1);
+                        IF cell_meta_.string_len > 3900 AND substr(include_clobs_,1,1) IN ('Y','y','1') THEN
+                           SELECT xt1.txt INTO cell_meta_.clob_val
+                           FROM   xmlTable (
+                                     '/*:sst/*:si[$i]'
+                                     passing xmlType (xmldata => ss_part_, csid => csid_utf8_),
+                                             to_number (sd_.c_val)+1 as "i"
+                                     columns txt CLOB path 'string-join(.//*:t/text(), "")'
+                                 ) xt1;
+                        END IF;
+                        IF quote_prefix_.exists(sd_.c_style) THEN
+                           cell_meta_.string_val := '''' || cell_meta_.string_val;
+                           IF cell_meta_.clob_val IS NOT null THEN
+                              cell_meta_.clob_val := '''' || cell_meta_.clob_val;
+                           END IF;
+                        END IF;
+                     END IF;
+                  ELSIF sd_.c_type = 'n' OR sd_.c_type IS null THEN
+                     cell_nr_val_ := to_number (
+                        sd_.c_val,
+                        CASE
+                           WHEN instr(upper(sd_.c_val),'E') = 0 THEN translate (sd_.c_val, '.012345678,-+', 'D999999999')
+                           ELSE translate(substr(sd_.c_val, 1, instr(upper(sd_.c_val), 'E')-1), '.012345678,-+', 'D999999999') || 'EEEE'
+                        END, 'NLS_NUMERIC_CHARACTERS=.,'
+                     );
+                     IF date_styles_.exists(sd_.c_style) THEN
+                        cell_meta_.cell_type := CELL_DT_DATE_;
+                        cell_meta_.date_val  := Xl_Nr_To_Date (cell_nr_val_, sh_.d1904='true');
+                     ELSIF time_styles_.exists(sd_.c_style) THEN
+                        cell_meta_.cell_type  := CELL_DT_STRING_;
+                        cell_meta_.string_val := to_char(numToDsInterval(cell_nr_val_, 'day'));
+                        cell_meta_.string_len := length(cell_meta_.string_val);
+                     ELSE
+                        cell_meta_.cell_type := CELL_DT_NUMBER_;
+                        cell_meta_.number_val := round (cell_nr_val_, 14-substr(to_char(cell_nr_val_,'TME'), -3));
+                     END IF;
+                  ELSIF sd_.c_type = 'd' THEN
+                     cell_meta_.cell_type := CELL_DT_DATE_;
+                     cell_meta_.date_val := cast(to_timestamp_tz(sd_.c_val, 'yyyy-mm-dd"T"hh24:mi:ss.ffTZH:TZM' ) as date);
+                  ELSIF sd_.c_type = 'inlineStr' THEN
+                     cell_meta_.cell_type := CELL_DT_STRING_;
+                     cell_meta_.string_val := sd_.txt;
+                     cell_meta_.string_len := sd_.len;
+                     IF cell_meta_.string_len > 3900 AND substr(include_clobs_,1,1) IN ('Y','y','1') AND sd_.c_ref IS NOT null THEN
+                        SELECT xt1.txt INTO cell_meta_.clob_val
+                        FROM   xmlTable (
+                                  '/*:worksheet/*:sheetData/*:row/*:c[@r=$r]'
+                                  passing xmlType (xmldata => sheet_part_, csid => csid_utf8_), sd_.c_ref as "r"
+                                  columns txt clob
+                                  path 'string-join(.//*:t/text(), "")'
+                               ) xt1;
+                     END IF;
+                  ELSIF sd_.c_type IN ('str', 'e') THEN
+                     cell_meta_.cell_type := CELL_DT_STRING_;
+                     cell_meta_.string_val := sd_.c_val;
+                     cell_meta_.string_len := length(cell_meta_.string_val);
+                  ELSIF sd_.c_type = 'b' THEN
+                     cell_meta_.cell_type := CELL_DT_STRING_;
+                     cell_meta_.string_val := CASE sd_.c_val
+                        WHEN '1' THEN 'TRUE'
+                        WHEN '0' THEN 'FALSE'
+                        ELSE sd_.c_val
+                     END;
+                     cell_meta_.string_len := length(cell_meta_.string_val);
+                  END IF;
+                  PIPE row(cell_meta_);
+                  prev_col_nr_ := cell_meta_.col_nr;
+                  prev_row_nr_ := cell_meta_.row_nr;
+               END LOOP;
+               Dbms_Lob.freeTemporary(sheet_part_);
+               exit;
+            END IF; -- fname = sheet name
+         END LOOP;
+      END IF;
+   END LOOP;
+
+   Dbms_Lob.freeTemporary (wb_part_);
+   Dbms_Lob.freeTemporary (wb_rels_part_);
+   IF ss_bulk_ IS NOT null THEN
+      ss_bulk_.delete;
+      ss_lengths_.delete;
+      Dbms_Lob.freeTemporary (ss_part_);
+   END IF;
+   date_styles_.delete;
+   time_styles_.delete;
+   quote_prefix_.delete;
+   RAISE no_data_needed;
+END Read_Xl;
+
+FUNCTION Read_Xl_From_Disk (
+   dir_            IN VARCHAR2,
+   filename_       IN VARCHAR2,
+   sheets_         IN VARCHAR2 := null,
+   cell_           IN VARCHAR2 := null,
+   include_clobs_  IN VARCHAR2 := null,
+   add_empty_cols_ IN VARCHAR2 := null ) RETURN tp_xl_cell_metas PIPELINED
+IS
+   xl_ BLOB := File_To_Blob (dir_, filename_);
+BEGIN
+   FOR r_ IN (SELECT * FROM table(Read_Xl(xl_,sheets_,cell_,include_clobs_,add_empty_cols_))) LOOP
+      PIPE row(r_);
+   END LOOP;
+END Read_Xl_From_Disk;
+
+FUNCTION File_To_Blob (
+   dir_      IN VARCHAR2,
+   filename_ IN VARCHAR2 ) RETURN BLOB
+IS
+   file_lob_    BFILE   := bFilename (dir_, filename_);
+   dest_offset_ INTEGER := 1;
+   src_offset_  INTEGER := 1;
+   file_blob_   BLOB;
+BEGIN
+    Dbms_Lob.Open (file_lob_, Dbms_Lob.FILE_READONLY);
+    Dbms_Lob.createTemporary (file_blob_, true, LOB_DURATION_);
+    Dbms_Lob.loadBlobFromFile (file_blob_, file_lob_, dbms_lob.lobmaxsize, dest_offset_, src_offset_);
+    Dbms_Lob.Close (file_lob_);
+    RETURN file_blob_;
+EXCEPTION
+   WHEN others THEN
+      IF Dbms_Lob.isOpen (file_lob_) = 1 THEN
+         Dbms_Lob.close (file_lob_);
+      END IF;
+      IF Dbms_Lob.isTemporary (file_blob_) = 1 THEN
+         Dbms_Lob.freeTemporary (file_blob_);
+      END IF;
+      RAISE;
+END File_To_Blob;
 
 END Nyce_Xlsx;
 /
