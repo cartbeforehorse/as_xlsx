@@ -1,18 +1,20 @@
 # Create an Excel-file with PL/SQL
 
-Initial version created by Anton Scheffer, and taken on 2021-10-04
+`Nyce_Xlsx` is an engine written in PL/SQL to generate Excel files directly out of Oracle databases.
 
-[Please visit his original blog here >>](https://technology.amis.nl/languages/oracle-plsql/create-an-excel-file-with-plsql/)
+The initial version was created by Anton Scheffer and called `AS_XLSX`. Our version is based on a copy taken from his on 2021-10-04.
+
+[His original blog is here >>](https://technology.amis.nl/languages/oracle-plsql/create-an-excel-file-with-plsql/)
 
 ## Licensing
 
-Please see the [License file](license.md) to understand your rights.
+Please see the [License file](LICENSE.md) to understand your rights.
 
-## Background and Branching
+# Background, Branching, and Regression Testing
 
 Anton also has a Git repo [here >>](https://github.com/antonscheffer/as_xlsx).  There are seveal reasons that we have not branched directly from his repo (in the classical Git sense) – the most obvious being that we created this repo before he created his!  That said, we are trying to keep up with changes being applied to his, by manually back-porting his functionality to ours.
 
-However, we also believe that this version has several benefits and improvements over his, which is why we decided to "branch" from his version in the first place.
+However, we also believe that our version has several benefits and improvements over his, which is why we decided to "branch" from his version in the first place.
 
 ## Reasons for *not* re-merging
 
@@ -20,23 +22,57 @@ In order to implement some of the functionality that we want, we've had to make 
 
 The big fundamental change that we've made in our version is to make use of Oracle's `Dbms_XmlDom` XML engine to build XML files.  This allows for cleaner coding standards, easier debugging and improved version/diff-tracking.  It also reduces the likelihood of introducing XML-formatting bugs, and *probably* leads to performance enhancements since manipulating CLOB strings can be slow in some circumstances (this is a theoretical benefit at the moment though as we haven't underone heavy stress-tested yet - December 2024).
 
-Our version now supports pivot-tables, which his does not, which is a big job to merge back into the original!
+Our version now supports pivot-tables, which his does not, which is a **big** job to merge back into the original!
 
-Other improvements have focused on improving the API interface, allowing the calling program (i.e. your code) to have a smaller footprint. reducing the syntactic overhead compared with the original version.  In particular, when trying to format large areas of an Excel sheet, we found the original version verbose, distracting from the overall "purpose" (or "flow") of the overall program.
+Other enhancements have focused on improving the API interface, allowing the calling program (i.e. your code) to have a smaller footprint.  We've focused on reducing the syntactic overhead (as compared with the original version).  In particular, when trying to format large areas of an Excel sheet, we found the original version verbose to the point that it starts to drown out the calling program's code footprint, distracting from the business logic, and the overall "purpose" (or "flow") of the program.
 
-Finally, this version includes executable test-scripts and a test-manager file to facilitate regression testing.  Admittedly, these files are IDE specific, but they also allow for a more standardised testing process.  It's nice to know that the most recent changes don't break older functionality!  The test scripts will also be useful for newcomers learn how it the interface works.
+## Testing and Learining
 
+Finally, this version includes executable test-scripts and a test-manager file to facilitate regression testing.  Admittedly, these files are IDE specific, but they also allow for a more standardised testing process.  It's nice to know that the most recent changes don't break older functionality!  The test scripts will also be useful for newcomers who want to learn how it the interface works.  *Aside:* the `_test` directory also containssome `.sql` files to create tables and inject data that the Excel files 
+
+# Installation
+
+## The basics
+
+Of course, you can download this code by the usual Git command-line method:
+
+    git clone https://github.com/cartbeforehorse/as_xlsx.git
+
+However, we'd suggest cloning through your favourite Git GUI tool.  Understanding change-control is so much easier whe you have a graphical interface to visualise it all.
+
+The primary package `Nyce_Xlsx`  does have dependencies, that are included in this repo.  In all, you'll need to install 3 PL/SQL packages (in the following order):
+
+ - `Nyce_Utils`
+ - `Nyce_Xml`
+ - `Nyce_Xlsx`
+
+You can deploy each of these into the database from a SQL*Plus prompt using the `@` command to deploy each package.  For example: `SQL> @nyce_utils.pck` should deploy the first file (assuming you're located in the repository's root directory, of course).  Again though, you may be more comfortable deploying packages through your own IDE.
+
+Also, in order to get the encryption functionality working, you'll need to make sure that your database has Oracle's `Dbms_Crypto` modules installed.  The package will deploy without it, but attempts to encrypt an Excel file will silently fail.
+
+## Branching and Support
+
+We would love to have help improving our code, and to receive new ideas on how to evolve the application/toolset.  So please do feel free to branch from our main branches.
+
+Alternatively, add your issues and improvement ideas to the "Issues" and "Projects" tabs on this GitHub page and we'll see what we can do to help.
 
 ---
 
-# Table of Contents <a name="TOC"></a>
+# Table of Contents
 
 - [Create an Excel-file with PL/SQL](#create-an-excel-file-with-plsql)
   - [Licensing](#licensing)
-  - [Background and Branching](#background-and-branching)
+- [Background, Branching, and Regression Testing](#background-branching-and-regression-testing)
   - [Reasons for *not* re-merging](#reasons-for-not-re-merging)
-- [Table of Contents ](#table-of-contents-)
-- [Requirements](#requirements)
+  - [Testing and Learining](#testing-and-learining)
+- [Installation](#installation)
+  - [The basics](#the-basics)
+  - [Branching and Support](#branching-and-support)
+- [Table of Contents](#table-of-contents)
+- [Requirements and Standards](#requirements-and-standards)
+  - [Oracle Version Support](#oracle-version-support)
+  - [Tooling](#tooling)
+  - [Coding Standards](#coding-standards)
 - [Basic Usage](#basic-usage)
   - [Quick-start: Extracting Data from DB to Sheet](#quick-start-extracting-data-from-db-to-sheet)
   - [Using bind variables](#using-bind-variables)
@@ -52,10 +88,20 @@ Finally, this version includes executable test-scripts and a test-manager file t
   - [Report Overview Page](#report-overview-page)
   - [Column auto-width](#column-auto-width)
 
+# Requirements and Standards
 
-
-# Requirements
+## Oracle Version Support
 You'll need Oracle Database 19c or greater to use features included in this package.  We tried to make it backwardly compatible to Oracle 12c, but that proved to be too much work (and have too little benefit).  Sorry!
+
+Please feel free to branch though!
+
+## Tooling
+This code was developed on an IDE called [PL/SQL Developer](https://www.allroundautomations.com/products/pl-sql-developer/), which is by far the best tool for organising Oracle work (in our humble opinion).  The tool organises PL/SQL package headers and body into a single `pck` file, which makes more sense than the 2-file structure most IDEs use.  `pck` files can still be compiled as a normal SQL file for deployment purposes though, so this shouldn't bother anyone who normally use the 2-file system.
+
+PL/SQL Developer also has a native format for storing test files (and test-manager files).  However, since most developers of PL/SQL code don't bother with formalised testing, I doubt this will bother too many people!  It should be reassuring to know that on-going development is validated against historical/regressive test scenarios, and anyway you'll find that the test-code can be easily extracted from `tst` files should you want to run them in a different IDE.
+
+## Coding Standards
+Yeah, okay, this is a bit of a moan.  But if you plan to make changes, please observe the coding conventions used in the package.  In particular, please define variables with a trailing underscore: `_`.  It is a constant source of amusement to us that PL/SQL coders want to define their variables as "variables" and parameters as "parameters" by using `v_`, `p_` or `i_` prefixes (which never seem to be consistent anyway).  The least interesting property of a v_variable or p_parameter is the fact that it is a v_variable or p_parameter!  Every other programming language in the world aspires to make itself more readable by describing variables as the data they store, and deliberately abstracting away from the the fact that they are v_variables (just as English abstracs away from describing w_each w_word w_as w_a w_word).  And yet PL/SQL code generally appears to buck this trend.  Go figure!  Anyhoo, sorry about that little digression.  Funny how some details can get under one's skin, innit!! :-P
 
 
 # Basic Usage
