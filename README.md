@@ -1,78 +1,96 @@
-# Create an Excel-file with PL/SQL
+# Generate Excel Files with PL/SQL: NYCE_XLSX
 
-`Nyce_Xlsx` is an engine written in PL/SQL to generate Excel files directly out of Oracle databases.
+**NYCE_XLSX** is a PL/SQL engine for generating Excel files (`.xlsx`) directly from an Oracle database. It is based on **AS_XLSX**, originally developed by Anton Scheffer.
 
-The initial version was created by Anton Scheffer and called `AS_XLSX`. Our version is based on a copy taken from his on 2021-10-04.
+Our version was created from a snapshot of **AS_XLSX** on **October 4, 2021**, and has since evolved with significant improvements, including:
+- 🏆 **Pivot Table Support** – A major enhancement over the original AS_XLSX.
+- 🚀 **Refactored XML Engine** – Uses `DBMS_XMLDOM` for better performance and debugging.
+- 📏 **Simplified API** – Reduces verbosity and improves maintainability.
+- 🔄 **Regression Testing Framework** – Ensures new updates don’t break functionality.
 
-[His original blog is here >>](https://technology.amis.nl/languages/oracle-plsql/create-an-excel-file-with-plsql/)
+👉 **Original AS_XLSX blog post:** [here >>](https://technology.amis.nl/languages/oracle-plsql/create-an-excel-file-with-plsql/)
+
 
 ## Licensing
 
 Please see the [License file](LICENSE.md) to understand your rights.
 
-# Background, Branching, and Regression Testing
+# Why NYCE_XLSX?
 
-Anton also has a Git repo [here >>](https://github.com/antonscheffer/as_xlsx).  There are seveal reasons that we have not branched directly from his repo (in the classical Git sense) – the most obvious being that we created this repo before he created his!  That said, we are trying to keep up with changes being applied to his, by manually back-porting his functionality to ours.
+## Differences with AS_XLSX
 
-However, we also believe that our version has several benefits and improvements over his, which is why we decided to "branch" from his version in the first place.
+Anton now has an official Git repo [here >>](https://github.com/antonscheffer/as_xlsx).  However, we created and continue to maintain NYCE_XLSX separately for several reasons.  As much as we'd like to re-merge the code, these reasons make it impractical:
 
-## Reasons for *not* re-merging
+1. **Independent Evolution**: This Git repo predates Anton's.  Initially, updates to AS_XLSX were posted to a blog-post, and we simply needed a more stable versioning system
+2. **Major Structural Differences**: Our version is significantly refactored, making direct re-merging impractical.
+3. **Breaking Changes**: Simplifying the API has made it impossible to maintain backward-compatibility
 
-In order to implement some of the functionality that we want, we've had to make **significant** changes to the code-base, which makes re-merging the code impractical.
+## Why choose NYCE_XLSX?
 
-The big fundamental change that we've made in our version is to make use of Oracle's `Dbms_XmlDom` XML engine to build XML files.  This allows for cleaner coding standards, easier debugging and improved version/diff-tracking.  It also reduces the likelihood of introducing XML-formatting bugs, and *probably* leads to performance enhancements since manipulating CLOB strings can be slow in some circumstances (this is a theoretical benefit at the moment though as we haven't underone heavy stress-tested yet - December 2024).
+We continue to use this repository with our customers, because:
 
-Our version now supports pivot-tables, which his does not, which is a **big** job to merge back into the original!
+1. **Improved Features** We've introduced significant new functionality that aren't available in the original version
+2. **Bug fixes**: Several bugs have been fixed that were discovered in the original version
+3. **Improved API**: Functions are re-shaped with the aim of reducing complexity and verbosity of code in the calling application
+4. **XML Engine**: We make use of Oracle's in-built XML builder to create XML files, significantly simplifying debugging
+5. **Feature Tracking**: We track and back-port new functionality from the original repo into this one (sometimes fixing bugs along the way)
+6. **Better Regression Testing**: We include executable test scripts to validate new features and ensure that existing ones don't break
 
-Other enhancements have focused on improving the API interface, allowing the calling program (i.e. your code) to have a smaller footprint.  We've focused on reducing the syntactic overhead (as compared with the original version).  In particular, when trying to format large areas of an Excel sheet, we found the original version verbose to the point that it starts to drown out the calling program's code footprint, distracting from the business logic, and the overall "purpose" (or "flow") of the program.
-
-## Testing and Learining
-
-Finally, this version includes executable test-scripts and a test-manager file to facilitate regression testing.  Admittedly, these files are IDE specific, but they also allow for a more standardised testing process.  It's nice to know that the most recent changes don't break older functionality!  The test scripts will also be useful for newcomers who want to learn how it the interface works.  *Aside:* the `_test` directory also containssome `.sql` files to create tables and inject data that the Excel files 
 
 # Installation
 
-## The basics
+**1. Clone the Repository**
 
-Of course, you can download this code by the usual Git command-line method:
+You can download our repo from your command line with:
+```sh
+git clone https://github.com/cartbeforehorse/as_xlsx.git
+```
 
-    git clone https://github.com/cartbeforehorse/as_xlsx.git
+**2. Package Deployment and Dependencies**
 
-However, we'd suggest cloning through your favourite Git GUI tool.  Understanding change-control is so much easier whe you have a graphical interface to visualise it all.
+NYCE_XLSX requires three PL/SQL packages to be installed in this order:
+1. Nyce_Utils
+2. Nyce_Xml
+3. Nyce_Xlsx
 
-The primary package `Nyce_Xlsx`  does have dependencies, that are included in this repo.  In all, you'll need to install 3 PL/SQL packages (in the following order):
+You can use the following commands from SQL*Plus, or simply use your preferred PL/SQL IDE:
 
- - `Nyce_Utils`
- - `Nyce_Xml`
- - `Nyce_Xlsx`
+```sql
+SQL> @nyce_utils.pck
+SQL> @nyce_xml.pck
+SQL> @nyce_xlsx.pck
+```
 
-You can deploy each of these into the database from a SQL*Plus prompt using the `@` command to deploy each package.  For example: `SQL> @nyce_utils.pck` should deploy the first file (assuming you're located in the repository's root directory, of course).  Again though, you may be more comfortable deploying packages through your own IDE.
+**3. Ensure `DBMS_CRYPTO` is Installed**
 
-Also, in order to get the encryption functionality working, you'll need to make sure that your database has Oracle's `Dbms_Crypto` modules installed.  The package will deploy without it, but attempts to encrypt an Excel file will silently fail.
+For encryption support, your database must include DBMS_CRYPTO:
+
+```sql
+SELECT * FROM dba_objects WHERE object_name = 'DBMS_CRYPTO';
+```
+
+If missing, any attempt to encrypt your Excel file will fail silently.  Contact your DBA to install it Oracle packages.
 
 ## Branching and Support
 
-We would love to have help improving our code, and to receive new ideas on how to evolve the application/toolset.  So please do feel free to branch from our main branches.
+We would love your help to improve our code, or to share new ideas on how to evolve the application/toolset.
 
-Alternatively, add your issues and improvement ideas to the "Issues" and "Projects" tabs on this GitHub page and we'll see what we can do to help.
+Please feel free to branch from our repo, or add your issues and improvement ideas to the "Issues" and "Projects" tabs on this GitHub page.  We'll see what we can do to help.
 
 ---
 
 # Table of Contents
 
-- [Create an Excel-file with PL/SQL](#create-an-excel-file-with-plsql)
+- [Generate Excel Files with PL/SQL: NYCE\_XLSX](#generate-excel-files-with-plsql-nyce_xlsx)
   - [Licensing](#licensing)
-- [Background, Branching, and Regression Testing](#background-branching-and-regression-testing)
-  - [Reasons for *not* re-merging](#reasons-for-not-re-merging)
-  - [Testing and Learining](#testing-and-learining)
+- [Why NYCE\_XLSX?](#why-nyce_xlsx)
+  - [Differences with AS\_XLSX](#differences-with-as_xlsx)
+  - [Why choose NYCE\_XLSX?](#why-choose-nyce_xlsx)
 - [Installation](#installation)
-  - [The basics](#the-basics)
   - [Branching and Support](#branching-and-support)
 - [Table of Contents](#table-of-contents)
 - [Requirements and Standards](#requirements-and-standards)
   - [Oracle Version Support](#oracle-version-support)
-  - [Tooling](#tooling)
-  - [Coding Standards](#coding-standards)
 - [Basic Usage](#basic-usage)
   - [Quick-start: Extracting Data from DB to Sheet](#quick-start-extracting-data-from-db-to-sheet)
   - [Using bind variables](#using-bind-variables)
@@ -94,15 +112,6 @@ Alternatively, add your issues and improvement ideas to the "Issues" and "Projec
 You'll need Oracle Database 19c or greater to use features included in this package.  We tried to make it backwardly compatible to Oracle 12c, but that proved to be too much work (and have too little benefit).  Sorry!
 
 Please feel free to branch though!
-
-## Tooling
-This code was developed on an IDE called [PL/SQL Developer](https://www.allroundautomations.com/products/pl-sql-developer/), which is by far the best tool for organising Oracle work (in our humble opinion).  The tool organises PL/SQL package headers and body into a single `pck` file, which makes more sense than the 2-file structure most IDEs use.  `pck` files can still be compiled as a normal SQL file for deployment purposes though, so this shouldn't bother anyone who normally use the 2-file system.
-
-PL/SQL Developer also has a native format for storing test files (and test-manager files).  However, since most developers of PL/SQL code don't bother with formalised testing, I doubt this will bother too many people!  It should be reassuring to know that on-going development is validated against historical/regressive test scenarios, and anyway you'll find that the test-code can be easily extracted from `tst` files should you want to run them in a different IDE.
-
-## Coding Standards
-Yeah, okay, this is a bit of a moan.  But if you plan to make changes, please observe the coding conventions used in the package.  In particular, please define variables with a trailing underscore: `_`.  It is a constant source of amusement to us that PL/SQL coders want to define their variables as "variables" and parameters as "parameters" by using `v_`, `p_` or `i_` prefixes (which never seem to be consistent anyway).  The least interesting property of a v_variable or p_parameter is the fact that it is a v_variable or p_parameter!  Every other programming language in the world aspires to make itself more readable by describing variables as the data they store, and deliberately abstracting away from the the fact that they are v_variables (just as English abstracs away from describing w_each w_word w_as w_a w_word).  And yet PL/SQL code generally appears to buck this trend.  Go figure!  Anyhoo, sorry about that little digression.  Funny how some details can get under one's skin, innit!! :-P
-
 
 # Basic Usage
 
